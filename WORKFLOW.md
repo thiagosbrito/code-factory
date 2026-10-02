@@ -47,6 +47,8 @@ codex:
 server:
   host: 127.0.0.1
   port: 4318
+observability:
+  dashboard_enabled: false
 ---
 
 Build Code Factory by completing Linear issue {{ issue.identifier }}.

@@ -123,6 +123,7 @@ async function start() {
       { mode: 0o600 },
     );
   let escalation;
+  let stopping = false;
   const stop = () => {
     try {
       process.kill(-child.pid, "SIGTERM");
@@ -131,6 +132,7 @@ async function start() {
     }
   };
   const stopWithDeadline = () => {
+    stopping = true;
     stop();
     escalation ??= setTimeout(() => {
       try {
@@ -154,7 +156,7 @@ async function start() {
     clearTimeout(timeout);
     clearTimeout(escalation);
     rmSync(lock, { recursive: true });
-    process.exitCode = code ?? 1;
+    process.exitCode = stopping ? 0 : (code ?? 1);
   });
   console.log(
     `Symphony started; session limit ${minutes} minutes; dashboard http://127.0.0.1:4318`,
