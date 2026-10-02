@@ -1,0 +1,61 @@
+{
+  "name": "code-factory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local, agent-independent coding loop factory",
+  "bin": {
+    "code-factory": "dist/node/cli.js"
+  },
+  "files": [
+    "dist",
+    "docs"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js"
+    }
+  },
+  "scripts": {
+    "dev": "tsx watch scripts/dev.mts",
+    "dev:ui": "vite",
+    "dev:runtime": "tsx watch src/cli.ts start --port 4310",
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.runtime.json && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "oxlint --threads=2",
+    "format": "oxfmt --threads=2",
+    "format:check": "oxfmt --check --threads=2",
+    "test": "vitest run",
+    "test:package": "node scripts/smoke-package.mjs",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@radix-ui/react-slot": "1.3.3",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "oxfmt": "0.71.0",
+    "oxlint": "1.86.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwind-merge": "3.7.0",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.2",
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@11.8.0"
+}
