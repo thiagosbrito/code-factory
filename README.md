@@ -41,3 +41,6 @@ pnpm pack
 The tarball includes the CLI, compiled portable contracts, built UI, and architecture docs. It is suitable for installation from a local tarball. The package is marked private until its public name and publishing scope are decided. Development uses pnpm; consumers will be able to install the release through npm.
 
 See [architecture decisions](docs/architecture.md) and [development guidance](CONTRIBUTING.md).
+
+To orchestrate development of this repository from Linear, see the
+[external Symphony setup](docs/symphony.md).
