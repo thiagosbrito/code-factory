@@ -1,56 +1,85 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
+import { Factory, type Screen } from "./Factory";
+import { Setup } from "./Setup";
+import { api, type FactoryResponse, type ProjectResponse } from "./project-api";
 
-type ConnectionState = { status: "idle" | "checking" | "ready" | "failed"; message: string };
-
-/** Temporary connection shell; approved Figma screens will replace this composition. */
 export function App() {
-  const [connection, setConnection] = useState<ConnectionState>({
-    status: "idle",
-    message: "The foundation is ready for the final prototype.",
-  });
-  async function checkRuntime() {
-    setConnection({ status: "checking", message: "Checking local runtime…" });
+  const [project, setProject] = useState<ProjectResponse | null>(null);
+  const [agents, setAgents] = useState<AgentConnection[]>([]);
+  const [agentError, setAgentError] = useState("");
+  const [counts, setCounts] = useState<FactoryResponse>({ loops: 0, runs: 0 });
+  const [error, setError] = useState("");
+  const [demo, setDemo] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [screen, setScreen] = useState<Screen>("runs");
+  async function load() {
     try {
-      const response = await fetch("/api/health");
-      if (!response.ok) throw new Error("Runtime request failed.");
-      const result: unknown = await response.json();
-      if (
-        !result ||
-        typeof result !== "object" ||
-        !("status" in result) ||
-        result.status !== "ready"
-      )
-        throw new Error("Unexpected runtime response.");
-      setConnection({
-        status: "ready",
-        message: "Local runtime connected. Agent execution is not configured yet.",
-      });
-    } catch {
-      setConnection({
-        status: "failed",
-        message: "Cannot reach the local runtime. Start it with pnpm dev.",
-      });
+      const [nextProject, nextCounts, nextAgents] = await Promise.all([
+        api<ProjectResponse>("/api/project"),
+        api<FactoryResponse>("/api/factory"),
+        api<{ agents: AgentConnection[] }>("/api/agents")
+          .then((result) => ({ agents: result.agents, error: "" }))
+          .catch(() => ({
+            agents: [] as AgentConnection[],
+            error: "Agent discovery is unavailable. You can finish setup and recheck later.",
+          })),
+      ]);
+      setProject(nextProject);
+      setCounts(nextCounts);
+      setAgents(nextAgents.agents);
+      setAgentError(nextAgents.error);
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load local runtime.");
     }
   }
+  useEffect(() => {
+    void Promise.resolve().then(load);
+  }, []);
+  if (error)
+    return (
+      <main className="mx-auto max-w-xl p-8">
+        <h1 className="text-2xl font-semibold">Cannot open project</h1>
+        <p role="alert" className="mt-3 text-sm text-red-700">
+          {error}
+        </p>
+        <Button className="mt-5" onClick={() => void load()}>
+          Retry
+        </Button>
+      </main>
+    );
+  if (!project) return <output className="block p-8">Loading local project…</output>;
+  if ((!project.project && !demo) || editing)
+    return (
+      <Setup
+        state={project}
+        agents={agents}
+        agentError={agentError}
+        onRefreshAgents={async () => {
+          const result = await api<{ agents: AgentConnection[] }>("/api/agents");
+          setAgents(result.agents);
+          setAgentError("");
+        }}
+        onSaved={(next) => {
+          setProject(next);
+          setEditing(false);
+        }}
+        onDemo={() => setDemo(true)}
+        {...(project.project ? { onCancel: () => setEditing(false) } : {})}
+      />
+    );
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-6 px-6">
-      <div>
-        <p className="mb-2 text-sm font-medium text-muted-foreground">Local coding factory</p>
-        <h1 className="text-3xl font-semibold tracking-tight">Code Factory</h1>
-      </div>
-      <p className="text-muted-foreground">
-        Your project starts with no loops, selected agent, or model. Setup and the loop editor will
-        follow the approved prototype.
-      </p>
-      <output className="text-sm">{connection.message}</output>
-      <Button
-        className="w-fit"
-        onClick={() => void checkRuntime()}
-        disabled={connection.status === "checking"}
-      >
-        Check local runtime
-      </Button>
-    </main>
+    <Factory
+      project={project}
+      counts={counts}
+      screen={screen}
+      setScreen={setScreen}
+      demo={demo}
+      onDemo={() => setDemo(true)}
+      onExitDemo={() => setDemo(false)}
+      onEditSetup={() => setEditing(true)}
+    />
   );
 }

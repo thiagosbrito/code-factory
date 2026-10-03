@@ -1,9 +1,24 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile, chmod } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+  chmod,
+  symlink,
+  realpath,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { initializeProject, readProjectConfig } from "../src/runtime/project.js";
+import {
+  initializeProject,
+  readProjectConfig,
+  projectRevision,
+  saveProjectSetup,
+  validateProjectDirectory,
+} from "../src/runtime/project.js";
 import { discoverAgents } from "../src/adapters/discovery.js";
 import { startLocalServer } from "../src/runtime/server.js";
 
@@ -37,7 +52,78 @@ describe("project initialization", () => {
     const directory = await temporaryProject();
     await initializeProject(directory);
     await writeFile(join(directory, ".code-factory", "project.json"), "bad json");
-    await expect(readProjectConfig(directory)).rejects.toThrow(/JSON/);
+    await expect(readProjectConfig(directory)).rejects.toThrow(/Invalid project configuration/);
+    await expect(saveProjectSetup(directory, { name: "New", revision: null })).rejects.toThrow(
+      /Invalid project configuration/,
+    );
+    expect(await readFile(join(directory, ".code-factory", "project.json"), "utf8")).toBe(
+      "bad json",
+    );
+  });
+  it("validates the selected directory and rejects linked factory storage", async () => {
+    const directory = await temporaryProject();
+    await expect(validateProjectDirectory(join(directory, "missing"))).rejects.toThrow(
+      /does not exist/,
+    );
+    await writeFile(join(directory, "file"), "x");
+    await expect(validateProjectDirectory(join(directory, "file"))).rejects.toThrow(
+      /not a directory/,
+    );
+    const other = await temporaryProject();
+    const alias = join(other, "alias");
+    await symlink(directory, alias);
+    expect(await validateProjectDirectory(alias)).toBe(await realpath(directory));
+    await symlink(other, join(directory, ".code-factory"));
+    await expect(initializeProject(directory)).rejects.toThrow(/regular directory/);
+  });
+  it("keeps other factory and agent files when setup is saved and reports write failures", async () => {
+    const directory = await temporaryProject();
+    await mkdir(join(directory, ".kiro"));
+    await writeFile(join(directory, ".kiro", "agent.txt"), "private instructions");
+    await mkdir(join(directory, ".code-factory"));
+    await mkdir(join(directory, ".code-factory", "loops"));
+    await writeFile(join(directory, ".code-factory", "loops", "keep.txt"), "existing loop");
+    await saveProjectSetup(directory, { name: "Factory", revision: null });
+    expect(await readFile(join(directory, ".kiro", "agent.txt"), "utf8")).toBe(
+      "private instructions",
+    );
+    expect(await readFile(join(directory, ".code-factory", "loops", "keep.txt"), "utf8")).toBe(
+      "existing loop",
+    );
+    const folder = join(directory, ".code-factory");
+    const revision = await projectRevision(directory);
+    await chmod(folder, 0o500);
+    try {
+      await expect(saveProjectSetup(directory, { name: "Cannot save", revision })).rejects.toThrow(
+        /Check write permissions/,
+      );
+    } finally {
+      await chmod(folder, 0o700);
+    }
+    expect((await readProjectConfig(directory))?.name).toBe("Factory");
+  });
+  it("saves a trimmed project name while retaining the binding and rejecting stale writes", async () => {
+    const directory = await temporaryProject();
+    await initializeProject(directory);
+    const path = join(directory, ".code-factory", "project.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        schemaVersion: 1,
+        name: "Before",
+        defaultBinding: { provider: "codex", model: "saved-model" },
+      }),
+    );
+    const revision = await projectRevision(directory);
+    const saved = await saveProjectSetup(directory, { name: "  After  ", revision });
+    expect(saved).toMatchObject({
+      name: "After",
+      defaultBinding: { provider: "codex", model: "saved-model" },
+    });
+    await expect(saveProjectSetup(directory, { name: "Stale", revision })).rejects.toThrow(
+      /changed on disk/,
+    );
+    expect((await readProjectConfig(directory))?.name).toBe("After");
   });
 });
 
@@ -57,6 +143,53 @@ describe("agent discovery", () => {
 });
 
 describe("local API", () => {
+  it("starts with zero history and saves setup only in the trusted CLI project", async () => {
+    const directory = await temporaryProject();
+    const other = await temporaryProject();
+    const { server, url } = await startLocalServer({ projectDirectory: directory, port: 0 });
+    try {
+      expect(await fetch(`${url}/api/project`).then((response) => response.json())).toMatchObject({
+        project: null,
+        path: await realpath(directory),
+        revision: null,
+      });
+      expect(await fetch(`${url}/api/factory`).then((response) => response.json())).toEqual({
+        loops: 0,
+        runs: 0,
+      });
+      const invalid = await fetch(`${url}/api/project/setup`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: " ", revision: null }),
+      });
+      expect(invalid.status).toBe(400);
+      const spoofed = await fetch(`${url}/api/project/setup`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Safe", path: other, revision: null }),
+      });
+      expect(spoofed.status).toBe(400);
+      const saved = await fetch(`${url}/api/project/setup`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Local", revision: null }),
+      });
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toMatchObject({
+        project: { name: "Local", defaultBinding: null },
+      });
+      expect(await readProjectConfig(other)).toBeNull();
+      expect(await fetch(`${url}/api/factory`).then((response) => response.json())).toEqual({
+        loops: 0,
+        runs: 0,
+      });
+      expect(await fetch(`${url}/api/project`).then((response) => response.json())).toMatchObject({
+        project: { name: "Local" },
+      });
+    } finally {
+      await new Promise<void>((resolveClosed) => server.close(() => resolveClosed()));
+    }
+  });
   it("serves project state and assets without claiming runtime integration", async () => {
     const directory = await temporaryProject();
     await initializeProject(directory);
