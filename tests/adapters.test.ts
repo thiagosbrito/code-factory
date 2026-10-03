@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CodexAdapter, createCodexAdapter, type CodexRpc } from "../src/adapters/codex.js";
+import {
+  CodexAdapter,
+  createCodexAdapter,
+  dispatchCodexMessage,
+  type CodexRpc,
+} from "../src/adapters/codex.js";
 import { mockAdapter } from "../src/adapters/mock.js";
 import type {
   AgentAdapter,
@@ -105,6 +110,69 @@ async function collect(adapter: AgentAdapter, step: StepExecutionInput): Promise
 }
 
 describe("portable adapter conformance", () => {
+  it("declines approval requests and rejects unsupported server requests without consuming response IDs", () => {
+    const replies: Record<string, unknown>[] = [];
+    const responses: Record<string, unknown>[] = [];
+    const notifications: Record<string, unknown>[] = [];
+    const handlers = {
+      response: (message: Record<string, unknown>) => responses.push(message),
+      notification: (message: Record<string, unknown>) => notifications.push(message),
+      send: (message: Record<string, unknown>) => replies.push(message),
+    };
+
+    dispatchCodexMessage(
+      { id: 7, method: "item/commandExecution/requestApproval", params: {} },
+      handlers,
+    );
+    dispatchCodexMessage(
+      { id: 8, method: "item/fileChange/requestApproval", params: {} },
+      handlers,
+    );
+    dispatchCodexMessage({ id: 9, method: "unknown/serverRequest", params: {} }, handlers);
+    dispatchCodexMessage({ id: 7, method: "item/commandExecution/requestApproval" }, handlers);
+
+    expect(replies).toEqual([
+      { jsonrpc: "2.0", id: 7, result: { decision: "decline" } },
+      { jsonrpc: "2.0", id: 8, result: { decision: "decline" } },
+      {
+        jsonrpc: "2.0",
+        id: 9,
+        error: { code: -32601, message: "Unsupported Codex server request: unknown/serverRequest" },
+      },
+      { jsonrpc: "2.0", id: 7, result: { decision: "decline" } },
+    ]);
+    expect(responses).toEqual([]);
+    expect(notifications).toEqual([]);
+    dispatchCodexMessage({ id: 7, result: { ok: true } }, handlers);
+    expect(responses).toEqual([{ id: 7, result: { ok: true } }]);
+  });
+
+  it("uses explicit file approval decisions, stays closed on errors, and never approves commands", () => {
+    const replies: Record<string, unknown>[] = [];
+    const handlers = {
+      response: () => {},
+      notification: () => {},
+      send: (value: Record<string, unknown>) => replies.push(value),
+      approveFileChange: () => true,
+    };
+    dispatchCodexMessage({ id: 1, method: "item/fileChange/requestApproval" }, handlers);
+    dispatchCodexMessage({ id: 2, method: "item/commandExecution/requestApproval" }, handlers);
+    dispatchCodexMessage(
+      { id: 3, method: "item/fileChange/requestApproval" },
+      {
+        ...handlers,
+        approveFileChange: () => {
+          throw new Error("No decision");
+        },
+      },
+    );
+    expect(replies).toEqual([
+      { jsonrpc: "2.0", id: 1, result: { decision: "accept" } },
+      { jsonrpc: "2.0", id: 2, result: { decision: "decline" } },
+      { jsonrpc: "2.0", id: 3, result: { decision: "decline" } },
+    ]);
+  });
+
   it("rejects a spoofed executable before opening the app-server", async () => {
     const directory = await mkdtemp(join(tmpdir(), "factory-executable-"));
     try {
@@ -141,6 +209,13 @@ describe("portable adapter conformance", () => {
     const rpc = new FixtureRpc();
     const events = await collect(new CodexAdapter(rpc, "/bin/codex", "0.160.0"), input);
     expect(events.map((event) => event.type)).toEqual(["started", "message", "completed"]);
+    expect(rpc.calls.find((call) => call.method === "turn/start")?.params.sandboxPolicy).toEqual({
+      type: "workspaceWrite",
+      writableRoots: [input.projectDirectory],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    });
     expect(
       events.every(
         (event) =>

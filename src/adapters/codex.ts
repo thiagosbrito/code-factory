@@ -11,12 +11,50 @@ import type {
 } from "./contract.js";
 
 type RpcMessage = {
-  id?: number;
+  id?: number | string;
   method?: string;
   params?: Record<string, unknown>;
   result?: unknown;
   error?: { message?: string };
 };
+
+type RpcDispatch = {
+  response(message: RpcMessage): void;
+  notification(message: RpcMessage): void;
+  send(message: Record<string, unknown>): void;
+  approveFileChange?(request: RpcMessage): boolean;
+};
+
+/** Route app-server messages, declining approvals and rejecting unknown requests by default. */
+export function dispatchCodexMessage(message: RpcMessage, handlers: RpcDispatch): void {
+  if (message.method && (typeof message.id === "number" || typeof message.id === "string")) {
+    const approvalMethods = new Set([
+      "item/commandExecution/requestApproval",
+      "item/fileChange/requestApproval",
+    ]);
+    if (approvalMethods.has(message.method)) {
+      let decision = "decline";
+      if (message.method === "item/fileChange/requestApproval") {
+        try {
+          if (handlers.approveFileChange?.(message) === true) decision = "accept";
+        } catch {
+          /* Keep the default denial. */
+        }
+      }
+      handlers.send({ jsonrpc: "2.0", id: message.id, result: { decision } });
+    } else {
+      handlers.send({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32601, message: `Unsupported Codex server request: ${message.method}` },
+      });
+    }
+    return;
+  }
+  if (message.method) handlers.notification(message);
+  else if (typeof message.id === "number" || typeof message.id === "string")
+    handlers.response(message);
+}
 export interface CodexRpc {
   request(method: string, params: Record<string, unknown>): Promise<unknown>;
   notify(method: string, params?: Record<string, unknown>): void;
@@ -34,7 +72,10 @@ export class CodexStdioRpc implements CodexRpc {
   private readonly listeners = new Set<(message: RpcMessage) => void>();
   private nextId = 1;
 
-  constructor(executable: string) {
+  constructor(
+    executable: string,
+    options: { approveFileChange?(request: RpcMessage): boolean } = {},
+  ) {
     this.child = spawn(executable, ["app-server", "--listen", "stdio://"], { stdio: "pipe" });
     createInterface({ input: this.child.stdout }).on("line", (line) => {
       let message: RpcMessage;
@@ -43,14 +84,21 @@ export class CodexStdioRpc implements CodexRpc {
       } catch {
         return;
       }
-      if (typeof message.id === "number") {
-        const pending = this.pending.get(message.id);
-        this.pending.delete(message.id);
-        if (message.error) pending?.reject(new Error(message.error.message ?? "Codex RPC error"));
-        else pending?.resolve(message.result);
-      } else if (message.method) {
-        for (const listener of this.listeners) listener(message);
-      }
+      dispatchCodexMessage(message, {
+        response: (response) => {
+          if (typeof response.id !== "number") return;
+          const pending = this.pending.get(response.id);
+          this.pending.delete(response.id);
+          if (response.error)
+            pending?.reject(new Error(response.error.message ?? "Codex RPC error"));
+          else pending?.resolve(response.result);
+        },
+        notification: (notification) => {
+          for (const listener of this.listeners) listener(notification);
+        },
+        send: (reply) => this.child.stdin.write(`${JSON.stringify(reply)}\n`),
+        ...(options.approveFileChange ? { approveFileChange: options.approveFileChange } : {}),
+      });
     });
     const fail = (error: Error) => {
       for (const pending of this.pending.values()) pending.reject(error);
@@ -195,6 +243,13 @@ export class CodexAdapter implements AgentAdapter {
           await this.rpc.request("turn/start", {
             threadId: sessionId,
             input: textInput(input.instruction),
+            sandboxPolicy: {
+              type: "workspaceWrite",
+              writableRoots: [input.projectDirectory],
+              networkAccess: false,
+              excludeTmpdirEnvVar: false,
+              excludeSlashTmp: false,
+            },
           }),
         ).turn,
       );
