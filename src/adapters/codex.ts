@@ -197,12 +197,22 @@ export class CodexAdapter implements AgentAdapter {
           .map((entry) => ({
             id: identifier(entry.model),
             displayName: identifier(entry.displayName),
+            efforts: Array.isArray(entry.supportedReasoningEfforts)
+              ? entry.supportedReasoningEfforts
+                  .map((effort) =>
+                    effort && typeof effort === "object" && "reasoningEffort" in effort
+                      ? effort.reasoningEffort
+                      : null,
+                  )
+                  .filter((effort): effort is string => typeof effort === "string")
+              : [],
           }))
       : [];
     return {
       provider: this.provider,
       executable: this.executable,
       version: this.version,
+      identity: "Codex CLI",
       protocol: "Codex app-server JSON-RPC over stdio",
       installation: "detected",
       authentication: account.account ? "authenticated" : "unauthenticated",
@@ -226,7 +236,7 @@ export class CodexAdapter implements AgentAdapter {
       object(
         await this.rpc.request("thread/start", {
           cwd: input.projectDirectory,
-          model: input.binding.model ?? null,
+          model: input.binding.model === "agent-default" ? null : input.binding.model,
           approvalPolicy: "on-request",
           sandbox: "workspace-write",
         }),
@@ -243,6 +253,7 @@ export class CodexAdapter implements AgentAdapter {
           await this.rpc.request("turn/start", {
             threadId: sessionId,
             input: textInput(input.instruction),
+            ...(input.binding.effort ? { effort: input.binding.effort } : {}),
             sandboxPolicy: {
               type: "workspaceWrite",
               writableRoots: [input.projectDirectory],

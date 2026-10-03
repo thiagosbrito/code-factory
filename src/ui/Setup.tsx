@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
+import type { ProviderId } from "../domain/loop.js";
 import type { ProjectConfig } from "../runtime/project.js";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { connectionViewModel } from "./connection";
+import { bindingError, connectionViewModel } from "./connection";
 import { Brand } from "./Brand";
 import { api, type ProjectResponse } from "./project-api";
-import { SetupSection } from "./SetupSection";
+import { AgentSetupSection } from "./AgentSetupSection";
+import { ModelSetupSection } from "./ModelSetupSection";
+import { ProjectSetupSection } from "./ProjectSetupSection";
 
 export function Setup({
   state,
   agents,
   agentError,
   onRefreshAgents,
+  onConnect,
   onSaved,
   onDemo,
   onCancel,
@@ -21,29 +24,80 @@ export function Setup({
   agents: AgentConnection[];
   agentError: string;
   onRefreshAgents: () => Promise<void>;
+  onConnect: (
+    request:
+      | { provider: "codex"; launch: true }
+      | { provider: "custom"; launch: true; executable: string; protocol: "codex-app-server" },
+  ) => Promise<AgentConnection>;
   onSaved: (state: ProjectResponse) => void;
   onDemo: () => void;
   onCancel?: () => void;
 }) {
   const [name, setName] = useState(state.project?.name ?? "");
-  const [selected, setSelected] = useState<string | null>(
+  const [selected, setSelected] = useState<ProviderId | null>(
     state.project?.defaultBinding?.provider ?? null,
   );
+  const [model, setModel] = useState(state.project?.defaultBinding?.model ?? "agent-default");
+  const [effort, setEffort] = useState(state.project?.defaultBinding?.effort ?? "");
+  const [customExecutable, setCustomExecutable] = useState(
+    state.project?.customAgent?.executable ?? "",
+  );
+  const [bindingChanged, setBindingChanged] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
-  const models = agents.map(connectionViewModel);
-  const active = models.find((item) => item.id === selected);
+  const displayedAgents: AgentConnection[] = agents.map((item) => {
+    if (item.provider !== "custom" || item.executable === customExecutable.trim()) return item;
+    return {
+      provider: "custom",
+      executable: null,
+      installation: "missing",
+      authentication: "unknown",
+      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+      reason: "Verify the current executable and protocol to connect.",
+    };
+  });
+  const activeConnection = displayedAgents.find((item) => item.provider === selected);
+  const active = activeConnection ? connectionViewModel(activeConnection) : undefined;
   const savedBinding = state.project?.defaultBinding;
+  const activeModel = activeConnection?.models?.find((item) => item.id === model);
+  const availableEfforts = activeModel?.efforts ?? [];
+  const draftBinding = selected
+    ? { provider: selected, model, ...(effort ? { effort } : {}) }
+    : null;
+  const validation = bindingError(draftBinding, displayedAgents);
   useEffect(() => {
     nameRef.current?.focus();
   }, []);
+  function selectAgent(provider: ProviderId | null) {
+    setSelected(provider);
+    setModel("agent-default");
+    setEffort("");
+    setBindingChanged(true);
+    setError("");
+  }
+  function changeCustomExecutable(value: string) {
+    setCustomExecutable(value);
+    setModel("agent-default");
+    setEffort("");
+    setBindingChanged(true);
+    setError("");
+  }
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!name.trim()) {
       setError("Enter a project name.");
       nameRef.current?.focus();
+      return;
+    }
+    if (bindingChanged && validation) {
+      setError(validation);
+      return;
+    }
+    if (customExecutable.trim() && !customExecutable.trim().startsWith("/")) {
+      setError("Enter an absolute custom executable path.");
       return;
     }
     setBusy(true);
@@ -52,7 +106,14 @@ export function Setup({
       const result = await api<{ project: ProjectConfig; revision: string }>("/api/project/setup", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), revision: state.revision }),
+        body: JSON.stringify({
+          name: name.trim(),
+          revision: state.revision,
+          ...(bindingChanged ? { defaultBinding: draftBinding } : {}),
+          ...(customExecutable.trim()
+            ? { customAgent: { executable: customExecutable.trim(), protocol: "codex-app-server" } }
+            : {}),
+        }),
       });
       onSaved({ ...state, ...result });
     } catch (caught) {
@@ -70,6 +131,29 @@ export function Setup({
       setError(caught instanceof Error ? caught.message : "Could not recheck agents. Try again.");
     } finally {
       setRefreshing(false);
+    }
+  }
+  async function verify() {
+    if (selected !== "codex" && selected !== "custom") return;
+    setVerifying(true);
+    setError("");
+    try {
+      const connection = await onConnect(
+        selected === "codex"
+          ? { provider: "codex", launch: true }
+          : {
+              provider: "custom",
+              launch: true,
+              executable: customExecutable.trim(),
+              protocol: "codex-app-server",
+            },
+      );
+      if (selected === "custom" && connection.executable)
+        setCustomExecutable(connection.executable);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not verify agent connection.");
+    } finally {
+      setVerifying(false);
     }
   }
   return (
@@ -97,106 +181,45 @@ export function Setup({
           .code-factory.
         </p>
         <form onSubmit={(event) => void save(event)} className="mt-7 space-y-4">
-          <SetupSection
-            number={1}
-            title="Project"
-            description="Local workspace selected when Code Factory started"
-          >
-            <div className="grid gap-4 sm:grid-cols-[1fr_1.4fr]">
-              <label className="grid gap-2 text-sm font-medium" htmlFor="project-name">
-                Project name
-                <Input
-                  ref={nameRef}
-                  id="project-name"
-                  value={name}
-                  onChange={(event) => {
-                    setName(event.target.value);
-                    setError("");
-                  }}
-                  aria-invalid={Boolean(error && !name.trim())}
-                  aria-describedby={error ? "setup-error" : undefined}
-                  placeholder="my-application"
-                />
-              </label>
-              <div className="grid gap-2 text-sm font-medium">
-                <span>Local project path</span>
-                <div
-                  className="flex min-h-10 items-center overflow-x-auto rounded-md border border-input bg-canvas px-3 text-sm font-normal"
-                  aria-label="Canonical project path"
-                >
-                  {state.path}
-                </div>
-                <small className="font-normal text-muted-foreground">
-                  Validated by the local runtime. Restart with --project to use another workspace.
-                </small>
-              </div>
-            </div>
-          </SetupSection>
-          <SetupSection
-            number={2}
-            title="Coding agent"
-            description="Installation, authentication, and capabilities are separate checks"
-          >
-            <div className="grid gap-2 sm:grid-cols-2">
-              {models.map((agent) => (
-                <button
-                  type="button"
-                  key={agent.id}
-                  onClick={() => setSelected(agent.id)}
-                  aria-pressed={selected === agent.id}
-                  className={`rounded-lg border p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected === agent.id ? "border-teal-600 bg-teal-50" : "border-border"}`}
-                >
-                  <span className="block text-sm font-semibold">{agent.label}</span>
-                  <span className="text-xs text-muted-foreground">{agent.detail}</span>
-                </button>
-              ))}
-            </div>
-            {models.length === 0 && (
-              <p className="text-sm text-muted-foreground">No agent candidates are available.</p>
-            )}
-            {agentError && <p className="mt-2 text-sm text-red-700">{agentError}</p>}
-            <Button
-              type="button"
-              variant="outline"
-              className="mt-3"
-              onClick={() => void refreshAgents()}
-              disabled={refreshing}
-            >
-              {refreshing ? "Rechecking…" : "Recheck agents"}
-            </Button>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Selection here is a preview. Connection setup and binding are managed by the
-              connection flow. You can finish without an agent.
-            </p>
-          </SetupSection>
-          <SetupSection
-            number={3}
-            title="Default model"
-            description="Used for future work when a verified connection is configured"
-          >
-            <label htmlFor="default-model" className="grid max-w-sm gap-2 text-sm font-medium">
-              Project default model
-              <select
-                id="default-model"
-                aria-label="Project default model"
-                disabled
-                className="h-10 rounded-md border border-input bg-canvas px-3 text-sm font-normal text-muted-foreground"
-              >
-                <option>
-                  {savedBinding
-                    ? `${savedBinding.provider} · ${savedBinding.model} (saved)`
-                    : active?.verified && active.models.length
-                      ? "Select in connection settings"
-                      : "Connect an agent to load models"}
-                </option>
-              </select>
-              <small className="font-normal text-muted-foreground">
-                {savedBinding
-                  ? "Saved default is retained. Verify connection availability before execution."
-                  : "Model choices come from the verified agent catalog. No model is selected yet."}
-              </small>
-            </label>
-          </SetupSection>
+          <ProjectSetupSection
+            statePath={state.path}
+            name={name}
+            nameRef={nameRef}
+            error={error}
+            onNameChange={(value) => {
+              setName(value);
+              setError("");
+            }}
+          />
+          <AgentSetupSection
+            displayedAgents={displayedAgents}
+            agentError={agentError}
+            selected={selected}
+            customExecutable={customExecutable}
+            verifying={verifying}
+            refreshing={refreshing}
+            onSelect={selectAgent}
+            onCustomExecutableChange={changeCustomExecutable}
+            onVerify={verify}
+            onRefresh={refreshAgents}
+          />
+          <ModelSetupSection
+            active={active}
+            model={model}
+            effort={effort}
+            availableEfforts={availableEfforts}
+            hasSavedBinding={Boolean(savedBinding)}
+            validation={validation}
+            onModelChange={(value) => {
+              setModel(value);
+              setEffort("");
+              setBindingChanged(true);
+            }}
+            onEffortChange={(value) => {
+              setEffort(value);
+              setBindingChanged(true);
+            }}
+          />
           {error && (
             <p
               id="setup-error"

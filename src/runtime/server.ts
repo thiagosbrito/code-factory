@@ -2,7 +2,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, realpath, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { extname, join, resolve, sep } from "node:path";
-import { discoverAgents } from "../adapters/discovery.js";
+import { ConnectionRegistry, connectionRequestSchema } from "./connections.js";
 import {
   ProjectError,
   projectRevision,
@@ -30,12 +30,12 @@ async function readBody(request: import("node:http").IncomingMessage): Promise<u
   let body = "";
   for await (const chunk of request) {
     body += String(chunk);
-    if (body.length > 8192) throw new ProjectError("Setup request is too large.", 413);
+    if (body.length > 8192) throw new ProjectError("Request body is too large.", 413);
   }
   try {
     return JSON.parse(body) as unknown;
   } catch {
-    throw new ProjectError("Send valid JSON for project setup.", 400);
+    throw new ProjectError("Send valid JSON.", 400);
   }
 }
 
@@ -48,6 +48,33 @@ async function entryCount(directory: string, suffix?: string): Promise<number> {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return 0;
     throw error;
   }
+}
+
+async function validateDefaultBinding(
+  input: Parameters<typeof saveProjectSetup>[1],
+  connections: ConnectionRegistry,
+): Promise<void> {
+  const binding = input.defaultBinding;
+  if (!binding) return;
+
+  const connection = (await connections.list()).find((item) => item.provider === binding.provider);
+  if (!connection?.protocol || connection.authentication !== "authenticated")
+    throw new ProjectError(
+      "Verify and authenticate the selected agent before saving its default.",
+      422,
+    );
+
+  const model = connection.models?.find((item) => item.id === binding.model);
+  if (binding.model !== "agent-default" && !model)
+    throw new ProjectError("Selected model is unavailable in the current agent catalog.", 422);
+  if (binding.effort && !model?.efforts?.includes(binding.effort))
+    throw new ProjectError("Selected effort is unavailable for this model.", 422);
+
+  if (binding.provider !== "custom") return;
+  const configuredPath = input.customAgent?.executable;
+  const verifiedPath = configuredPath ? await realpath(configuredPath).catch(() => null) : null;
+  if (verifiedPath !== connection.executable)
+    throw new ProjectError("Verify the current custom executable before saving its default.", 422);
 }
 
 async function serveAsset(response: ServerResponse, pathname: string, uiDirectory: string) {
@@ -77,8 +104,10 @@ export async function startLocalServer(options: {
   port?: number;
   uiDirectory?: string;
   devOrigin?: string;
+  connections?: ConnectionRegistry;
 }) {
   const projectDirectory = await validateProjectDirectory(options.projectDirectory);
+  const connections = options.connections ?? new ConnectionRegistry(projectDirectory);
   const server = createServer((request, response) => {
     void (async () => {
       const address = server.address();
@@ -100,8 +129,17 @@ export async function startLocalServer(options: {
           return json(response, 400, {
             error: parsed.error.issues[0]?.message ?? "Invalid setup.",
           });
+        await validateDefaultBinding(parsed.data, connections);
         const project = await saveProjectSetup(projectDirectory, parsed.data);
         return json(response, 200, { project, revision: await projectRevision(projectDirectory) });
+      }
+      if (pathname === "/api/agents/connect" && request.method === "POST") {
+        const parsed = connectionRequestSchema.safeParse(await readBody(request));
+        if (!parsed.success)
+          return json(response, 400, {
+            error: parsed.error.issues[0]?.message ?? "Invalid connection request.",
+          });
+        return json(response, 200, { connection: await connections.connect(parsed.data) });
       }
       if (request.method !== "GET")
         return json(response, 405, { error: "Unsupported request method" });
@@ -123,7 +161,7 @@ export async function startLocalServer(options: {
           runs: await entryCount(join(projectDirectory, ".code-factory", "runs"), ".json"),
         });
       if (pathname === "/api/agents")
-        return json(response, 200, { agents: await discoverAgents() });
+        return json(response, 200, { agents: await connections.list() });
       if (pathname.startsWith("/api/")) return json(response, 404, { error: "Unknown endpoint" });
       return serveAsset(response, pathname, options.uiDirectory ?? defaultUiDirectory);
     })().catch((error: unknown) => {
@@ -135,6 +173,7 @@ export async function startLocalServer(options: {
       console.error(error instanceof Error ? error.message : "Unknown runtime error");
     });
   });
+  server.on("close", () => connections.close());
   await new Promise<void>((resolveStarted, reject) => {
     server.once("error", reject);
     server.listen(options.port ?? 4310, "127.0.0.1", () => {

@@ -5,6 +5,7 @@ import { ErrorView } from "./ErrorView";
 import type { Screen } from "./FactorySidebar";
 import { Setup } from "./Setup";
 import { api, type FactoryResponse, type ProjectResponse } from "./project-api";
+import { unavailableCandidates } from "./connection";
 
 export function App() {
   const [project, setProject] = useState<ProjectResponse | null>(null);
@@ -23,7 +24,7 @@ export function App() {
         api<{ agents: AgentConnection[] }>("/api/agents")
           .then((result) => ({ agents: result.agents, error: "" }))
           .catch(() => ({
-            agents: [] as AgentConnection[],
+            agents: unavailableCandidates(),
             error: "Agent discovery is unavailable. You can finish setup and recheck later.",
           })),
       ]);
@@ -52,6 +53,19 @@ export function App() {
           setAgents(result.agents);
           setAgentError("");
         }}
+        onConnect={async (request) => {
+          const result = await api<{ connection: AgentConnection }>("/api/agents/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(request),
+          });
+          setAgents((previous) =>
+            previous.map((item) =>
+              item.provider === result.connection.provider ? result.connection : item,
+            ),
+          );
+          return result.connection;
+        }}
         onSaved={(next) => {
           setProject(next);
           setEditing(false);
@@ -63,6 +77,7 @@ export function App() {
   return (
     <Factory
       project={project}
+      agents={agents}
       counts={counts}
       screen={screen}
       setScreen={setScreen}

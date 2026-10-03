@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { App } from "../src/ui/App.js";
 import { ErrorBoundary } from "../src/ui/ErrorBoundary.js";
 import type { ProjectConfig } from "../src/runtime/project.js";
+import type { AgentConnection } from "../src/adapters/contract.js";
 
 afterEach(() => {
   cleanup();
@@ -16,6 +17,16 @@ function runtime(initial: ProjectConfig | null = null) {
   let revision = initial ? "saved" : null;
   let failNextSave = false;
   let failAgents = false;
+  let agents: AgentConnection[] = [
+    {
+      provider: "codex",
+      executable: "/bin/codex",
+      installation: "detected",
+      authentication: "unknown",
+      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+    },
+  ];
+  let connected: AgentConnection | null = null;
   const requests: { path: string; method: string }[] = [];
   vi.stubGlobal("fetch", async (input: string, options?: RequestInit) => {
     const path = String(input);
@@ -31,29 +42,32 @@ function runtime(initial: ProjectConfig | null = null) {
       if (failAgents) {
         status = 503;
         body = { error: "Agent discovery unavailable" };
-      } else
-        body = {
-          agents: [
-            {
-              provider: "codex",
-              executable: "/bin/codex",
-              installation: "detected",
-              authentication: "unknown",
-              capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
-            },
-          ],
-        };
+      } else body = { agents };
+    } else if (path === "/api/agents/connect" && method === "POST") {
+      if (!connected) {
+        status = 422;
+        body = { error: "Connection handshake failed" };
+      } else {
+        agents = agents.map((item) => (item.provider === connected?.provider ? connected! : item));
+        body = { connection: connected };
+      }
     } else if (path === "/api/project/setup" && method === "PUT") {
       if (failNextSave) {
         failNextSave = false;
         status = 403;
         body = { error: "Cannot save project configuration. Check write permissions." };
       } else {
-        const request = JSON.parse(String(options?.body)) as { name: string };
+        const request = JSON.parse(String(options?.body)) as {
+          name: string;
+          defaultBinding?: ProjectConfig["defaultBinding"];
+        };
         project = {
           schemaVersion: 1,
           name: request.name,
-          defaultBinding: project?.defaultBinding ?? null,
+          defaultBinding:
+            request.defaultBinding === undefined
+              ? (project?.defaultBinding ?? null)
+              : request.defaultBinding,
         };
         revision = "updated";
         body = { project, revision };
@@ -68,11 +82,77 @@ function runtime(initial: ProjectConfig | null = null) {
     requests,
     failSave: () => (failNextSave = true),
     setAgentFailure: (failed: boolean) => (failAgents = failed),
+    setAgents: (items: AgentConnection[]) => (agents = items),
+    setConnection: (item: AgentConnection) => (connected = item),
     getProject: () => project,
   };
 }
 
 describe("first-use UI", () => {
+  it("uses explicit verification and keyboard selection, then clears incompatible draft models", async () => {
+    const local = runtime();
+    const base: AgentConnection = {
+      provider: "codex",
+      executable: "/bin/codex",
+      installation: "detected",
+      authentication: "unknown",
+      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+    };
+    local.setAgents([
+      base,
+      ...(["cursor", "kiro", "claude-code"] as const).map((provider) => ({
+        ...base,
+        provider,
+        executable: null,
+        installation: "missing" as const,
+      })),
+      { ...base, provider: "custom", executable: null, installation: "missing" },
+    ]);
+    local.setConnection({
+      ...base,
+      identity: "Codex CLI",
+      version: "0.160.0",
+      protocol: "Codex app-server JSON-RPC over stdio",
+      authentication: "authenticated",
+      models: [{ id: "model-a", displayName: "Model A", efforts: ["low", "high"] }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Connect your first project" })).toBeTruthy();
+    expect(screen.getByText("Claude Code")).toBeTruthy();
+    expect(local.requests.filter((item) => item.path === "/api/agents/connect")).toHaveLength(0);
+    const codex = screen.getByRole("button", { name: /Codex.*Executable detected/ });
+    codex.focus();
+    await user.keyboard("{Enter}");
+    expect(codex.getAttribute("aria-pressed")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Verify connection" }));
+    expect(await screen.findByText(/Codex CLI 0.160.0 · Connected/)).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Model A" })).toBeTruthy();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Project default model" }),
+      "model-a",
+    );
+    await user.selectOptions(screen.getByRole("combobox", { name: "Effort" }), "high");
+    const cursor = screen.getByRole("button", { name: /Cursor.*Not detected/ });
+    cursor.focus();
+    await user.keyboard("{Enter}");
+    expect(cursor.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("combobox", { name: "Project default model" })).toHaveProperty(
+      "value",
+      "agent-default",
+    );
+    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+    await user.click(codex);
+    await user.type(screen.getByRole("textbox", { name: "Project name" }), "Verified project");
+    await user.click(screen.getByRole("button", { name: "Finish setup" }));
+    expect(await screen.findByRole("heading", { name: "No runs yet" })).toBeTruthy();
+    expect(local.getProject()?.defaultBinding).toEqual({
+      provider: "codex",
+      model: "agent-default",
+    });
+    expect(local.requests.filter((item) => item.path === "/api/agents/connect")).toHaveLength(1);
+  });
+
   it("recovers from a render error through the application error boundary", async () => {
     let failing = true;
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});

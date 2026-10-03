@@ -10,22 +10,28 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
-import { providerIdSchema } from "../domain/loop.js";
+import { executionBindingSchema } from "../domain/loop.js";
+
+export const customAgentSchema = z.strictObject({
+  executable: z.string().trim().min(1).refine(isAbsolute, "Enter an absolute executable path."),
+  protocol: z.literal("codex-app-server"),
+});
 
 export const projectConfigSchema = z.strictObject({
   schemaVersion: z.literal(1),
   name: z.string().trim().min(1).max(120),
-  defaultBinding: z
-    .strictObject({ provider: providerIdSchema, model: z.string().min(1) })
-    .nullable(),
+  defaultBinding: executionBindingSchema.nullable(),
+  customAgent: customAgentSchema.optional(),
 });
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 export const projectSetupSchema = z.strictObject({
   name: z.string().trim().min(1, "Enter a project name.").max(120),
   revision: z.string().nullable(),
+  defaultBinding: executionBindingSchema.nullable().optional(),
+  customAgent: customAgentSchema.nullable().optional(),
 });
 
 export class ProjectError extends Error {
@@ -158,7 +164,15 @@ export async function saveProjectSetup(
   const config = projectConfigSchema.parse({
     schemaVersion: 1,
     name: input.name,
-    defaultBinding: current?.defaultBinding ?? null,
+    defaultBinding:
+      input.defaultBinding === undefined ? (current?.defaultBinding ?? null) : input.defaultBinding,
+    ...(input.customAgent === undefined
+      ? current?.customAgent
+        ? { customAgent: current.customAgent }
+        : {}
+      : input.customAgent
+        ? { customAgent: input.customAgent }
+        : {}),
   });
   const folder = join(root, ".code-factory");
   try {

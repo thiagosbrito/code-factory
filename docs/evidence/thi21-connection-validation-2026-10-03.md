@@ -1,0 +1,5 @@
+# THI-21 connection validation
+
+The verified native Codex connection receipt is [THI-6's 2026-10-03 receipt](thi6-native-2026-10-03.json). It records Codex CLI 0.160.0, successful `initialize`, `account/read`, and `model/list`, and authenticated native execution. THI-21's explicit connection endpoint calls the same `createCodexAdapter().inspect()` path after executable identity verification. The receipt does not establish capability support for every future machine or account, so the connection UI retains unknown capability states until an adapter reports support.
+
+THI-21 contract fixture tests cover discovery without launch, unauthenticated inspection, catalog changes, custom identity/handshake failure, custom success, default persistence, and immutable run bindings. A fresh native inspection attempted in this worktree could not start: sandboxed Codex exited while initializing its SQLite state under `~/.codex`. No credential files were read or copied. The prior verified native receipt remains the native proof for the supported first adapter; no new native success is claimed.

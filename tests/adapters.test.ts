@@ -43,7 +43,12 @@ class FixtureRpc implements CodexRpc {
     if (method === "model/list")
       return {
         data: [
-          { model: "model-a", displayName: "Model A", hidden: false },
+          {
+            model: "model-a",
+            displayName: "Model A",
+            hidden: false,
+            supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "high" }],
+          },
           { model: "hidden", displayName: "Hidden", hidden: true },
         ],
       };
@@ -191,7 +196,7 @@ describe("portable adapter conformance", () => {
       authentication: "authenticated",
       authenticationMechanism: "Codex-owned ChatGPT login",
       protocol: "Codex app-server JSON-RPC over stdio",
-      models: [{ id: "model-a", displayName: "Model A" }],
+      models: [{ id: "model-a", displayName: "Model A", efforts: ["low", "high"] }],
     });
     expect(rpc.calls.map((call) => call.method)).toEqual([
       "initialize",
@@ -203,6 +208,16 @@ describe("portable adapter conformance", () => {
       authentication: "not-required",
       capabilities: { steering: "unsupported", resume: "unsupported" },
     });
+  });
+
+  it("sends catalog-supported effort at turn start and leaves agent default model to Codex", async () => {
+    const rpc = new FixtureRpc();
+    await collect(new CodexAdapter(rpc, "/bin/codex", "0.160.0"), {
+      ...input,
+      binding: { provider: "codex", model: "agent-default", effort: "high" },
+    });
+    expect(rpc.calls.find((call) => call.method === "thread/start")?.params.model).toBeNull();
+    expect(rpc.calls.find((call) => call.method === "turn/start")?.params.effort).toBe("high");
   });
 
   it("streams one assigned step with stable factory and native identities", async () => {

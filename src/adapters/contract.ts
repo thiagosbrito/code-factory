@@ -15,7 +15,9 @@ export interface AgentConnection {
   capabilities: AgentCapabilities;
   version?: string;
   protocol?: string;
-  models?: { id: string; displayName: string }[];
+  identity?: string;
+  reason?: string;
+  models?: { id: string; displayName: string; efforts?: string[] }[];
 }
 export interface StepExecutionInput {
   runId: string;

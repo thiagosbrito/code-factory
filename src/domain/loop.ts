@@ -13,6 +13,7 @@ const identifierSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 export const executionBindingSchema = z.strictObject({
   provider: providerIdSchema,
   model: z.string().trim().min(1).default("agent-default"),
+  effort: z.string().trim().min(1).optional(),
 });
 
 const stepSchema = z.strictObject({
