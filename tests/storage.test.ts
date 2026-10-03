@@ -158,6 +158,27 @@ describe("graph and migration contracts", () => {
     expect(() =>
       parseLoop({
         ...valid,
+        dependencies: [...valid.dependencies, { from: "implement", to: "join" }],
+      }),
+    ).toThrow(/omits an incoming dependency/);
+    expect(() =>
+      parseLoop({
+        ...valid,
+        dependencies: [...valid.dependencies, { from: "quality", to: "security" }],
+      }),
+    ).toThrow(/cannot order its members/);
+    expect(() =>
+      parseLoop({
+        ...valid,
+        groups: [
+          ...valid.groups,
+          { id: "another", name: "Another", kind: "parallel", stepIds: ["quality", "security"] },
+        ],
+      }),
+    ).toThrow(/containing group/);
+    expect(() =>
+      parseLoop({
+        ...valid,
         dependencies: [...valid.dependencies, { from: "join", to: "implement" }],
       }),
     ).toThrow(/cycles/);

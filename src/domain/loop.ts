@@ -83,21 +83,40 @@ const baseLoopSchema = z.strictObject({
 type LoopShape = z.infer<typeof baseLoopSchema>;
 type Group = LoopShape["groups"][number];
 type Report = (message: string) => void;
+type DependencyIndex = {
+  edges: Set<string>;
+  incoming: Map<string, Set<string>>;
+  outgoing: Map<string, Set<string>>;
+};
 
 function hasDuplicates(values: string[]): boolean {
   return new Set(values).size !== values.length;
 }
 
-function validateDependencies(loop: LoopShape, stepIds: Set<string>, report: Report): Set<string> {
-  const edges = new Set<string>();
+function validateDependencies(
+  loop: LoopShape,
+  stepIds: Set<string>,
+  report: Report,
+): DependencyIndex {
+  const index: DependencyIndex = {
+    edges: new Set(),
+    incoming: new Map(),
+    outgoing: new Map(),
+  };
   for (const { from, to } of loop.dependencies) {
     if (!stepIds.has(from) || !stepIds.has(to))
       report("Dependencies must reference existing steps.");
     const key = `${from}:${to}`;
-    if (edges.has(key)) report("Dependencies must be unique.");
-    edges.add(key);
+    if (index.edges.has(key)) report("Dependencies must be unique.");
+    index.edges.add(key);
+    const incoming = index.incoming.get(to) ?? new Set<string>();
+    incoming.add(from);
+    index.incoming.set(to, incoming);
+    const outgoing = index.outgoing.get(from) ?? new Set<string>();
+    outgoing.add(to);
+    index.outgoing.set(from, outgoing);
   }
-  return edges;
+  return index;
 }
 
 function validateRepeatGroup(
@@ -120,79 +139,75 @@ function validateRepeatGroup(
   if (!validContinuation) report(`Repeat ${group.id} needs a distinct continuation into its body.`);
 }
 
-function validateGroup(group: Group, loop: LoopShape, stepIds: Set<string>, report: Report): void {
+function validateGroup(group: Group, loop: LoopShape, report: Report): void {
   if (hasDuplicates(group.stepIds)) report(`Group ${group.id} repeats a step.`);
-  for (const id of group.stepIds) {
-    if (!stepIds.has(id)) report(`Group ${group.id} references missing step ${id}.`);
-  }
-  if (group.kind === "repeat") return validateRepeatGroup(group, loop, report);
-  const ordersMembers = loop.dependencies.some(
-    ({ from, to }) => group.stepIds.includes(from) && group.stepIds.includes(to),
-  );
-  if (ordersMembers) report(`Parallel group ${group.id} cannot order its members.`);
+  if (group.kind === "repeat") validateRepeatGroup(group, loop, report);
 }
 
 function validateGroups(loop: LoopShape, stepIds: Set<string>, report: Report): void {
-  const groupIds = new Set<string>();
-  for (const group of loop.groups) {
-    if (groupIds.has(group.id)) report(`Duplicate group ${group.id}.`);
-    groupIds.add(group.id);
-    validateGroup(group, loop, stepIds, report);
+  if (hasDuplicates(loop.groups.map(({ id }) => id))) report("Group IDs must be unique.");
+  loop.groups.forEach((group) => validateGroup(group, loop, report));
+  const groupById = new Map(loop.groups.map((group) => [group.id, group]));
+  const members = loop.groups.flatMap(({ id, stepIds }) =>
+    stepIds.map((stepId) => ({ groupId: id, stepId })),
+  );
+  const declaredGroupByStep = new Map(loop.steps.map(({ id, groupId }) => [id, groupId]));
+  const containingGroupByStep = new Map<string, string>();
+  for (const { groupId, stepId } of members) {
+    if (!stepIds.has(stepId)) report(`Group ${groupId} references missing step ${stepId}.`);
+    if (declaredGroupByStep.get(stepId) !== groupId)
+      report(`Step ${stepId} must identify its containing group.`);
+    containingGroupByStep.set(stepId, groupId);
   }
   for (const step of loop.steps) {
-    const containingGroups = loop.groups.filter(({ stepIds: members }) =>
-      members.includes(step.id),
-    );
-    if (step.groupId && !containingGroups.some(({ id }) => id === step.groupId))
+    if (step.groupId && containingGroupByStep.get(step.id) !== step.groupId)
       report(`Step ${step.id} has invalid group ${step.groupId}.`);
-    if (containingGroups.some(({ id }) => id !== step.groupId))
-      report(`Step ${step.id} must identify its containing group.`);
+  }
+  for (const { from, to } of loop.dependencies) {
+    const groupId = containingGroupByStep.get(from);
+    if (
+      groupId &&
+      groupId === containingGroupByStep.get(to) &&
+      groupById.get(groupId)?.kind === "parallel"
+    )
+      report(`Parallel group ${groupId} cannot order its members.`);
   }
 }
 
 function validateJoins(
   loop: LoopShape,
   stepIds: Set<string>,
-  edges: Set<string>,
+  dependencies: DependencyIndex,
   report: Report,
 ): void {
   if (hasDuplicates(loop.joins.map(({ stepId }) => stepId))) report("Join steps must be unique.");
   for (const join of loop.joins) {
     if (!stepIds.has(join.stepId)) report(`Join references missing step ${join.stepId}.`);
     if (hasDuplicates(join.from)) report(`Join ${join.stepId} repeats a source.`);
-    for (const id of join.from) {
-      if (!edges.has(`${id}:${join.stepId}`))
-        report(`Join ${join.stepId} needs dependency ${id} -> ${join.stepId}.`);
-    }
-    const incoming = loop.dependencies.filter(({ to }) => to === join.stepId);
-    if (incoming.some(({ from }) => !join.from.includes(from)))
+    const incoming = dependencies.incoming.get(join.stepId) ?? new Set<string>();
+    const missing = join.from.find((id) => !incoming.has(id));
+    if (missing) report(`Join ${join.stepId} needs dependency ${missing} -> ${join.stepId}.`);
+    const declared = new Set(join.from);
+    if ([...incoming].some((id) => !declared.has(id)))
       report(`Join ${join.stepId} omits an incoming dependency.`);
   }
-}
-
-function isRepeatContinuation(
-  loop: LoopShape,
-  stepId: string,
-  outcome: string,
-  to: string,
-): boolean {
-  return loop.groups.some(
-    (group) =>
-      group.kind === "repeat" &&
-      group.exitWhen.stepId === stepId &&
-      group.continueWhen.outcome === outcome &&
-      group.continueWhen.to === to,
-  );
 }
 
 function validateDecisions(
   loop: LoopShape,
   stepIds: Set<string>,
-  edges: Set<string>,
+  dependencies: DependencyIndex,
   report: Report,
 ): void {
   if (hasDuplicates(loop.decisions.map(({ stepId }) => stepId)))
     report("Decision steps must be unique.");
+  const continuations = new Set(
+    loop.groups.flatMap((group) =>
+      group.kind === "repeat"
+        ? [`${group.exitWhen.stepId}:${group.continueWhen.outcome}:${group.continueWhen.to}`]
+        : [],
+    ),
+  );
   for (const decision of loop.decisions) {
     if (!stepIds.has(decision.stepId))
       report(`Decision references missing step ${decision.stepId}.`);
@@ -200,29 +215,43 @@ function validateDecisions(
       report(`Decision ${decision.stepId} repeats an outcome.`);
     for (const { outcome, to } of decision.branches) {
       if (
-        !edges.has(`${decision.stepId}:${to}`) &&
-        !isRepeatContinuation(loop, decision.stepId, outcome, to)
+        !dependencies.edges.has(`${decision.stepId}:${to}`) &&
+        !continuations.has(`${decision.stepId}:${outcome}:${to}`)
       )
         report(`Decision ${decision.stepId} needs dependency to ${to}.`);
     }
-    const outgoing = loop.dependencies.filter(({ from }) => from === decision.stepId);
-    if (outgoing.some(({ to }) => !decision.branches.some((branch) => branch.to === to)))
+    const targets = new Set(decision.branches.map(({ to }) => to));
+    const outgoing = dependencies.outgoing.get(decision.stepId) ?? new Set<string>();
+    if ([...outgoing].some((to) => !targets.has(to)))
       report(`Decision ${decision.stepId} omits an outgoing dependency.`);
   }
 }
 
-function validateAcyclic(loop: LoopShape, stepIds: Set<string>, report: Report): void {
-  const remaining = new Set(stepIds);
-  while (remaining.size) {
-    const ready = [...remaining].filter(
-      (id) => !loop.dependencies.some(({ from, to }) => to === id && remaining.has(from)),
-    );
-    if (!ready.length) {
-      report("Dependency cycles are not allowed; repairs require explicit bounded policy.");
-      return;
+function validateAcyclic(
+  stepIds: Set<string>,
+  dependencies: DependencyIndex,
+  report: Report,
+): void {
+  const pending = new Map(
+    [...stepIds].map((id) => [
+      id,
+      [...(dependencies.incoming.get(id) ?? [])].filter((source) => stepIds.has(source)).length,
+    ]),
+  );
+  const ready = [...pending].filter(([, count]) => count === 0).map(([id]) => id);
+  let visited = 0;
+  while (ready.length) {
+    const id = ready.pop()!;
+    visited++;
+    for (const successor of dependencies.outgoing.get(id) ?? []) {
+      const count = pending.get(successor);
+      if (count === undefined) continue;
+      pending.set(successor, count - 1);
+      if (count === 1) ready.push(successor);
     }
-    for (const id of ready) remaining.delete(id);
   }
+  if (visited !== stepIds.size)
+    report("Dependency cycles are not allowed; repairs require explicit bounded policy.");
 }
 
 export const loopSchema = baseLoopSchema.superRefine((loop, context) => {
@@ -230,11 +259,11 @@ export const loopSchema = baseLoopSchema.superRefine((loop, context) => {
   const report: Report = (message) => context.addIssue({ code: "custom", message });
   if (stepIds.size !== loop.steps.length) report("Step IDs must be unique.");
   if (loop.status === "published" && !loop.steps.length) report("A published loop needs a step.");
-  const edges = validateDependencies(loop, stepIds, report);
+  const dependencies = validateDependencies(loop, stepIds, report);
   validateGroups(loop, stepIds, report);
-  validateJoins(loop, stepIds, edges, report);
-  validateDecisions(loop, stepIds, edges, report);
-  validateAcyclic(loop, stepIds, report);
+  validateJoins(loop, stepIds, dependencies, report);
+  validateDecisions(loop, stepIds, dependencies, report);
+  validateAcyclic(stepIds, dependencies, report);
 });
 
 export type LoopDefinition = z.infer<typeof loopSchema>;
