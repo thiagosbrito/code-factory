@@ -15,7 +15,7 @@ Put `LINEAR_API_KEY=...` in the developer checkout's ignored `.env` and run
 `chmod 600 .env`. The launcher reads this one value without sourcing the file.
 It passes the key to Symphony; the Codex transport strips tracker and GitHub
 token variables from worker processes. Workers use Symphony's `linear_graphql`
-tool and the host's GitHub CLI credentials. Do not commit authentication files.
+tool. A host publishing tool uses the host's GitHub CLI credentials. Do not commit authentication files.
 
 ```sh
 pnpm symphony:install
@@ -55,8 +55,10 @@ Only labelled tickets in `Todo` or `In Progress` are eligible. There is initiall
 one worker. Do not opt in a ticket another person or agent is already implementing.
 
 The worker maintains one `Codex Workpad`, implements and validates the ticket,
-pushes its assigned `symphony/THI-123` branch, opens a PR, and moves the issue to
-`In Review`. That state pauses work and retains its worktree. Review and merge
+then calls `symphony_publish_review`. This host tool revalidates the candidate,
+commits only explicitly listed ticket files, pushes its assigned `symphony/THI-123`
+branch, creates or updates the PR, verifies the published commit and open PR, links
+it in Linear, and finally moves the issue to `In Review`. That state pauses work and retains its worktree. Review and merge
 the PR yourself, then mark the issue `Done`. To request fixes, add feedback and
 return the ticket to `Todo`; the worker preserves its branch, PR, and workpad.
 Removing the label prevents new dispatch but does not cancel an in-flight turn;
@@ -79,7 +81,10 @@ does not install a background login service. The local dashboard is
 
 The workflow's eight turns cap each invocation; Symphony can retry a ticket in
 another invocation. The session timer bounds the overall foreground run.
-External blockers move the issue to In Review with a durable workpad note.
+External blockers move the issue to Backlog with a durable workpad note. In Review
+is reserved for completed acceptance criteria and a confirmed PR. Publication
+failures are recorded in `records/THI-123.json` and pause the issue in Backlog,
+preserving files, commits, and any existing PR without a repeated agent retry loop.
 
 Terminal issues (`Done`, `Canceled`, `Duplicate`) trigger cleanup. The hook checks
 ownership, branch, tracked and untracked changes, and unpublished commits. It
@@ -107,9 +112,26 @@ patch. The runtime test reports a skip if Symphony is not installed; local setup
 validation must include it with no skip. Packaging changes require
 `pnpm test:package`. Record local results and actual CI results separately.
 
-The transport grants writes to the assigned worktree and the shared automation
-Git metadata, with network access. Git metadata must be shared for worktrees;
-the workflow forbids modifying other tickets' refs or configuration. Start with
-one trusted worker and inspect the first PR before increasing concurrency.
+The worker defaults to `gpt-6-sol` rather than inheriting the desktop model
+from the host Codex configuration. Set `SYMPHONY_CODEX_MODEL` to choose another
+model supported by the authenticated CLI account. A model catalog entry alone
+does not establish access; verify that an inference turn succeeds.
+
+Current Codex reports failed and interrupted turns through `turn/completed`
+with a status and error. The transport translates these to the separate failure
+and cancellation events expected by Symphony v0.0.3, preserving error details.
+This prevents failed turns from being counted as successful continuations.
+
+The transport grants file writes only to the assigned worktree, with network
+access. Codex protects linked Git metadata even when its ancestor is explicitly
+writable; a `git add` denial is not a GitHub authentication failure. The host
+fetches origin before a worker runs. The narrowly scoped publishing tool owns
+Git mutations and PR publication. The transport rejects direct Linear updates
+to the team's In Review state; workers must use the verified host tool. It checks workspace ownership, assigned branch,
+expected remote, explicit file list, local validation, remote commit, PR state,
+CI/review blockers, and Linear eligibility. It does not merge or force-push.
+A PR URL alone is not completion evidence: required native behavior still needs
+its own receipt. Start with one trusted worker and inspect the first PR before
+increasing concurrency.
 
 Upstream: [pinned implementation](https://github.com/openai/symphony/tree/v0.0.3).

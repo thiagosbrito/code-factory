@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -14,6 +14,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { isDirectReviewTransition } from "../scripts/symphony/review.mjs";
 import { project, releaseEnvironment, runtime } from "../scripts/symphony/common.mjs";
 
 function command(bin, args, options = {}) {
@@ -35,6 +36,10 @@ function fixture(t) {
   seedGit("config", "user.name", "Fixture");
   seedGit("config", "user.email", "fixture@example.test");
   writeFileSync(join(seed, "README.md"), "baseline\n");
+  writeFileSync(
+    join(seed, "package.json"),
+    JSON.stringify({ scripts: { check: "fixture", "test:package": "fixture" } }),
+  );
   seedGit("add", ".");
   seedGit("commit", "-m", "Baseline");
   command("git", ["clone", "--bare", seed, remote]);
@@ -140,16 +145,76 @@ test("Codex transport limits write roots and strips tracker credentials", (t) =>
     },
     input:
       JSON.stringify({
+        id: 0,
+        method: "thread/start",
+        params: { dynamicTools: [{ name: "linear_graphql" }] },
+      }) +
+      "\n" +
+      JSON.stringify({
         id: 1,
         method: "turn/start",
         params: { sandboxPolicy: { type: "dangerFullAccess" } },
-      }) + "\n",
+      }) +
+      "\n",
   });
-  const response = JSON.parse(result);
+  const [thread, response] = result.split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(
+    thread.message.params.dynamicTools.map((tool) => tool.name),
+    ["linear_graphql", "symphony_publish_review"],
+  );
+  assert.equal(thread.message.params.dynamicTools[1].type, "function");
   assert.equal(response.hasKey, false);
   assert.equal(response.hasGitHubToken, false);
   assert.equal(response.message.params.sandboxPolicy.type, "workspaceWrite");
-  assert.deepEqual(response.message.params.sandboxPolicy.writableRoots, [workspace, f.repository]);
+  assert.deepEqual(response.message.params.sandboxPolicy.writableRoots, [workspace]);
+});
+
+test("Codex failed and interrupted turns reach Symphony as failures", (t) => {
+  const f = fixture(t);
+  const workspace = f.create("THI-FAILURE");
+  const fake = join(f.root, "fake-codex.mjs");
+  writeFileSync(
+    fake,
+    '#!/usr/bin/env node\nimport { createInterface } from "node:readline";\nconsole.log(JSON.stringify({ args: process.argv.slice(2) }));\nconst input = createInterface({input:process.stdin}); input.on("line", line => console.log(line));\n',
+  );
+  chmodSync(fake, 0o755);
+  const events = [
+    {
+      method: "turn/completed",
+      params: {
+        turn: {
+          id: "failed",
+          status: "failed",
+          error: { message: "Unsupported model", codexErrorInfo: "other" },
+        },
+      },
+    },
+    { method: "turn/completed", params: { turn: { id: "stopped", status: "interrupted" } } },
+    { method: "turn/completed", params: { turn: { id: "ok", status: "completed", error: null } } },
+    { id: 3, result: { turn: { status: "inProgress" } } },
+  ];
+  for (const model of [undefined, "fixture-model"]) {
+    const env = { ...process.env, SYMPHONY_ROOT: f.automation, SYMPHONY_CODEX_BIN: fake };
+    delete env.SYMPHONY_CODEX_MODEL;
+    if (model) env.SYMPHONY_CODEX_MODEL = model;
+    const result = command(process.execPath, [join(project, "scripts/symphony/codex-runner.mjs")], {
+      cwd: workspace,
+      env,
+      input: events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+    });
+    const [launch, ...output] = result.split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(launch.args, [
+      "app-server",
+      "-c",
+      `model=${JSON.stringify(model ?? "gpt-6-sol")}`,
+    ]);
+    assert.deepEqual(output, [
+      { ...events[0], method: "turn/failed" },
+      { ...events[1], method: "turn/cancelled" },
+      events[2],
+      events[3],
+    ]);
+  }
 });
 
 test(
@@ -171,3 +236,170 @@ test(
     );
   },
 );
+
+function reviewHarness(f, workspace, mode = "success") {
+  const harness = join(f.root, "review-harness.mjs");
+  writeFileSync(
+    harness,
+    String.raw`
+    import { readFileSync } from "node:fs";
+    import { run } from ${JSON.stringify(join(project, "scripts/symphony/common.mjs"))};
+    import { publishReview } from ${JSON.stringify(join(project, "scripts/symphony/review.mjs"))};
+    const workspace = ${JSON.stringify(workspace)};
+    const mode = ${JSON.stringify(mode)};
+    const events = [];
+    let existing = false;
+    const command = (bin, args, options) => {
+      if (bin === "pnpm") {
+        events.push(args.at(-1));
+        if (mode === "validation") throw new Error("Validation failed");
+        return "";
+      }
+      if (bin === "gh") {
+        events.push("gh:" + args[1]);
+        if (args[1] === "list") return JSON.stringify(existing ? [{number: 1, state: "OPEN"}] : []);
+        if (args[1] === "create" && mode === "github") throw new Error("GitHub permission denied");
+        if (args[1] === "create" || args[1] === "edit") {
+          if (readFileSync(args[args.indexOf("--body-file")+1], "utf8") !== "Reviewed evidence\nValidation passed\n") throw new Error("PR body changed");
+          existing = true;
+          return "https://github.com/thiagosbrito/code-factory/pull/1";
+        }
+        if (args[1] === "view") return JSON.stringify({url: "https://github.com/thiagosbrito/code-factory/pull/1",state:"OPEN",isDraft:false,headRefName:"symphony/THI-REVIEW",baseRefName:"main",headRefOid: mode === "mismatch" ? "wrong" : run("git",["rev-parse","HEAD"],{cwd:workspace}),statusCheckRollup: mode === "ci" ? [{conclusion:"FAILURE"}] : [],reviewDecision:null});
+        return "";
+      }
+      if (bin === "git" && args.join(" ") === "remote get-url origin") return "https://github.com/thiagosbrito/code-factory.git";
+      return run(bin, args, options);
+    };
+    let state = "In Progress";
+    const linear = async (query, variables) => {
+      if (query.includes("issue(id:")) return {issue: {id: "ticket-id",identifier:"THI-REVIEW",project:{id:"bd22686b-05ec-4184-9bea-4dc9a8ef23af"},state:{name:state},labels:{nodes:[{name:"symphony-ready"}]},team:{states:{nodes:[{id:"review",name:"In Review"},{id:"backlog",name:"Backlog"}]}}}};
+      if (query.includes("attachmentLinkGitHubPR")) { events.push("linear:link"); return {attachmentLinkGitHubPR:{success:mode !== "link"}}; }
+      if (query.includes("issueUpdate")) { state = variables.stateId === "review" ? "In Review" : "Backlog"; events.push("linear:"+state); return {issueUpdate:{success:true}}; }
+      throw new Error("Unexpected Linear operation");
+    };
+    const request = {ready:true,blockers:[],files:["README.md"],commitMessage:"Ticket implementation",title:"THI-REVIEW: implement ticket",body:"Reviewed evidence\nValidation passed\n"};
+    if (mode === "path") request.files = ["../outside"];
+    const result = await publishReview(workspace, request, {command,linear});
+    const second = mode === "success" ? await publishReview(workspace, request, {command,linear}) : null;
+    console.log(JSON.stringify({result,second,events,state}));
+  `,
+  );
+  return JSON.parse(
+    command(process.execPath, [harness], {
+      env: { ...process.env, SYMPHONY_ROOT: f.automation },
+    }),
+  );
+}
+
+test("host publication commits/pushes the owned branch and confirms a PR before In Review; retries reuse it", (t) => {
+  const f = fixture(t);
+  const workspace = f.create("THI-REVIEW");
+  writeFileSync(join(workspace, "README.md"), "reviewed ticket work\n");
+  const outcome = reviewHarness(f, workspace);
+  assert.equal(outcome.result.success, true);
+  assert.equal(outcome.second.success, true);
+  assert.equal(outcome.state, "In Review");
+  assert.equal(outcome.events.filter((event) => event === "gh:create").length, 1);
+  assert.equal(outcome.events.filter((event) => event === "gh:edit").length, 1);
+  assert.ok(outcome.events.indexOf("gh:view") < outcome.events.indexOf("linear:link"));
+  assert.ok(outcome.events.indexOf("linear:link") < outcome.events.indexOf("linear:In Review"));
+  assert.equal(command("git", ["-C", workspace, "status", "--porcelain"]), "");
+  assert.equal(
+    command("git", [
+      "--git-dir",
+      join(f.root, "remote.git"),
+      "rev-parse",
+      "refs/heads/symphony/THI-REVIEW",
+    ]),
+    outcome.result.commit,
+  );
+  assert.equal(f.hook("after-run", workspace).status, 0);
+  const receipt = JSON.parse(readFileSync(join(f.automation, "records/THI-REVIEW.json"), "utf8"));
+  assert.equal(receipt.state, "review-ready");
+  assert.equal(receipt.url, outcome.result.url);
+});
+
+for (const mode of ["validation", "github", "mismatch", "ci", "link", "path"]) {
+  test(`publication failure (${mode}) preserves work and never marks the ticket In Review`, (t) => {
+    const f = fixture(t);
+    const workspace = f.create("THI-REVIEW");
+    writeFileSync(join(workspace, "README.md"), "preserved work\n");
+    const outcome = reviewHarness(f, workspace, mode);
+    assert.equal(outcome.result.success, false);
+    assert.ok(!outcome.events.includes("linear:In Review"));
+    if (mode !== "path") assert.equal(outcome.state, "Backlog");
+    if (mode === "validation" || mode === "path") assert.ok(!outcome.events.includes("gh:create"));
+    assert.equal(readFileSync(join(workspace, "README.md"), "utf8"), "preserved work\n");
+    const record = JSON.parse(readFileSync(join(f.automation, "records/THI-REVIEW.json"), "utf8"));
+    assert.equal(record.state, "publication-blocked");
+    assert.ok(record.error);
+  });
+}
+
+test("publishing tool calls are handled by the host and their replies return to Codex", async (t) => {
+  const f = fixture(t);
+  const workspace = f.path("THI-WIRE");
+  mkdirSync(workspace);
+  const fake = join(f.root, "wire-codex.mjs");
+  writeFileSync(
+    fake,
+    '#!/usr/bin/env node\nimport { createInterface } from "node:readline";\nconst input = createInterface({input:process.stdin}); input.on("line", line => {const message = JSON.parse(line); if(message.method === "thread/start") console.log(JSON.stringify({id:77,method:"item/tool/call",params:{tool:"symphony_publish_review",arguments:{}}})); else if(message.id === 77) { console.log(JSON.stringify({reply:message})); process.exit(0); }});\n',
+  );
+  chmodSync(fake, 0o755);
+  const child = spawn(process.execPath, [join(project, "scripts/symphony/codex-runner.mjs")], {
+    cwd: workspace,
+    env: { ...process.env, SYMPHONY_ROOT: f.automation, SYMPHONY_CODEX_BIN: fake },
+    stdio: "pipe",
+  });
+  t.after(() => child.kill());
+  let output = "";
+  let error = "";
+  child.stdout.on("data", (chunk) => (output += chunk));
+  child.stderr.on("data", (chunk) => (error += chunk));
+  const closed = new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  child.stdin.write(JSON.stringify({ id: 1, method: "thread/start", params: {} }) + "\n");
+  const timeout = setTimeout(() => child.kill(), 10_000);
+  try {
+    assert.equal(await closed, 0, error);
+  } finally {
+    clearTimeout(timeout);
+  }
+  const messages = output
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].reply.id, 77);
+  assert.equal(messages[0].reply.result.success, false);
+  assert.equal(messages[0].reply.result.contentItems[0].type, "inputText");
+  assert.ok(!messages.some((message) => message.method === "item/tool/call"));
+});
+
+test("direct Linear review transitions are reserved for the verified host handoff", () => {
+  const query =
+    'mutation($state: String!) { change: issueUpdate(id: "ticket", input: { stateId: $state }) { success } }';
+  assert.equal(
+    isDirectReviewTransition({
+      tool: "linear_graphql",
+      arguments: { query, variables: { state: "e2dcc62e-339f-41f9-bab6-a7b726b6bea9" } },
+    }),
+    true,
+  );
+  assert.equal(
+    isDirectReviewTransition({
+      tool: "linear_graphql",
+      arguments: { query, variables: { state: "todo" } },
+    }),
+    false,
+  );
+  assert.equal(
+    isDirectReviewTransition({
+      tool: "linear_graphql",
+      arguments: { query: 'query { issue(id: "THI-6") { state { id } } }' },
+    }),
+    false,
+  );
+});
