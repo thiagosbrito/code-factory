@@ -53,117 +53,163 @@ export const implementationRoundSchema = z.strictObject({
   number: z.number().int().positive(),
   startedAt: z.iso.datetime(),
 });
-export const runRecordSchema = z
-  .strictObject({
-    schemaVersion: z.literal(2),
-    revision: z.number().int().nonnegative(),
-    snapshot: runSnapshotSchema,
-    status: z.enum(["pending", "running", "waiting", "succeeded", "failed", "canceled"]),
-    implementationRound: z.number().int().positive(),
-    rounds: z.array(implementationRoundSchema).min(1),
-    steps: z.array(stepRunSchema),
-    evidence: z.array(evidenceSchema),
-  })
-  .superRefine((record, context) => {
-    const ids = record.snapshot.loop.steps.map((step) => step.id);
-    const report = (message: string) => context.addIssue({ code: "custom", message });
-    if (record.snapshot.loop.status !== "published") report("Run loop must be published.");
-    if (record.implementationRound > record.snapshot.loop.policy.maxImplementationRounds)
-      report("Implementation round exceeds loop policy.");
+const baseRunRecordSchema = z.strictObject({
+  schemaVersion: z.literal(2),
+  revision: z.number().int().nonnegative(),
+  snapshot: runSnapshotSchema,
+  status: z.enum(["pending", "running", "waiting", "succeeded", "failed", "canceled"]),
+  implementationRound: z.number().int().positive(),
+  rounds: z.array(implementationRoundSchema).min(1),
+  steps: z.array(stepRunSchema),
+  evidence: z.array(evidenceSchema),
+});
+
+type RunRecordShape = z.infer<typeof baseRunRecordSchema>;
+type StepRun = RunRecordShape["steps"][number];
+type Attempt = StepRun["attempts"][number];
+type Receipt = RunRecordShape["evidence"][number];
+type Report = (message: string) => void;
+
+function hasDuplicates<T>(values: T[]): boolean {
+  return new Set(values).size !== values.length;
+}
+
+function validateRoundHistory(record: RunRecordShape, report: Report): void {
+  if (record.implementationRound > record.snapshot.loop.policy.maxImplementationRounds)
+    report("Implementation round exceeds loop policy.");
+  const hasConsecutiveNumbers = record.rounds.every(({ number }, index) => number === index + 1);
+  if (
+    record.rounds.length !== record.implementationRound ||
+    !hasConsecutiveNumbers ||
+    hasDuplicates(record.rounds.map(({ id }) => id))
+  )
+    report("Implementation round history must have stable consecutive identities.");
+}
+
+function validateAttempt(
+  attempt: Attempt,
+  previous: Attempt | undefined,
+  index: number,
+  stepId: string,
+  currentRound: number,
+  report: Report,
+): void {
+  if (attempt.number !== index + 1) report(`Step ${stepId} attempt numbers must be consecutive.`);
+  if (attempt.implementationRound > currentRound)
+    report(`Step ${stepId} attempt refers to a future round.`);
+  if (previous && attempt.implementationRound < previous.implementationRound)
+    report(`Step ${stepId} attempt rounds must be monotonic.`);
+  if ((attempt.status === "running") === Boolean(attempt.endedAt))
+    report(`Step ${stepId} attempt ${attempt.number} has an invalid end time.`);
+  if (Boolean(attempt.sessionId) !== Boolean(attempt.turnId))
+    report(`Step ${stepId} attempt ${attempt.number} has incomplete resume identity.`);
+}
+
+function validateStepRun(step: StepRun, record: RunRecordShape, report: Report): void {
+  if (step.attempts.length > record.snapshot.loop.policy.maxAttemptsPerStep)
+    report(`Step ${step.stepId} exceeds attempt policy.`);
+  const active = step.attempts.filter(({ status }) => status === "running");
+  if (active.length > 1 || (active.length === 1 && step.attempts.at(-1) !== active[0]))
+    report(`Step ${step.stepId} has overlapping attempts.`);
+  if ((step.status === "running") !== (active.length === 1))
+    report(`Step ${step.stepId} status disagrees with its active attempt.`);
+  step.attempts.forEach((attempt, index) =>
+    validateAttempt(
+      attempt,
+      step.attempts[index - 1],
+      index,
+      step.stepId,
+      record.implementationRound,
+      report,
+    ),
+  );
+}
+
+function validateSteps(record: RunRecordShape, report: Report): void {
+  const loopStepIds = record.snapshot.loop.steps.map(({ id }) => id);
+  const runStepIds = record.steps.map(({ stepId }) => stepId);
+  if (
+    runStepIds.length !== loopStepIds.length ||
+    runStepIds.some((id) => !loopStepIds.includes(id)) ||
+    hasDuplicates(runStepIds)
+  )
+    report("Run steps must match the loop snapshot exactly.");
+  if (hasDuplicates(record.steps.map(({ id }) => id))) report("Step run IDs must be unique.");
+  const attempts = record.steps.flatMap(({ attempts }) => attempts);
+  if (hasDuplicates(attempts.map(({ id }) => id))) report("Attempt IDs must be unique.");
+  for (const step of record.steps) validateStepRun(step, record, report);
+}
+
+function validateBindings(record: RunRecordShape, report: Report): void {
+  const { loop, bindings, projectDefault } = record.snapshot;
+  const stepIds = loop.steps.map(({ id }) => id);
+  if (Object.keys(bindings).length !== stepIds.length || stepIds.some((id) => !bindings[id]))
+    report("Resolved bindings must match loop steps exactly.");
+  for (const step of loop.steps) {
+    const expected = step.binding ?? projectDefault;
+    if (JSON.stringify(bindings[step.id]) !== JSON.stringify(expected))
+      report(`Resolved binding for ${step.id} differs from the selected loop and project default.`);
+  }
+}
+
+function validateProvenance(
+  receipt: Receipt,
+  record: RunRecordShape,
+  precedingIds: Set<string>,
+  report: Report,
+): void {
+  if (!("provenance" in receipt)) return;
+  for (const inputId of receipt.provenance.inputReceiptIds) {
+    if (!precedingIds.has(inputId))
+      report(`Evidence ${receipt.id} references a missing or later input receipt ${inputId}.`);
+  }
+  if (receipt.provenance.baselineId !== record.snapshot.baseline.id)
+    report("Evidence baseline does not match the run snapshot.");
+  if (
+    receipt.freshness.state === "current" &&
+    receipt.freshness.checkedAgainstCandidateId !== receipt.provenance.candidateId
+  )
+    report("Current evidence must be checked against its candidate.");
+}
+
+function validateEvidence(record: RunRecordShape, report: Report): void {
+  const evidenceIds = new Set<string>();
+  const eventSequences = new Set<number>();
+  const stepIds = new Set(record.snapshot.loop.steps.map(({ id }) => id));
+  const attemptOwners = new Map(
+    record.steps.flatMap((step) =>
+      step.attempts.map((attempt) => [attempt.id, step.stepId] as const),
+    ),
+  );
+  for (const receipt of record.evidence) {
+    if (evidenceIds.has(receipt.id)) report(`Duplicate evidence ID ${receipt.id}.`);
+    if (receipt.kind === "event" && eventSequences.has(receipt.sequence))
+      report(`Duplicate event sequence ${receipt.sequence}.`);
+    if (receipt.kind === "event") eventSequences.add(receipt.sequence);
+    if (receipt.runId !== record.snapshot.id) report("Evidence references another run.");
+    if (receipt.stepId && !stepIds.has(receipt.stepId))
+      report("Evidence references a missing step.");
+    if (receipt.attemptId && !attemptOwners.has(receipt.attemptId))
+      report("Evidence references a missing attempt.");
     if (
-      record.rounds.length !== record.implementationRound ||
-      record.rounds.some((round, index) => round.number !== index + 1) ||
-      new Set(record.rounds.map((round) => round.id)).size !== record.rounds.length
+      receipt.attemptId &&
+      receipt.stepId &&
+      attemptOwners.get(receipt.attemptId) !== receipt.stepId
     )
-      report("Implementation round history must have stable consecutive identities.");
-    if (
-      record.steps.length !== ids.length ||
-      record.steps.some((step) => !ids.includes(step.stepId)) ||
-      new Set(record.steps.map((step) => step.stepId)).size !== ids.length
-    )
-      report("Run steps must match the loop snapshot exactly.");
-    if (new Set(record.steps.map((step) => step.id)).size !== record.steps.length)
-      report("Step run IDs must be unique.");
-    const attempts = record.steps.flatMap((step) => step.attempts);
-    if (new Set(attempts.map((attempt) => attempt.id)).size !== attempts.length)
-      report("Attempt IDs must be unique.");
-    for (const step of record.steps) {
-      if (step.attempts.length > record.snapshot.loop.policy.maxAttemptsPerStep)
-        report(`Step ${step.stepId} exceeds attempt policy.`);
-      const active = step.attempts.filter((attempt) => attempt.status === "running");
-      if (active.length > 1 || (active.length === 1 && step.attempts.at(-1) !== active[0]))
-        report(`Step ${step.stepId} has overlapping attempts.`);
-      if ((step.status === "running") !== (active.length === 1))
-        report(`Step ${step.stepId} status disagrees with its active attempt.`);
-      step.attempts.forEach((attempt, index) => {
-        if (attempt.number !== index + 1)
-          report(`Step ${step.stepId} attempt numbers must be consecutive.`);
-        if (attempt.implementationRound > record.implementationRound)
-          report(`Step ${step.stepId} attempt refers to a future round.`);
-        if (
-          index > 0 &&
-          attempt.implementationRound < step.attempts[index - 1]!.implementationRound
-        )
-          report(`Step ${step.stepId} attempt rounds must be monotonic.`);
-        if ((attempt.status === "running") === Boolean(attempt.endedAt))
-          report(`Step ${step.stepId} attempt ${attempt.number} has an invalid end time.`);
-        if (Boolean(attempt.sessionId) !== Boolean(attempt.turnId))
-          report(`Step ${step.stepId} attempt ${attempt.number} has incomplete resume identity.`);
-      });
-    }
-    if (
-      Object.keys(record.snapshot.bindings).length !== ids.length ||
-      ids.some((id) => !record.snapshot.bindings[id])
-    )
-      report("Resolved bindings must match loop steps exactly.");
-    for (const step of record.snapshot.loop.steps) {
-      const expected = step.binding ?? record.snapshot.projectDefault;
-      if (JSON.stringify(record.snapshot.bindings[step.id]) !== JSON.stringify(expected))
-        report(
-          `Resolved binding for ${step.id} differs from the selected loop and project default.`,
-        );
-    }
-    const evidenceIds = new Set<string>();
-    const eventSequences = new Set<number>();
-    for (const receipt of record.evidence) {
-      if (evidenceIds.has(receipt.id)) report(`Duplicate evidence ID ${receipt.id}.`);
-      if (receipt.kind === "event") {
-        if (eventSequences.has(receipt.sequence))
-          report(`Duplicate event sequence ${receipt.sequence}.`);
-        eventSequences.add(receipt.sequence);
-      }
-      if (receipt.runId !== record.snapshot.id) report("Evidence references another run.");
-      if (receipt.stepId && !ids.includes(receipt.stepId))
-        report("Evidence references a missing step.");
-      if (receipt.attemptId && !attempts.some((attempt) => attempt.id === receipt.attemptId))
-        report("Evidence references a missing attempt.");
-      if (
-        receipt.attemptId &&
-        receipt.stepId &&
-        !record.steps.some(
-          (step) =>
-            step.stepId === receipt.stepId &&
-            step.attempts.some((attempt) => attempt.id === receipt.attemptId),
-        )
-      )
-        report("Evidence attempt does not belong to its step.");
-      if ("provenance" in receipt) {
-        for (const inputId of receipt.provenance.inputReceiptIds)
-          if (!evidenceIds.has(inputId))
-            report(
-              `Evidence ${receipt.id} references a missing or later input receipt ${inputId}.`,
-            );
-        if (receipt.provenance.baselineId !== record.snapshot.baseline.id)
-          report("Evidence baseline does not match the run snapshot.");
-        if (
-          receipt.freshness.state === "current" &&
-          receipt.freshness.checkedAgainstCandidateId !== receipt.provenance.candidateId
-        )
-          report("Current evidence must be checked against its candidate.");
-      }
-      evidenceIds.add(receipt.id);
-    }
-  });
+      report("Evidence attempt does not belong to its step.");
+    validateProvenance(receipt, record, evidenceIds, report);
+    evidenceIds.add(receipt.id);
+  }
+}
+
+export const runRecordSchema = baseRunRecordSchema.superRefine((record, context) => {
+  const report: Report = (message) => context.addIssue({ code: "custom", message });
+  if (record.snapshot.loop.status !== "published") report("Run loop must be published.");
+  validateRoundHistory(record, report);
+  validateSteps(record, report);
+  validateBindings(record, report);
+  validateEvidence(record, report);
+});
 export type RunRecord = z.infer<typeof runRecordSchema>;
 
 /** Snapshot all inputs once; callers supply the actual protected baseline when available. */
