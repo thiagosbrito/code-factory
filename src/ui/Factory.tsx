@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
+import type { LoopDefinition } from "../domain/loop.js";
+import type { RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { FactoryResponse, ProjectResponse } from "./project-api";
 import { FactoryEmptyState } from "./FactoryEmptyState";
 import { FactorySidebar, screenLabels, type Screen } from "./FactorySidebar";
 import { bindingError, connectionViewModel } from "./connection";
+import { api } from "./project-api";
+import { NewRunDialog } from "./NewRunDialog";
 
 export function Factory({
   project,
@@ -29,6 +33,51 @@ export function Factory({
   onEditSetup: () => void;
 }) {
   const [notice, setNotice] = useState("");
+  const [newRunOpen, setNewRunOpen] = useState(false);
+  const [publishedLoops, setPublishedLoops] = useState<LoopDefinition[]>([]);
+  const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [trackerConfigured, setTrackerConfigured] = useState(false);
+  const [selectedRunId, setSelectedRunId] = useState(
+    () => location.hash.match(/^#runs\/([0-9a-f-]{36})$/i)?.[1] ?? "",
+  );
+  const selectedRun = runs.find((run) => run.snapshot.id === selectedRunId);
+  useEffect(() => {
+    if (demo) return;
+    void Promise.all([
+      api<{ loops: LoopDefinition[] }>("/api/loops/published"),
+      api<{ runs: RunRecord[] }>("/api/runs"),
+      api<{ configured: boolean }>("/api/tracker"),
+    ])
+      .then(([loops, history, tracker]) => {
+        setPublishedLoops(loops.loops);
+        setRuns(history.runs);
+        setTrackerConfigured(tracker.configured);
+      })
+      .catch((error: unknown) =>
+        setNotice(error instanceof Error ? error.message : "Could not load run history."),
+      );
+  }, [demo]);
+  const openRun = (id: string) => {
+    setSelectedRunId(id);
+    window.history.pushState(null, "", `#runs/${id}`);
+  };
+  const onStarted = (id: string, run?: RunRecord) => {
+    openRun(id);
+    if (run) {
+      setRuns((previous) => [run, ...previous.filter((item) => item.snapshot.id !== id)]);
+      return;
+    }
+    void api<{ run: RunRecord }>(`/api/runs/${id}`)
+      .then(({ run }) =>
+        setRuns((previous) => [run, ...previous.filter((item) => item.snapshot.id !== id)]),
+      )
+      .catch((error: unknown) =>
+        setNotice(error instanceof Error ? error.message : "Could not load run."),
+      );
+  };
+  const canStart = Boolean(
+    project.project?.defaultBinding && !bindingError(project.project.defaultBinding, agents),
+  );
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     headingRef.current?.focus();
@@ -50,7 +99,7 @@ export function Factory({
           setScreen(next);
           setNotice("");
         }}
-        runs={demo ? 2 : counts.runs}
+        runs={demo ? 2 : runs.length}
         demo={demo}
         onExitDemo={onExitDemo}
       />
@@ -62,16 +111,19 @@ export function Factory({
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {screen === "runs"
-                ? "Your local factory is configured. Runs appear after a loop is created."
+                ? "Launch and review repeatable coding work."
                 : screen === "loops"
                   ? "Reusable local workflows for future runs."
                   : "Project and connection settings"}
             </p>
           </div>
           {!demo && (
-            <Button variant="outline" onClick={onDemo}>
-              Open demo factory
-            </Button>
+            <div className="flex gap-2">
+              {screen === "runs" && <Button onClick={() => setNewRunOpen(true)}>New run</Button>}
+              <Button variant="outline" onClick={onDemo}>
+                Open demo factory
+              </Button>
+            </div>
           )}
         </div>
         {demo && (
@@ -128,6 +180,92 @@ export function Factory({
               Explore the layout without creating project history.
             </p>
           </Card>
+        ) : screen === "runs" && selectedRun ? (
+          <Card className="mt-7 p-6">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSelectedRunId("");
+                window.history.pushState(null, "", "#runs");
+              }}
+            >
+              ← All runs
+            </Button>
+            <h2 className="mt-5 text-xl font-semibold">
+              {selectedRun.snapshot.task.ticket?.title ??
+                selectedRun.snapshot.task.description.slice(0, 80)}
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Run {selectedRun.snapshot.id} · {selectedRun.status}
+            </p>
+            <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="font-medium">Project</dt>
+                <dd>{project.project?.name}</dd>
+              </div>
+              <div>
+                <dt className="font-medium">Loop</dt>
+                <dd>
+                  {selectedRun.snapshot.loop.name} · v{selectedRun.snapshot.loop.version}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium">Git baseline</dt>
+                <dd className="break-all font-mono text-xs">
+                  {selectedRun.snapshot.baseline.revision}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium">Isolated workspace</dt>
+                <dd className="break-all text-xs">{selectedRun.snapshot.baseline.workspace}</dd>
+              </div>
+            </dl>
+            {selectedRun.snapshot.task.description && (
+              <section className="mt-6">
+                <h3 className="font-medium">Description</h3>
+                <p className="mt-1 whitespace-pre-wrap text-sm">
+                  {selectedRun.snapshot.task.description}
+                </p>
+              </section>
+            )}
+            {selectedRun.snapshot.task.ticket && (
+              <section className="mt-6">
+                <h3 className="font-medium">
+                  Retrieved ticket · {selectedRun.snapshot.task.ticket.id}
+                </h3>
+                <p className="mt-1 whitespace-pre-wrap text-sm">
+                  {selectedRun.snapshot.task.ticket.summary}
+                </p>
+                <ul className="mt-2 list-inside list-disc text-sm">
+                  {selectedRun.snapshot.task.ticket.attachments.map((attachment) => (
+                    <li key={attachment.url}>{attachment.title}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <p className="mt-6 text-xs text-muted-foreground">
+              Pending execution. The scheduler starts in a later implementation slice.
+            </p>
+          </Card>
+        ) : screen === "runs" && runs.length > 0 ? (
+          <div className="mt-7 space-y-2">
+            {runs.map((run) => (
+              <button
+                key={run.snapshot.id}
+                onClick={() => openRun(run.snapshot.id)}
+                className="block w-full rounded-lg border bg-white p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <strong>
+                  {run.snapshot.task.ticket?.title ?? run.snapshot.task.description.slice(0, 80)}
+                </strong>
+                <span className="ml-3 text-xs text-muted-foreground">{run.status}</span>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {run.snapshot.loop.name} v{run.snapshot.loop.version} · {run.snapshot.id}
+                </p>
+              </button>
+            ))}
+          </div>
         ) : counts[screen] === 0 ? (
           <FactoryEmptyState kind={screen} onCreate={showCreate} onTemplate={showTemplate} />
         ) : (
@@ -139,6 +277,19 @@ export function Factory({
               Saved items will be listed when the {screen} view is connected.
             </p>
           </Card>
+        )}
+        {!demo && (
+          <NewRunDialog
+            open={newRunOpen}
+            onOpenChange={setNewRunOpen}
+            projectName={project.project?.name ?? "Project"}
+            loops={publishedLoops}
+            trackerConfigured={trackerConfigured}
+            canStart={canStart}
+            agents={agents}
+            defaultBinding={project.project?.defaultBinding ?? null}
+            onStarted={onStarted}
+          />
         )}
       </main>
     </div>

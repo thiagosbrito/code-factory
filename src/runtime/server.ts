@@ -2,7 +2,11 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, realpath, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { extname, join, resolve, sep } from "node:path";
+import { ZodError } from "zod";
 import { ConnectionRegistry, connectionRequestSchema } from "./connections.js";
+import { startRun, startRunInputSchema } from "./intake.js";
+import { listPublishedLoops, listRuns, readRun } from "./storage.js";
+import { linearTracker, ticketIdSchema, type TicketTracker } from "./tracker.js";
 import {
   ProjectError,
   projectRevision,
@@ -30,7 +34,7 @@ async function readBody(request: import("node:http").IncomingMessage): Promise<u
   let body = "";
   for await (const chunk of request) {
     body += String(chunk);
-    if (body.length > 8192) throw new ProjectError("Request body is too large.", 413);
+    if (body.length > 65536) throw new ProjectError("Request body is too large.", 413);
   }
   try {
     return JSON.parse(body) as unknown;
@@ -105,9 +109,15 @@ export async function startLocalServer(options: {
   uiDirectory?: string;
   devOrigin?: string;
   connections?: ConnectionRegistry;
+  tracker?: TicketTracker;
 }) {
   const projectDirectory = await validateProjectDirectory(options.projectDirectory);
   const connections = options.connections ?? new ConnectionRegistry(projectDirectory);
+  const tracker =
+    options.tracker ??
+    (process.env.CODE_FACTORY_LINEAR_API_KEY
+      ? linearTracker(process.env.CODE_FACTORY_LINEAR_API_KEY)
+      : undefined);
   const server = createServer((request, response) => {
     void (async () => {
       const address = server.address();
@@ -141,6 +151,27 @@ export async function startLocalServer(options: {
           });
         return json(response, 200, { connection: await connections.connect(parsed.data) });
       }
+      if (pathname === "/api/tickets/retrieve" && request.method === "POST") {
+        const body = await readBody(request);
+        const parsed = ticketIdSchema.safeParse(
+          body && typeof body === "object" && "id" in body ? body.id : undefined,
+        );
+        if (!parsed.success) return json(response, 400, { error: parsed.error.issues[0]?.message });
+        if (!tracker)
+          return json(response, 422, { error: "Configure a tracker before retrieving tickets." });
+        return json(response, 200, { ticket: await tracker.retrieve(parsed.data) });
+      }
+      if (pathname === "/api/runs" && request.method === "POST") {
+        const parsed = startRunInputSchema.safeParse(await readBody(request));
+        if (!parsed.success) return json(response, 400, { error: parsed.error.issues[0]?.message });
+        const run = await startRun(
+          projectDirectory,
+          parsed.data,
+          await connections.list(),
+          tracker,
+        );
+        return json(response, 201, { runId: run.snapshot.id, run });
+      }
       if (request.method !== "GET")
         return json(response, 405, { error: "Unsupported request method" });
       if (pathname === "/api/health")
@@ -162,13 +193,37 @@ export async function startLocalServer(options: {
         });
       if (pathname === "/api/agents")
         return json(response, 200, { agents: await connections.list() });
+      if (pathname === "/api/loops/published")
+        return json(response, 200, { loops: await listPublishedLoops(projectDirectory) });
+      if (pathname === "/api/runs")
+        return json(response, 200, { runs: await listRuns(projectDirectory) });
+      if (pathname === "/api/tracker")
+        return json(response, 200, {
+          configured: Boolean(tracker),
+          provider: tracker ? "linear" : null,
+        });
+      if (pathname.startsWith("/api/runs/")) {
+        const id = pathname.slice("/api/runs/".length);
+        if (!/^[0-9a-f-]{36}$/i.test(id)) return json(response, 400, { error: "Invalid run ID." });
+        const run = await readRun(projectDirectory, id);
+        return run
+          ? json(response, 200, { run })
+          : json(response, 404, { error: "Run not found." });
+      }
       if (pathname.startsWith("/api/")) return json(response, 404, { error: "Unknown endpoint" });
       return serveAsset(response, pathname, options.uiDirectory ?? defaultUiDirectory);
     })().catch((error: unknown) => {
       if (!response.headersSent)
-        json(response, error instanceof ProjectError ? error.status : 500, {
-          error: error instanceof ProjectError ? error.message : "Runtime request failed",
-        });
+        json(
+          response,
+          error instanceof ProjectError ? error.status : error instanceof ZodError ? 400 : 500,
+          {
+            error:
+              error instanceof ProjectError || error instanceof ZodError
+                ? error.message
+                : "Runtime request failed",
+          },
+        );
       else response.end();
       console.error(error instanceof Error ? error.message : "Unknown runtime error");
     });
