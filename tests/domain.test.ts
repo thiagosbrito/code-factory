@@ -114,6 +114,7 @@ describe("mock adapter", () => {
     stepId: "quality",
     attempt: 1,
     instruction: "Review changes",
+    projectDirectory: "/tmp/mock-project",
     binding: { provider: "mock" as const, model: "agent-default" },
   };
   it("emits ordered public events and declares unavailable controls honestly", async () => {

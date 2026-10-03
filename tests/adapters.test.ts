@@ -1,0 +1,230 @@
+import { describe, expect, it } from "vitest";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CodexAdapter, createCodexAdapter, type CodexRpc } from "../src/adapters/codex.js";
+import { mockAdapter } from "../src/adapters/mock.js";
+import type {
+  AgentAdapter,
+  AdapterEvent,
+  StepExecutionInput,
+  StepSession,
+} from "../src/adapters/contract.js";
+
+type Notification = { method?: string; params?: Record<string, unknown> };
+class FixtureRpc implements CodexRpc {
+  constructor(
+    private readonly failFirst = false,
+    private readonly recoveryActive = false,
+  ) {}
+  calls: { method: string; params: Record<string, unknown> }[] = [];
+  private listeners = new Set<(message: Notification) => void>();
+  private nextThread = 0;
+  notify(method: string, params: Record<string, unknown> = {}) {
+    this.calls.push({ method, params });
+  }
+  subscribe(listener: (message: Notification) => void) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  emit(method: string, params: Record<string, unknown>) {
+    for (const listener of this.listeners) listener({ method, params });
+  }
+  async request(method: string, params: Record<string, unknown>): Promise<unknown> {
+    this.calls.push({ method, params });
+    if (method === "initialize") return { userAgent: "fixture" };
+    if (method === "account/read")
+      return { account: { type: "chatgpt" }, requiresOpenaiAuth: true };
+    if (method === "model/list")
+      return {
+        data: [
+          { model: "model-a", displayName: "Model A", hidden: false },
+          { model: "hidden", displayName: "Hidden", hidden: true },
+        ],
+      };
+    if (method === "thread/start") return { thread: { id: `thread-${++this.nextThread}` } };
+    if (method === "turn/start") {
+      const threadId = String(params.threadId);
+      const turnId = `turn-${threadId}`;
+      queueMicrotask(() => {
+        this.emit("item/agentMessage/delta", { threadId, turnId, delta: "progress" });
+        this.emit("turn/completed", {
+          threadId,
+          turn: {
+            id: turnId,
+            status: this.failFirst && threadId === "thread-1" ? "failed" : "completed",
+          },
+        });
+      });
+      return { turn: { id: turnId } };
+    }
+    if (method === "thread/resume") return { thread: { id: params.threadId } };
+    if (method === "thread/read") {
+      if (this.recoveryActive)
+        queueMicrotask(() => {
+          this.emit("item/agentMessage/delta", {
+            threadId: "thread-1",
+            turnId: "turn-thread-1",
+            delta: "resumed",
+          });
+          this.emit("turn/completed", {
+            threadId: "thread-1",
+            turn: { id: "turn-thread-1", status: "completed" },
+          });
+        });
+      return {
+        thread: {
+          id: params.threadId,
+          turns: [
+            {
+              id: "turn-thread-1",
+              status: this.recoveryActive ? "inProgress" : "completed",
+              items: [{ type: "agentMessage", text: "saved" }],
+            },
+          ],
+        },
+      };
+    }
+    if (method === "turn/steer") return {};
+    throw new Error(`Unexpected method ${method}`);
+  }
+}
+
+const input: StepExecutionInput = {
+  runId: "run-1",
+  stepId: "selected-step",
+  attempt: 1,
+  instruction: "Fixture only",
+  projectDirectory: "/tmp/disposable-project",
+  binding: { provider: "codex", model: "model-a" },
+};
+async function collect(adapter: AgentAdapter, step: StepExecutionInput): Promise<AdapterEvent[]> {
+  const result: AdapterEvent[] = [];
+  for await (const event of adapter.execute(step, new AbortController().signal)) result.push(event);
+  return result;
+}
+
+describe("portable adapter conformance", () => {
+  it("rejects a spoofed executable before opening the app-server", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "factory-executable-"));
+    try {
+      const executable = join(directory, "codex");
+      await writeFile(executable, "#!/bin/sh\necho other-cli 1.2.3\n");
+      await chmod(executable, 0o755);
+      await expect(createCodexAdapter(executable)).rejects.toThrow(/not a supported Codex CLI/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it("inspects a provider without treating catalog entries as entitlement", async () => {
+    const rpc = new FixtureRpc();
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    expect(await adapter.inspect(input.projectDirectory)).toMatchObject({
+      authentication: "authenticated",
+      authenticationMechanism: "Codex-owned ChatGPT login",
+      protocol: "Codex app-server JSON-RPC over stdio",
+      models: [{ id: "model-a", displayName: "Model A" }],
+    });
+    expect(rpc.calls.map((call) => call.method)).toEqual([
+      "initialize",
+      "initialized",
+      "account/read",
+      "model/list",
+    ]);
+    expect(await mockAdapter.inspect(input.projectDirectory)).toMatchObject({
+      authentication: "not-required",
+      capabilities: { steering: "unsupported", resume: "unsupported" },
+    });
+  });
+
+  it("streams one assigned step with stable factory and native identities", async () => {
+    const rpc = new FixtureRpc();
+    const events = await collect(new CodexAdapter(rpc, "/bin/codex", "0.160.0"), input);
+    expect(events.map((event) => event.type)).toEqual(["started", "message", "completed"]);
+    expect(
+      events.every(
+        (event) =>
+          event.runId === "run-1" &&
+          event.stepId === "selected-step" &&
+          event.attempt === 1 &&
+          event.sessionId === "thread-1" &&
+          event.turnId === "turn-thread-1",
+      ),
+    ).toBe(true);
+    expect(rpc.calls.find((call) => call.method === "thread/start")?.params).toMatchObject({
+      cwd: input.projectDirectory,
+      model: "model-a",
+    });
+    expect(rpc.calls.filter((call) => call.method === "turn/start")).toHaveLength(1);
+  });
+
+  it("retries only the selected failed step as a distinct attempt and session", async () => {
+    const rpc = new FixtureRpc(true);
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    const first = await collect(adapter, input);
+    const retry = await collect(adapter, { ...input, attempt: 2 });
+    expect(first[0]?.sessionId).toBe("thread-1");
+    expect(first.at(-1)).toMatchObject({ type: "completed", outcome: "failed" });
+    expect(retry[0]).toMatchObject({ stepId: "selected-step", attempt: 2, sessionId: "thread-2" });
+    expect(rpc.calls.filter((call) => call.method === "thread/start")).toHaveLength(2);
+  });
+
+  it("recovers a completed turn and steers the matching in-flight turn without interruption", async () => {
+    const rpc = new FixtureRpc();
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    const session: StepSession = {
+      runId: "run-1",
+      stepId: "selected-step",
+      attempt: 1,
+      sessionId: "thread-1",
+      turnId: "turn-thread-1",
+    };
+    const recovered = [];
+    for await (const event of adapter.attach(session, new AbortController().signal))
+      recovered.push(event);
+    expect(recovered).toEqual([
+      { type: "completed", outcome: "succeeded", output: "saved", ...session },
+    ]);
+    expect(await adapter.steer(session, "Focus on the selected check")).toBe("supported");
+    expect(rpc.calls.find((call) => call.method === "turn/steer")?.params).toMatchObject({
+      threadId: "thread-1",
+      expectedTurnId: "turn-thread-1",
+    });
+    expect(rpc.calls.some((call) => call.method === "turn/interrupt")).toBe(false);
+  });
+
+  it("reattaches to an in-progress turn and streams its remaining native events", async () => {
+    const rpc = new FixtureRpc(false, true);
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    const session: StepSession = {
+      runId: "run-1",
+      stepId: "selected-step",
+      attempt: 1,
+      sessionId: "thread-1",
+      turnId: "turn-thread-1",
+    };
+    const events = [];
+    for await (const event of adapter.attach(session, new AbortController().signal))
+      events.push(event);
+    expect(events.map((event) => event.type)).toEqual(["message", "completed"]);
+    expect(events.at(-1)).toMatchObject({ output: "resumed", ...session });
+  });
+
+  it("keeps the mock on the same event contract and reports unsupported controls", async () => {
+    const events = await collect(mockAdapter, {
+      ...input,
+      binding: { provider: "mock", model: "fixture" },
+    });
+    expect(events.map((event) => event.type)).toEqual(["started", "message", "completed"]);
+    expect(events.every((event) => Boolean(event.sessionId && event.turnId))).toBe(true);
+    expect(await mockAdapter.steer(events[0] as StepSession, "guide")).toBe("unsupported");
+    await expect(async () => {
+      for await (const _event of mockAdapter.attach(
+        events[0] as StepSession,
+        new AbortController().signal,
+      )) {
+        /* never */
+      }
+    }).rejects.toThrow(/unsupported/);
+  });
+});
