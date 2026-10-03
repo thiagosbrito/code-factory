@@ -26,7 +26,11 @@ Codex CLI 0.160.0 is the first candidate. Its locally generated app-server proto
 
 Kiro CLI 2.27.0 remains a second-provider candidate. Its documented ACP interface includes initialize, session creation/load, prompt, cancel, model selection, and streaming notifications. The documented ACP method list does not establish cooperative in-flight guidance, so Kiro steering remains unknown pending a separate probe. See [Kiro ACP](https://kiro.dev/docs/cli/acp/) and [Codex app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server).
 
-The sandboxed disposable-project probe of `codex app-server --listen stdio://` exited with `Operation not permitted` before `initialize` returned. Consequently the current machine has no live turn, streaming, retry, recovery, or steering receipt. Connection capabilities remain `unknown` in the adapter until those behaviors are exercised through an explicitly authorized real task. Before release, run the same portable contract against a disposable project in an environment where app-server can start, with explicit user launch intent; capture the started, delta, completed, failed retry, resumed, and steering acknowledgments and verify the project diff. The deterministic fixture proves translation and control routing, not native execution.
+A host-authorized disposable-project proof on 2026-10-03 completed with Codex CLI 0.160.0 and `gpt-6-sol`. The [native receipt](evidence/thi6-native-2026-10-03.json) records authenticated catalog inspection, actual text-file edits, started/message/completed events with stable identities, a `turn/steer` acknowledgment plus the requested file, completed-turn recovery after a new app-server connection, and a selected retry on a distinct thread after an intentionally unavailable model produced a native error. No `turn/interrupt` was sent. Factory scheduling remains the sole graph owner.
+
+The proof exposed two integration gaps: incoming server requests were discarded as responses, and the turn lacked explicit writable roots. The adapter now supplies its assigned project root with native tool network access disabled, declines command approvals, and rejects unsupported server requests. A host may supply an explicit file-change decision callback; the proof accepts only patches to its three allowlisted disposable files. Production UI approval handling is still a separate integration task. Connection capability declarations remain `unknown` until connection-specific evidence is verified; this one host receipt is not a blanket claim for every executable, account, model, or machine.
+
+Run `pnpm prove:codex` only with explicit native launch intent. It makes bounded real model calls, uses Codex-owned authentication, preserves the disposable project and receipt for inspection, and exits nonzero if any required check fails. The initial pre-initialize sandbox failure is historical; it no longer describes the current host after the runtime permissions were granted. Fixture tests remain separate from the native receipt. [Supported app-server lifecycle and approvals](https://learn.chatgpt.com/docs/app-server).
 
 ## Connection truthfulness
 
@@ -42,7 +46,7 @@ Keep local React state near its components. Use reducers for complex editor tran
 
 ## Next slices
 
-1. THI-6: finish the live disposable-project proof after an explicit launch and app-server access are available.
+1. Consume the THI-6 native receipt when integrating connection verification, scoped approval UI, and the production runner; rerun the proof for a different native environment.
 2. Extend portable loop and event schemas for scheduling, evidence, attempt identity, bounded repair groups, and persistence.
 3. Implement the durable description-only mock vertical slice, then use the same contracts for the native adapter.
 4. Integrate approved Figma screens with shadcn components, onboarding, empty states, and explicit optional templates.

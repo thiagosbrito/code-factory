@@ -36,7 +36,8 @@
     "symphony:dashboard": "node scripts/symphony/usage-dashboard.mjs",
     "symphony:start": "node scripts/symphony/control.mjs start",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build",
+    "prove:codex": "pnpm build && node scripts/prove-codex.mjs"
   },
   "dependencies": {
     "zod": "4.6.5"

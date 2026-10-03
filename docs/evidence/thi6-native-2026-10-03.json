@@ -1,0 +1,159 @@
+{
+  "version": "codex-cli 0.160.0",
+  "model": "gpt-6-sol",
+  "startedAt": "2026-10-03T14:07:20.722Z",
+  "methods": [
+    {
+      "method": "initialize",
+      "ok": true
+    },
+    {
+      "method": "account/read",
+      "ok": true
+    },
+    {
+      "method": "model/list",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    },
+    {
+      "method": "turn/steer",
+      "ok": true,
+      "acceptedTurnId": "01a10217-43aa-7c11-abee-70f0742aac54"
+    },
+    {
+      "method": "initialize",
+      "ok": true
+    },
+    {
+      "method": "thread/resume",
+      "ok": true
+    },
+    {
+      "method": "thread/read",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    }
+  ],
+  "checks": {
+    "authentication": true,
+    "steeringAcknowledged": true,
+    "started": true,
+    "streaming": true,
+    "completed": true,
+    "stableIdentity": true,
+    "editedProject": true,
+    "steeringApplied": true,
+    "recoveryAfterReconnect": true,
+    "controlledFailure": true,
+    "selectedRetry": true,
+    "noInterrupt": true
+  },
+  "failures": [],
+  "connection": {
+    "provider": "codex",
+    "version": "0.160.0",
+    "authentication": "authenticated",
+    "authenticationMechanism": "Codex-owned ChatGPT login",
+    "modelCount": 8
+  },
+  "approvals": [
+    {
+      "itemId": "exec-91aa41a9-5d9d-4dd1-aa26-52e335ca3b4c",
+      "paths": ["proof.txt"],
+      "decision": "accept"
+    },
+    {
+      "itemId": "exec-420b99f1-8f92-43aa-8233-ae11d64cbfa3",
+      "paths": ["guidance.txt"],
+      "decision": "accept"
+    },
+    {
+      "itemId": "exec-d71aaf2d-1ca3-4110-83b9-86469b1fb73a",
+      "paths": ["retry.txt"],
+      "decision": "accept"
+    }
+  ],
+  "completedOutput": "I\u2019ll create `proof.txt` in this project with the exact requested text.Created `proof.txt` containing `native-proof` and `guidance.txt` containing `steer-acknowledged` in the project.",
+  "recoveredEvents": [
+    {
+      "type": "completed",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a10217-4322-7d80-8330-f924772713da",
+      "turnId": "01a10217-43aa-7c11-abee-70f0742aac54",
+      "outcome": "succeeded",
+      "output": "I\u2019ll create `proof.txt` in this project with the exact requested text.\nCreated `proof.txt` containing `native-proof` and `guidance.txt` containing `steer-acknowledged` in the project."
+    }
+  ],
+  "controlledFailure": "Codex stream error",
+  "failedSession": {
+    "sessionId": "01a10217-687a-7f53-87bb-ff4249c5f0e2",
+    "turnId": "01a10217-68ed-73a3-acc3-647d5a81e3f0"
+  },
+  "retrySession": {
+    "runId": "thi6-native-proof",
+    "stepId": "selected-retry",
+    "attempt": 2,
+    "sessionId": "01a10217-6fff-7220-9695-26e0037114f6",
+    "turnId": "01a10217-708f-7a23-a9e3-1c1351e0ae52",
+    "outcome": "succeeded"
+  },
+  "projectFiles": [
+    {
+      "path": "proof.txt",
+      "content": "native-proof\n"
+    },
+    {
+      "path": "guidance.txt",
+      "content": "steer-acknowledged\n"
+    },
+    {
+      "path": "retry.txt",
+      "content": "retry-succeeded\n"
+    }
+  ],
+  "finishedAt": "2026-10-03T14:07:42.626Z",
+  "executionEvents": [
+    {
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a10217-4322-7d80-8330-f924772713da",
+      "turnId": "01a10217-43aa-7c11-abee-70f0742aac54",
+      "eventCounts": {
+        "started": 1,
+        "message": 45,
+        "completed": 1
+      },
+      "outcome": "succeeded"
+    }
+  ],
+  "schemaVersion": 1,
+  "adapterSourceSha256": "0a3d5986ed72716fcb36d9344ac290638255f40884ef9868657944c26a323386",
+  "probeSource": "scripts/prove-codex.mjs",
+  "scope": "Three allowlisted text files in a disposable project; approval callback rejects commands and other files; network disabled for native tools. Credentials provider-owned."
+}
