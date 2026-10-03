@@ -37,7 +37,7 @@ async function findExecutable(
 export async function discoverAgents(
   searchPath = process.env.PATH ?? "",
 ): Promise<AgentConnection[]> {
-  return Promise.all(
+  const discovered: AgentConnection[] = await Promise.all(
     executableNames.map(async ({ provider, names }) => {
       const executable = await findExecutable(names, searchPath);
       return {
@@ -46,7 +46,22 @@ export async function discoverAgents(
         installation: executable ? "detected" : "missing",
         authentication: "unknown",
         capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
-      };
+      } satisfies AgentConnection;
     }),
   );
+  return [
+    ...discovered,
+    {
+      provider: "custom" as const,
+      executable: null,
+      installation: "missing" as const,
+      authentication: "unknown" as const,
+      capabilities: {
+        streaming: "unknown" as const,
+        steering: "unknown" as const,
+        resume: "unknown" as const,
+      },
+      reason: "Choose an executable and supported protocol, then verify the handshake.",
+    },
+  ];
 }

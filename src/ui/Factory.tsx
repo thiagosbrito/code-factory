@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { FactoryResponse, ProjectResponse } from "./project-api";
 import { FactoryEmptyState } from "./FactoryEmptyState";
 import { FactorySidebar, screenLabels, type Screen } from "./FactorySidebar";
+import { bindingError, connectionViewModel } from "./connection";
 
 export function Factory({
   project,
+  agents,
   counts,
   screen,
   setScreen,
@@ -16,6 +19,7 @@ export function Factory({
   onEditSetup,
 }: {
   project: ProjectResponse;
+  agents: AgentConnection[];
   counts: FactoryResponse;
   screen: Screen;
   setScreen: (screen: Screen) => void;
@@ -86,6 +90,31 @@ export function Factory({
             <p className="mt-4 text-sm text-muted-foreground">
               Agent execution requires a verified connection. Project setup does not start a run.
             </p>
+            <h3 className="mt-6 font-semibold">Coding agents and default model</h3>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {agents
+                .filter((item) => item.provider !== "mock")
+                .map((item) => {
+                  const view = connectionViewModel(item);
+                  return (
+                    <div key={item.provider} className="rounded-lg border p-3 text-sm">
+                      <strong>{view.label}</strong>
+                      <p className="mt-1 text-xs text-muted-foreground">{view.detail}</p>
+                    </div>
+                  );
+                })}
+            </div>
+            <p className="mt-4 text-sm">
+              Project default:{" "}
+              {project.project?.defaultBinding
+                ? `${project.project.defaultBinding.provider} · ${project.project.defaultBinding.model}${project.project.defaultBinding.effort ? ` · ${project.project.defaultBinding.effort}` : ""}`
+                : "Not configured"}
+            </p>
+            {bindingError(project.project?.defaultBinding ?? null, agents) && (
+              <p role="alert" className="mt-2 text-sm text-red-700">
+                {bindingError(project.project?.defaultBinding ?? null, agents)}
+              </p>
+            )}
             {!demo && (
               <Button className="mt-5" variant="outline" onClick={onEditSetup}>
                 Edit project setup

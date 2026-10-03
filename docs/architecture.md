@@ -36,6 +36,8 @@ Run `pnpm prove:codex` only with explicit native launch intent. It makes bounded
 
 An executable candidate is not an authenticated or supported connection. Discovery performs no agent launch and reads no credentials. Identity/version verification, supported interfaces, authentication, advertised capabilities, and model catalogs must be proved by each runtime adapter. Generic executable names such as `agent` need particular care during verification. UI controls consume capabilities, rather than assuming parity from brand names. Custom connections will require explicit executable and protocol configuration.
 
+The connection registry now launches Codex only after an explicit local verification request. A custom path uses the same supported Codex app-server protocol and must pass executable, identity, and inspection checks; a saved path by itself never becomes a connection. The runtime keeps verified sessions in memory and stores only project defaults and optional custom executable configuration. Catalog choices are validated at save time. Previously saved unavailable selections remain visible in the UI and cannot silently become another model. Per-step binding selectors are exported for the loop editor; run snapshots continue to resolve bindings once at creation.
+
 The mock emits started/message/completed events and supports cancellation. It declares no steering or resume. A successful mock step means only that the fixture completed; it creates no source edits or test evidence.
 
 ## Local runtime and UI state
