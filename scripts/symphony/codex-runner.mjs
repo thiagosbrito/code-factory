@@ -87,7 +87,11 @@ input.on("line", (line) => {
   try {
     const message = JSON.parse(line);
     if (message.method === "thread/start") {
-      message.params.dynamicTools = [...(message.params.dynamicTools ?? []), reviewTool];
+      // Symphony v0.0.3 emits legacy specs; Codex rejects a list mixing both formats.
+      const tools = (message.params.dynamicTools ?? []).map((tool) =>
+        tool.type ? tool : { type: "function", ...tool },
+      );
+      message.params.dynamicTools = [...tools, reviewTool];
     }
     if (message.method === "turn/start") {
       message.params.sandboxPolicy = {

@@ -117,6 +117,11 @@ from the host Codex configuration. Set `SYMPHONY_CODEX_MODEL` to choose another
 model supported by the authenticated CLI account. A model catalog entry alone
 does not establish access; verify that an inference turn succeeds.
 
+Symphony v0.0.3 supplies its Linear tool in the legacy dynamic-tool format. The
+transport normalizes legacy tool specs to Codex's canonical function format
+before adding the publishing tool, preserving existing canonical namespaces.
+Codex rejects thread creation when canonical and legacy specs are mixed.
+
 Current Codex reports failed and interrupted turns through `turn/completed`
 with a status and error. The transport translates these to the separate failure
 and cancellation events expected by Symphony v0.0.3, preserving error details.
