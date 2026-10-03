@@ -147,7 +147,12 @@ test("Codex transport limits write roots and strips tracker credentials", (t) =>
       JSON.stringify({
         id: 0,
         method: "thread/start",
-        params: { dynamicTools: [{ name: "linear_graphql" }] },
+        params: {
+          dynamicTools: [
+            { name: "linear_graphql", description: "Linear", inputSchema: { type: "object" } },
+            { type: "namespace", name: "existing", description: "Existing tools", tools: [] },
+          ],
+        },
       }) +
       "\n" +
       JSON.stringify({
@@ -160,9 +165,15 @@ test("Codex transport limits write roots and strips tracker credentials", (t) =>
   const [thread, response] = result.split("\n").map((line) => JSON.parse(line));
   assert.deepEqual(
     thread.message.params.dynamicTools.map((tool) => tool.name),
-    ["linear_graphql", "symphony_publish_review"],
+    ["linear_graphql", "existing", "symphony_publish_review"],
   );
-  assert.equal(thread.message.params.dynamicTools[1].type, "function");
+  assert.deepEqual(
+    thread.message.params.dynamicTools.map((tool) => tool.type),
+    ["function", "namespace", "function"],
+  );
+  assert.equal(thread.message.params.dynamicTools[0].description, "Linear");
+  assert.deepEqual(thread.message.params.dynamicTools[0].inputSchema, { type: "object" });
+  assert.deepEqual(thread.message.params.dynamicTools[1].tools, []);
   assert.equal(response.hasKey, false);
   assert.equal(response.hasGitHubToken, false);
   assert.equal(response.message.params.sandboxPolicy.type, "workspaceWrite");
