@@ -50,6 +50,33 @@ async function entryCount(directory: string, suffix?: string): Promise<number> {
   }
 }
 
+async function validateDefaultBinding(
+  input: Parameters<typeof saveProjectSetup>[1],
+  connections: ConnectionRegistry,
+): Promise<void> {
+  const binding = input.defaultBinding;
+  if (!binding) return;
+
+  const connection = (await connections.list()).find((item) => item.provider === binding.provider);
+  if (!connection?.protocol || connection.authentication !== "authenticated")
+    throw new ProjectError(
+      "Verify and authenticate the selected agent before saving its default.",
+      422,
+    );
+
+  const model = connection.models?.find((item) => item.id === binding.model);
+  if (binding.model !== "agent-default" && !model)
+    throw new ProjectError("Selected model is unavailable in the current agent catalog.", 422);
+  if (binding.effort && !model?.efforts?.includes(binding.effort))
+    throw new ProjectError("Selected effort is unavailable for this model.", 422);
+
+  if (binding.provider !== "custom") return;
+  const configuredPath = input.customAgent?.executable;
+  const verifiedPath = configuredPath ? await realpath(configuredPath).catch(() => null) : null;
+  if (verifiedPath !== connection.executable)
+    throw new ProjectError("Verify the current custom executable before saving its default.", 422);
+}
+
 async function serveAsset(response: ServerResponse, pathname: string, uiDirectory: string) {
   const root = resolve(uiDirectory);
   const path = resolve(root, pathname === "/" ? "index.html" : `.${pathname}`);
@@ -102,35 +129,7 @@ export async function startLocalServer(options: {
           return json(response, 400, {
             error: parsed.error.issues[0]?.message ?? "Invalid setup.",
           });
-        if (parsed.data.defaultBinding) {
-          const binding = parsed.data.defaultBinding;
-          const connection = (await connections.list()).find(
-            (item) => item.provider === binding.provider,
-          );
-          if (!connection?.protocol || connection.authentication !== "authenticated")
-            throw new ProjectError(
-              "Verify and authenticate the selected agent before saving its default.",
-              422,
-            );
-          const model = connection.models?.find((item) => item.id === binding.model);
-          if (binding.model !== "agent-default" && !model)
-            throw new ProjectError(
-              "Selected model is unavailable in the current agent catalog.",
-              422,
-            );
-          if (binding.effort && !model?.efforts?.includes(binding.effort))
-            throw new ProjectError("Selected effort is unavailable for this model.", 422);
-          if (
-            binding.provider === "custom" &&
-            (!parsed.data.customAgent ||
-              (await realpath(parsed.data.customAgent.executable).catch(() => null)) !==
-                connection.executable)
-          )
-            throw new ProjectError(
-              "Verify the current custom executable before saving its default.",
-              422,
-            );
-        }
+        await validateDefaultBinding(parsed.data, connections);
         const project = await saveProjectSetup(projectDirectory, parsed.data);
         return json(response, 200, { project, revision: await projectRevision(projectDirectory) });
       }

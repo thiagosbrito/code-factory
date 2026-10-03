@@ -22,6 +22,29 @@ type InspectableAdapter = {
   close(): void;
 };
 
+async function resolveExecutable(
+  request: ConnectionRequest,
+  candidates: AgentConnection[],
+): Promise<string> {
+  if (request.provider === "codex") {
+    const executable = candidates.find((item) => item.provider === "codex")?.executable;
+    if (!executable)
+      throw new ProjectError("Codex executable is not detected. Install it and recheck.", 422);
+    return executable;
+  }
+
+  if (!isAbsolute(request.executable))
+    throw new ProjectError("Enter an absolute executable path.", 400);
+  try {
+    const executable = await realpath(request.executable);
+    await access(executable, constants.X_OK);
+    if (!(await stat(executable)).isFile()) throw new Error("not a regular file");
+    return executable;
+  } catch {
+    throw new ProjectError("Custom executable must be an accessible executable file.", 400);
+  }
+}
+
 /** Discovery is read-only. Only an explicit connect request may launch a provider process. */
 export class ConnectionRegistry {
   private readonly active = new Map<
@@ -57,23 +80,7 @@ export class ConnectionRegistry {
 
   async connect(request: ConnectionRequest): Promise<AgentConnection> {
     const candidates = await this.discover();
-    const detected = candidates.find((item) => item.provider === "codex");
-    let executable: string;
-    if (request.provider === "codex") {
-      if (!detected?.executable)
-        throw new ProjectError("Codex executable is not detected. Install it and recheck.", 422);
-      executable = detected.executable;
-    } else {
-      if (!isAbsolute(request.executable))
-        throw new ProjectError("Enter an absolute executable path.", 400);
-      try {
-        executable = await realpath(request.executable);
-        await access(executable, constants.X_OK);
-        if (!(await stat(executable)).isFile()) throw new Error("not a regular file");
-      } catch {
-        throw new ProjectError("Custom executable must be an accessible executable file.", 400);
-      }
-    }
+    const executable = await resolveExecutable(request, candidates);
     let adapter: InspectableAdapter | undefined;
     try {
       adapter = await this.createCodex(executable);

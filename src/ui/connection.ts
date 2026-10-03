@@ -26,6 +26,16 @@ export function unavailableCandidates(): AgentConnection[] {
     reason: "Discovery unavailable. Recheck to read local adapter results.",
   }));
 }
+function connectionDetail(connection: AgentConnection, verified: boolean, connected: boolean) {
+  if (connection.reason) return connection.reason;
+  if (connection.installation === "missing") return "Executable not found";
+  if (connected) return `${connection.identity} ${connection.version} · Connected`;
+  if (verified && connection.authentication === "unauthenticated")
+    return `${connection.identity} ${connection.version} · Authentication required`;
+  if (connection.provider === "codex") return "Detected; verification required";
+  return "Detected; connection adapter unavailable";
+}
+
 export function connectionViewModel(connection: AgentConnection): ConnectionViewModel {
   const verified =
     connection.installation !== "missing" &&
@@ -34,17 +44,7 @@ export function connectionViewModel(connection: AgentConnection): ConnectionView
   return {
     id: connection.provider,
     label: names[connection.provider],
-    detail:
-      connection.reason ??
-      (connection.installation === "missing"
-        ? "Executable not found"
-        : connected
-          ? `${connection.identity} ${connection.version} · Connected`
-          : verified && connection.authentication === "unauthenticated"
-            ? `${connection.identity} ${connection.version} · Authentication required`
-            : connection.provider === "codex"
-              ? "Detected; verification required"
-              : "Detected; connection adapter unavailable"),
+    detail: connectionDetail(connection, verified, connected),
     verified,
     connected,
     models: connected ? (connection.models ?? []) : [],
