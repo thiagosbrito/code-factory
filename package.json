@@ -28,10 +28,12 @@
     "format:check": "oxfmt --check --threads=2",
     "test": "vitest run",
     "test:package": "node scripts/smoke-package.mjs",
-    "test:symphony": "node --test tests/symphony.test.mjs",
+    "test:symphony": "node --test tests/symphony*.test.mjs",
     "symphony:install": "node scripts/symphony/install.mjs",
     "symphony:prepare": "node scripts/symphony/control.mjs prepare",
     "symphony:doctor": "node scripts/symphony/control.mjs doctor",
+    "symphony:usage": "node scripts/symphony/usage.mjs",
+    "symphony:dashboard": "node scripts/symphony/usage-dashboard.mjs",
     "symphony:start": "node scripts/symphony/control.mjs start",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "prepack": "pnpm build"
