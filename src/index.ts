@@ -10,3 +10,4 @@ export type {
   ConfigurationTranslator,
 } from "./adapters/contract.js";
 export { mockAdapter } from "./adapters/mock.js";
+export { createCodexAdapter, CodexAdapter } from "./adapters/codex.js";

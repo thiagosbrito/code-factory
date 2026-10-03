@@ -5,16 +5,52 @@ import type { AgentAdapter, AdapterEvent, StepExecutionInput } from "./contract.
 export const mockAdapter: AgentAdapter = {
   provider: "mock",
   capabilities: { streaming: "supported", steering: "unsupported", resume: "unsupported" },
+  async inspect() {
+    return {
+      provider: "mock",
+      executable: null,
+      installation: "built-in",
+      authentication: "not-required",
+      capabilities: this.capabilities,
+      models: [],
+    };
+  },
   async *execute(input: StepExecutionInput, signal: AbortSignal): AsyncIterable<AdapterEvent> {
     signal.throwIfAborted();
-    yield { type: "started", sessionId: randomUUID() };
+    const session = {
+      runId: input.runId,
+      stepId: input.stepId,
+      attempt: input.attempt,
+      sessionId: randomUUID(),
+      turnId: randomUUID(),
+    };
+    yield { type: "started", ...session };
     signal.throwIfAborted();
-    yield { type: "message", text: `Mock step ${input.stepId}, attempt ${input.attempt}` };
+    yield {
+      type: "message",
+      text: `Mock step ${input.stepId}, attempt ${input.attempt}`,
+      ...session,
+    };
     signal.throwIfAborted();
     yield {
       type: "completed",
       outcome: "succeeded",
       output: "Mock output. No project files were changed.",
+      ...session,
     };
+  },
+  attach() {
+    return {
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => {
+            throw new Error("Mock recovery is unsupported.");
+          },
+        };
+      },
+    };
+  },
+  async steer() {
+    return "unsupported" as const;
   },
 };

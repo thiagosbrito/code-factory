@@ -12,11 +12,19 @@ The initial versioned schema describes agent/check steps, explicit dependency ed
 
 Keep roles/instructions independent of provider/model bindings. Resolve defaults into a run snapshot once. Published definitions and historical inputs must be immutable in the future persisted registry; detached in-memory copies are only the starting contract.
 
-## Execution ownership — provisional
+## Execution ownership — confirmed for the first adapter (THI-6)
 
-Code Factory owns the portable loop scheduler. Adapters execute assigned steps and translate observable provider events. Do not simultaneously schedule the same graph through a native workflow runner. Delegated native workflow execution would be a distinct mode with explicit ownership.
+Code Factory owns the portable loop scheduler. The Codex adapter starts one app-server thread and turn for one assigned step; retry starts a separate thread for that step and attempt. The adapter does not submit a graph to a native workflow runner. Do not simultaneously schedule the same graph through a native workflow runner. Delegated native workflow execution would be a distinct mode with explicit ownership.
 
-This choice supports the new portable-factory requirement, but remains provisional until THI-6 proves the first supported runtime integration. This foundation deliberately does not implement the production scheduler. Native subagents inside an assigned step remain provider behavior and do not automatically become factory graph nodes.
+The fixture validates this ownership and preserves run, step, attempt, thread, and turn identities on every portable event. The production scheduler and durable receipt journal remain future work. Native subagents inside an assigned step remain provider behavior and do not automatically become factory graph nodes.
+
+## First native adapter proof boundary
+
+Codex CLI 0.160.0 is the first candidate. Its locally generated app-server protocol schema includes `initialize`, `account/read`, `model/list`, `thread/start`, `turn/start`, `thread/resume`, `thread/read`, and `turn/steer`. The adapter uses JSON-RPC over a private stdio process. `item/agentMessage/delta` and `turn/completed` become portable step events. `turn/steer` uses the expected active turn ID and never calls `turn/interrupt`. The native process owns credentials; connection inspection returns only an authentication state and a display catalog. A catalog entry is not proof of entitlement to run that model. The factory does not read or export credential files.
+
+Kiro CLI 2.27.0 remains a second-provider candidate. Its documented ACP interface includes initialize, session creation/load, prompt, cancel, model selection, and streaming notifications. The documented ACP method list does not establish cooperative in-flight guidance, so Kiro steering remains unknown pending a separate probe. See [Kiro ACP](https://kiro.dev/docs/cli/acp/) and [Codex app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server).
+
+The sandboxed disposable-project probe of `codex app-server --listen stdio://` exited with `Operation not permitted` before `initialize` returned. Consequently the current machine has no live turn, streaming, retry, recovery, or steering receipt. Connection capabilities remain `unknown` in the adapter until those behaviors are exercised through an explicitly authorized real task. Before release, run the same portable contract against a disposable project in an environment where app-server can start, with explicit user launch intent; capture the started, delta, completed, failed retry, resumed, and steering acknowledgments and verify the project diff. The deterministic fixture proves translation and control routing, not native execution.
 
 ## Connection truthfulness
 
@@ -32,7 +40,7 @@ Keep local React state near its components. Use reducers for complex editor tran
 
 ## Next slices
 
-1. THI-6: prove a native adapter using supported interfaces and record actual steering, streaming, session, retry, and recovery behavior.
+1. THI-6: finish the live disposable-project proof after an explicit launch and app-server access are available.
 2. Extend portable loop and event schemas for scheduling, evidence, attempt identity, bounded repair groups, and persistence.
 3. Implement the durable description-only mock vertical slice, then use the same contracts for the native adapter.
 4. Integrate approved Figma screens with shadcn components, onboarding, empty states, and explicit optional templates.

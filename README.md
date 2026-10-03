@@ -28,9 +28,9 @@ The built package serves its bundled UI on http://127.0.0.1:4310. Use `--port 0`
 
 ## Current scope
 
-This is the layout-independent foundation. Loop schemas validate dependencies and published/nonempty definitions. Runs can snapshot task inputs and resolved agent/model defaults. A deterministic mock implements the step event contract, with unsupported steering/recovery declared explicitly. The local HTTP API currently exposes health, project configuration, and discovered candidates only.
+This is the layout-independent foundation. Loop schemas validate dependencies and published/nonempty definitions. Runs can snapshot task inputs and resolved agent/model defaults. A deterministic mock implements the step event contract, with unsupported steering/recovery declared explicitly. A Codex app-server adapter implements connection inspection and isolated step turns behind the same contract; its native execution controls still require a live disposable-project receipt. The local HTTP API currently exposes health, project configuration, and discovered candidates only.
 
-There is no connected native adapter, production scheduler, durable event journal, saved loop registry, ticket integration, or real file-changing run yet. The mock adapter is a protocol fixture, not a live coding agent. Run snapshots are detached copies; immutable publication and persisted run storage are subsequent work. The small connection shell will be replaced with approved Figma screens.
+There is no connected production runner, production scheduler, durable event journal, saved loop registry, ticket integration, or real file-changing run yet. The mock adapter is a protocol fixture, not a live coding agent. Run snapshots are detached copies; immutable publication and persisted run storage are subsequent work. The small connection shell will be replaced with approved Figma screens.
 
 ## Packaging
 
