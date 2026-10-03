@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
-import { Button } from "@/components/ui/button";
-import { Factory, type Screen } from "./Factory";
+import { Factory } from "./Factory";
+import { ErrorView } from "./ErrorView";
+import type { Screen } from "./FactorySidebar";
 import { Setup } from "./Setup";
 import { api, type FactoryResponse, type ProjectResponse } from "./project-api";
 
@@ -38,18 +39,7 @@ export function App() {
   useEffect(() => {
     void Promise.resolve().then(load);
   }, []);
-  if (error)
-    return (
-      <main className="mx-auto max-w-xl p-8">
-        <h1 className="text-2xl font-semibold">Cannot open project</h1>
-        <p role="alert" className="mt-3 text-sm text-red-700">
-          {error}
-        </p>
-        <Button className="mt-5" onClick={() => void load()}>
-          Retry
-        </Button>
-      </main>
-    );
+  if (error) return <ErrorView message={error} onRetry={() => void load()} />;
   if (!project) return <output className="block p-8">Loading local project…</output>;
   if ((!project.project && !demo) || editing)
     return (

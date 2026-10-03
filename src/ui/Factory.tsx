@@ -1,100 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Brand } from "./Brand";
 import type { FactoryResponse, ProjectResponse } from "./project-api";
-
-export type Screen = "runs" | "loops" | "settings";
-const screenLabels: Record<Screen, string> = {
-  runs: "Runs",
-  loops: "Loops",
-  settings: "Settings",
-};
-
-function Sidebar({
-  projectName,
-  screen,
-  setScreen,
-  runs,
-  demo,
-  onExitDemo,
-}: {
-  projectName: string;
-  screen: Screen;
-  setScreen: (screen: Screen) => void;
-  runs: number;
-  demo: boolean;
-  onExitDemo: () => void;
-}) {
-  return (
-    <aside className="flex min-h-screen w-full flex-col bg-graphite p-5 text-white md:w-60">
-      <Brand />
-      <div className="mt-10 text-[11px] font-semibold tracking-widest text-stone-400">PROJECT</div>
-      <div className="mt-2 rounded-lg bg-white/10 p-3">
-        <strong className="block truncate text-sm">{projectName}</strong>
-        <small className="text-stone-300">{demo ? "Demo workspace" : "Local workspace"}</small>
-      </div>
-      <nav aria-label="Factory" className="mt-8 grid gap-1">
-        {(["runs", "loops", "settings"] as const).map((item) => (
-          <button
-            key={item}
-            onClick={() => setScreen(item)}
-            aria-current={screen === item ? "page" : undefined}
-            className={`rounded-lg px-3 py-2 text-left text-sm capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${screen === item ? "bg-white/15" : "hover:bg-white/10"}`}
-          >
-            {screenLabels[item]}
-            {item === "runs" && (
-              <span aria-hidden="true" className="float-right text-stone-300">
-                {runs}
-              </span>
-            )}
-          </button>
-        ))}
-      </nav>
-      <div className="mt-auto pt-8 text-xs text-stone-300">
-        {demo ? (
-          <Button variant="secondary" size="sm" onClick={onExitDemo}>
-            Exit demo
-          </Button>
-        ) : (
-          "Agent execution requires verified availability"
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function Empty({
-  kind,
-  onCreate,
-  onTemplate,
-}: {
-  kind: "runs" | "loops";
-  onCreate: () => void;
-  onTemplate: () => void;
-}) {
-  return (
-    <Card className="mt-7 flex min-h-80 flex-col items-center justify-center border-dashed bg-white/60 px-6 py-10 text-center">
-      <div className="grid size-12 place-items-center rounded-xl bg-teal-50 text-2xl text-teal-700">
-        {kind === "runs" ? "▷" : "∞"}
-      </div>
-      <h2 className="mt-4 text-xl font-semibold">
-        {kind === "runs" ? "No runs yet" : "No user loops yet"}
-      </h2>
-      <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
-        {kind === "runs"
-          ? "Create a loop for this project or start from an optional template. Demo runs never enter your history."
-          : "Create an empty loop or choose an optional starter template."}
-      </p>
-      <div className="mt-5 flex flex-wrap justify-center gap-2">
-        <Button onClick={onCreate}>Create loop</Button>
-        <Button variant="outline" onClick={onTemplate}>
-          Use starter template
-        </Button>
-      </div>
-    </Card>
-  );
-}
+import { FactoryEmptyState } from "./FactoryEmptyState";
+import { FactorySidebar, screenLabels, type Screen } from "./FactorySidebar";
 
 export function Factory({
   project,
@@ -130,7 +39,7 @@ export function Factory({
   };
   return (
     <div className="min-h-screen bg-canvas md:flex">
-      <Sidebar
+      <FactorySidebar
         projectName={demo ? "Demo factory" : (project.project?.name ?? "Project")}
         screen={screen}
         setScreen={(next) => {
@@ -191,7 +100,7 @@ export function Factory({
             </p>
           </Card>
         ) : counts[screen] === 0 ? (
-          <Empty kind={screen} onCreate={showCreate} onTemplate={showTemplate} />
+          <FactoryEmptyState kind={screen} onCreate={showCreate} onTemplate={showTemplate} />
         ) : (
           <Card className="mt-7 p-6">
             <h2 className="font-semibold">

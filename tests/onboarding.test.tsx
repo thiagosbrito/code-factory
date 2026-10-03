@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "../src/ui/App.js";
+import { ErrorBoundary } from "../src/ui/ErrorBoundary.js";
 import type { ProjectConfig } from "../src/runtime/project.js";
 
 afterEach(() => {
@@ -72,6 +73,29 @@ function runtime(initial: ProjectConfig | null = null) {
 }
 
 describe("first-use UI", () => {
+  it("recovers from a render error through the application error boundary", async () => {
+    let failing = true;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    function View() {
+      if (failing) throw new Error("Could not render project view.");
+      return <h1>Recovered project</h1>;
+    }
+    try {
+      const user = userEvent.setup();
+      render(
+        <ErrorBoundary>
+          <View />
+        </ErrorBoundary>,
+      );
+      expect(screen.getByRole("alert").textContent).toContain("Could not render project view.");
+      failing = false;
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      expect(screen.getByRole("heading", { name: "Recovered project" })).toBeTruthy();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("validates the name, reports a failed save, retries with Enter, and keeps demo separate", async () => {
     const local = runtime();
     const user = userEvent.setup();

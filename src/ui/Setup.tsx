@@ -2,38 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
 import type { ProjectConfig } from "../runtime/project.js";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { connectionViewModel } from "./connection";
 import { Brand } from "./Brand";
 import { api, type ProjectResponse } from "./project-api";
-
-function Section({
-  number,
-  title,
-  description,
-  children,
-}: {
-  number: number;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Card className="p-5">
-      <div className="flex items-center gap-3">
-        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-teal-50 text-sm font-semibold text-teal-700">
-          {number}
-        </span>
-        <div>
-          <h2 className="font-semibold">{title}</h2>
-          <p className="text-sm text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      <div className="mt-5">{children}</div>
-    </Card>
-  );
-}
+import { SetupSection } from "./SetupSection";
 
 export function Setup({
   state,
@@ -124,7 +97,7 @@ export function Setup({
           .code-factory.
         </p>
         <form onSubmit={(event) => void save(event)} className="mt-7 space-y-4">
-          <Section
+          <SetupSection
             number={1}
             title="Project"
             description="Local workspace selected when Code Factory started"
@@ -158,8 +131,8 @@ export function Setup({
                 </small>
               </div>
             </div>
-          </Section>
-          <Section
+          </SetupSection>
+          <SetupSection
             number={2}
             title="Coding agent"
             description="Installation, authentication, and capabilities are separate checks"
@@ -195,8 +168,8 @@ export function Setup({
               Selection here is a preview. Connection setup and binding are managed by the
               connection flow. You can finish without an agent.
             </p>
-          </Section>
-          <Section
+          </SetupSection>
+          <SetupSection
             number={3}
             title="Default model"
             description="Used for future work when a verified connection is configured"
@@ -223,7 +196,7 @@ export function Setup({
                   : "Model choices come from the verified agent catalog. No model is selected yet."}
               </small>
             </label>
-          </Section>
+          </SetupSection>
           {error && (
             <p
               id="setup-error"
