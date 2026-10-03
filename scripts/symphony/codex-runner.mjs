@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { workspaces } from "./common.mjs";
+import { checkpointTool, checkpointContext, saveCheckpoint } from "./context.mjs";
+import { budgetArguments } from "./budgets.mjs";
 
 import { isDirectReviewTransition, publishReview, reviewTool } from "./review.mjs";
 
@@ -14,7 +16,7 @@ const environment = Object.fromEntries(
 const model = process.env.SYMPHONY_CODEX_MODEL ?? "gpt-6-sol";
 const child = spawn(
   process.env.SYMPHONY_CODEX_BIN ?? "codex",
-  ["app-server", "-c", `model=${JSON.stringify(model)}`],
+  ["app-server", "-c", `model=${JSON.stringify(model)}`, ...budgetArguments(process.env)],
   {
     cwd: workspace,
     env: environment,
@@ -41,6 +43,28 @@ output.on("line", async (line) => {
           },
         }) + "\n",
       );
+      return;
+    }
+    if (message.method === "item/tool/call" && message.params?.tool === checkpointTool.name) {
+      try {
+        const result = saveCheckpoint(workspace, message.params.arguments);
+        child.stdin.write(
+          JSON.stringify({
+            id: message.id,
+            result: {
+              success: true,
+              contentItems: [{ type: "inputText", text: JSON.stringify(result) }],
+            },
+          }) + "\n",
+        );
+      } catch (error) {
+        child.stdin.write(
+          JSON.stringify({
+            id: message.id,
+            result: { success: false, contentItems: [{ type: "inputText", text: error.message }] },
+          }) + "\n",
+        );
+      }
       return;
     }
     if (message.method === "item/tool/call" && message.params?.tool === reviewTool.name) {
@@ -82,6 +106,7 @@ output.on("line", async (line) => {
 child.stdin.on("error", () => {
   input.close();
 });
+let initialTurn = true;
 const input = createInterface({ input: process.stdin });
 input.on("line", (line) => {
   try {
@@ -91,9 +116,15 @@ input.on("line", (line) => {
       const tools = (message.params.dynamicTools ?? []).map((tool) =>
         tool.type ? tool : { type: "function", ...tool },
       );
-      message.params.dynamicTools = [...tools, reviewTool];
+      message.params.dynamicTools = [...tools, reviewTool, checkpointTool];
     }
     if (message.method === "turn/start") {
+      if (initialTurn) {
+        initialTurn = false;
+        const context = checkpointContext(workspace);
+        if (context)
+          message.params.input = [...(message.params.input ?? []), { type: "text", text: context }];
+      }
       message.params.sandboxPolicy = {
         type: "workspaceWrite",
         writableRoots: [workspace],

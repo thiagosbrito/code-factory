@@ -165,11 +165,11 @@ test("Codex transport limits write roots and strips tracker credentials", (t) =>
   const [thread, response] = result.split("\n").map((line) => JSON.parse(line));
   assert.deepEqual(
     thread.message.params.dynamicTools.map((tool) => tool.name),
-    ["linear_graphql", "existing", "symphony_publish_review"],
+    ["linear_graphql", "existing", "symphony_publish_review", "symphony_checkpoint"],
   );
   assert.deepEqual(
     thread.message.params.dynamicTools.map((tool) => tool.type),
-    ["function", "namespace", "function"],
+    ["function", "namespace", "function", "function"],
   );
   assert.equal(thread.message.params.dynamicTools[0].description, "Linear");
   assert.deepEqual(thread.message.params.dynamicTools[0].inputSchema, { type: "object" });
@@ -218,6 +218,10 @@ test("Codex failed and interrupted turns reach Symphony as failures", (t) => {
       "app-server",
       "-c",
       `model=${JSON.stringify(model ?? "gpt-6-sol")}`,
+      "-c",
+      "tool_output_token_limit=2000",
+      "-c",
+      "model_auto_compact_token_limit=40000",
     ]);
     assert.deepEqual(output, [
       { ...events[0], method: "turn/failed" },
@@ -413,4 +417,44 @@ test("direct Linear review transitions are reserved for the verified host handof
     }),
     false,
   );
+});
+
+test("retained checkpoint is injected once on the next worker's first turn", (t) => {
+  const f = fixture(t);
+  const workspace = f.create("THI-CONTEXT-WIRE");
+  const checkpoint = {
+    phase: "implementation",
+    summary: "Acceptance: add bounded reads",
+    files: ["README.md"],
+    remaining: ["Implement bounded reads"],
+    validationReceipts: [],
+  };
+  command(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import {saveCheckpoint} from ${JSON.stringify(join(project, "scripts/symphony/context.mjs"))}; saveCheckpoint(process.cwd(), ${JSON.stringify(checkpoint)});`,
+    ],
+    { cwd: workspace, env: { ...process.env, SYMPHONY_ROOT: f.automation } },
+  );
+  const fake = join(f.root, "checkpoint-codex.mjs");
+  writeFileSync(
+    fake,
+    '#!/usr/bin/env node\nimport {createInterface} from "node:readline"; createInterface({input:process.stdin}).on("line", line => console.log(line));\n',
+  );
+  chmodSync(fake, 0o755);
+  const request = {
+    method: "turn/start",
+    params: { input: [{ type: "text", text: "Original task" }] },
+  };
+  const result = command(process.execPath, [join(project, "scripts/symphony/codex-runner.mjs")], {
+    cwd: workspace,
+    env: { ...process.env, SYMPHONY_ROOT: f.automation, SYMPHONY_CODEX_BIN: fake },
+    input: [request, request].map((value) => JSON.stringify(value)).join("\n") + "\n",
+  });
+  const [first, second] = result.split("\n").map((line) => JSON.parse(line));
+  assert.equal(first.params.input[0].text, "Original task");
+  assert.match(first.params.input[1].text, /Checkpoint phase: implementation/);
+  assert.deepEqual(second.params.input, request.params.input);
 });

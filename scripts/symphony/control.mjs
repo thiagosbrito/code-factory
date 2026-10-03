@@ -14,6 +14,7 @@ import {
   runtime,
   workspaces,
 } from "./common.mjs";
+import { MAX_SESSION_MILLISECONDS, parseSessionDuration } from "./session.mjs";
 
 function prepare() {
   ensureDirectories();
@@ -88,10 +89,7 @@ async function doctor() {
 async function start() {
   const manifest = await doctor();
   const lock = join(automation, "daemon.lock");
-  const minutes = Number(process.env.SYMPHONY_RUN_MINUTES ?? "45");
-  if (!Number.isFinite(minutes) || minutes <= 0) {
-    throw new Error("SYMPHONY_RUN_MINUTES must be a positive number.");
-  }
+  const minutes = parseSessionDuration(process.env.SYMPHONY_RUN_MINUTES);
   const environment = {
     ...releaseEnvironment(manifest.directory),
     SYMPHONY_ROOT: automation,
@@ -142,10 +140,16 @@ async function start() {
       }
     }, 10_000);
   };
-  const timeout = setTimeout(() => {
-    console.log("Symphony session time limit reached; stopping.");
-    stopWithDeadline();
-  }, minutes * 60_000);
+  const timeout =
+    minutes === null
+      ? undefined
+      : setTimeout(
+          () => {
+            console.log("Symphony session time limit reached; stopping.");
+            stopWithDeadline();
+          },
+          Math.max(1, Math.min(MAX_SESSION_MILLISECONDS, Math.floor(minutes * 60_000))),
+        );
   process.on("SIGINT", stopWithDeadline);
   process.on("SIGTERM", stopWithDeadline);
   child.on("error", () => {
@@ -153,13 +157,13 @@ async function start() {
     process.exitCode = 1;
   });
   child.on("close", (code) => {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
     clearTimeout(escalation);
     rmSync(lock, { recursive: true });
     process.exitCode = stopping ? 0 : (code ?? 1);
   });
   console.log(
-    `Symphony started; session limit ${minutes} minutes; dashboard http://127.0.0.1:4318`,
+    `Symphony started; session limit ${minutes === null ? "unlimited" : `${minutes} minutes`}; dashboard http://127.0.0.1:4318`,
   );
 }
 

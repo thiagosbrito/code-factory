@@ -72,15 +72,15 @@ project slug ID `e116ab6d4aee`.
 
 ## Sessions and cleanup
 
-`pnpm symphony:start` runs in the foreground with a default 45-minute session
-limit. Use `SYMPHONY_RUN_MINUTES=15 pnpm symphony:start` for a shorter pilot.
+`pnpm symphony:start` runs in the foreground with no default session duration
+limit. Optionally use `SYMPHONY_RUN_MINUTES=15 pnpm symphony:start` for a timed pilot.
 `Ctrl+C` stops the service and its worker process group. A stalled shutdown is
 killed after ten seconds. Restart explicitly for another session. This setup
 does not install a background login service. The local dashboard is
 <http://127.0.0.1:4318>; its state endpoint is `/api/v1/state`.
 
 The workflow's eight turns cap each invocation; Symphony can retry a ticket in
-another invocation. The session timer bounds the overall foreground run.
+another invocation. Only an explicitly configured session timer bounds the foreground run.
 External blockers move the issue to Backlog with a durable workpad note. In Review
 is reserved for completed acceptance criteria and a confirmed PR. Publication
 failures are recorded in `records/THI-123.json` and pause the issue in Backlog,
@@ -102,6 +102,31 @@ workers are unsupported by this setup; their upstream cleanup is unchanged.
 A crash can leave `daemon.lock` or `workspace.lock`. Inspect its `owner.json` and
 the process before removing a stale lock. Never clear a live lock, force-remove
 a dirty worktree, or bypass the patched launcher with the original executable.
+
+## Context cost and progress
+
+New workers retain at most 2,000 tokens from each tool result and automatically
+compact near 40,000 tokens. Override with `SYMPHONY_TOOL_OUTPUT_TOKENS` (256–10,000)
+and `SYMPHONY_COMPACT_TOKENS` (256–100,000) on `pnpm symphony:start`. The model stays
+`gpt-6-sol`. These settings apply at worker launch, so an already running worker
+keeps its configuration. Compaction is not a hard spending cap or a new thread.
+See the [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+for the underlying `tool_output_token_limit` and `model_auto_compact_token_limit` settings.
+
+The workflow uses discovery → implementation → validation → publication phases,
+bounded source reads, and a compact durable `symphony_checkpoint` task packet.
+Checkpoints live outside the worktree, contain file hashes and validation
+receipts, and invalidate receipts when relevant files change. New invocations
+receive the checkpoint on their first turn. Always run final required checks;
+checkpoint receipts only avoid redundant intermediate investigation.
+
+Run `pnpm symphony:usage` for a read-only usage summary or
+`pnpm symphony:dashboard` for the local usage view at <http://127.0.0.1:4319>.
+It reads local Codex rollout metadata; it makes no model calls. Cumulative input
+includes cached input repeatedly processed across requests. Fresh input is
+input minus cached input; reasoning tokens are a subset of output. None of these
+counts is a dollar invoice or a measurement of remaining Plus allowance.
+Existing rollouts have no reliable historical phase breakdown.
 
 ## Validation
 
