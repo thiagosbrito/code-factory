@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
@@ -105,4 +105,44 @@ it("resumes polling a persisted running run after reopening it", async () => {
     timeout: 2500,
   });
   view.unmount();
+});
+
+it("keeps execution unknown when the launch response is lost", async () => {
+  const loop = parseLoop({
+    schemaVersion: 2,
+    id: "flow",
+    name: "Flow",
+    version: 1,
+    status: "published",
+    steps: [{ id: "build", name: "Build", kind: "agent", role: "builder", instruction: "Build" }],
+    dependencies: [],
+    groups: [],
+    joins: [],
+    decisions: [],
+    policy: {},
+  });
+  const pending = createRunRecord(
+    createRunSnapshot(loop, { description: "Task" }, { provider: "mock", model: "default" }),
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, options?: RequestInit) => {
+      if (options?.method === "POST") throw new TypeError("Network lost");
+      return {
+        ok: true,
+        json: async () =>
+          path === "/api/loops/published"
+            ? { loops: [] }
+            : path === "/api/runs"
+              ? { runs: [pending] }
+              : { configured: false },
+      };
+    }),
+  );
+  const view = renderHook(() => useFactoryRuns(false));
+  await waitFor(() => expect(view.result.current.runs).toHaveLength(1));
+  await act(async () => view.result.current.execute(pending.snapshot.id));
+  expect(view.result.current.connected).toBe(false);
+  expect(view.result.current.notice).toMatch(/Execution state is unknown/);
+  expect(view.result.current.runs[0]?.status).toBe("pending");
 });

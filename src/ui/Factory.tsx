@@ -47,6 +47,7 @@ export const Factory = ({
     execute,
     cancel,
     executingRunId,
+    connected,
   } = useFactoryRuns(demo);
   const canStart = Boolean(
     project.project?.defaultBinding && !bindingError(project.project.defaultBinding, agents),
@@ -234,6 +235,7 @@ export const Factory = ({
             <RunExecution
               run={selectedRun}
               executing={executingRunId === selectedRun.snapshot.id}
+              connected={connected}
               onExecute={() => void execute(selectedRun.snapshot.id)}
               onCancel={() => void cancel(selectedRun.snapshot.id)}
             />

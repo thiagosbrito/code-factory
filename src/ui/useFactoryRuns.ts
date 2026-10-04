@@ -3,11 +3,14 @@ import type { LoopDefinition } from "../domain/loop.js";
 import type { RunRecord } from "../domain/run.js";
 import {
   api,
+  ApiError,
   publishedLoopsResponseSchema,
   runsResponseSchema,
   trackerStatusResponseSchema,
   runResponseSchema,
+  executionEventSchema,
 } from "./project-api";
+import { mergeRunEvent, mergeRunSnapshot } from "./run-events";
 
 /** Runtime data and run navigation owned by the factory screen. */
 export const useFactoryRuns = (demo: boolean) => {
@@ -16,11 +19,12 @@ export const useFactoryRuns = (demo: boolean) => {
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [trackerConfigured, setTrackerConfigured] = useState(false);
   const [executingRunId, setExecutingRunId] = useState<string | null>(null);
+  const [connected, setConnected] = useState(true);
   const [selectedRunId, setSelectedRunId] = useState(
     () => location.hash.match(/^#runs\/([0-9a-f-]{36})$/i)?.[1] ?? "",
   );
   const selectedRun = runs.find((run) => run.snapshot.id === selectedRunId);
-  const pollingRunId = executingRunId ?? (selectedRun?.status === "running" ? selectedRunId : null);
+  const pollingRunId = selectedRunId || executingRunId;
   useEffect(() => {
     if (demo) return;
     void Promise.all([
@@ -43,13 +47,47 @@ export const useFactoryRuns = (demo: boolean) => {
       void api(`/api/runs/${pollingRunId}`, runResponseSchema.parse)
         .then(({ run }) =>
           setRuns((previous) =>
-            previous.map((item) => (item.snapshot.id === pollingRunId ? run : item)),
+            previous.map((item) =>
+              item.snapshot.id === pollingRunId ? mergeRunSnapshot(item, run) : item,
+            ),
           ),
         )
-        .catch(() => undefined);
+        .then(() => setConnected(true))
+        .catch(() => setConnected(false));
     }, 1000);
     return () => window.clearInterval(timer);
   }, [demo, pollingRunId]);
+  useEffect(() => {
+    if (demo || !selectedRunId || typeof EventSource === "undefined") return;
+    const source = new EventSource(`/api/runs/${selectedRunId}/events`);
+    source.onopen = () => setConnected(true);
+    source.onerror = () => setConnected(false);
+    source.addEventListener("execution-event", (message) => {
+      try {
+        const event = executionEventSchema.parse(JSON.parse((message as MessageEvent).data));
+        setRuns((previous) =>
+          previous.map((item) =>
+            item.snapshot.id === selectedRunId ? mergeRunEvent(item, event) : item,
+          ),
+        );
+      } catch {
+        setConnected(false);
+      }
+    });
+    source.addEventListener("run-state", (message) => {
+      try {
+        const run = runResponseSchema.shape.run.parse(JSON.parse((message as MessageEvent).data));
+        setRuns((previous) =>
+          previous.map((item) =>
+            item.snapshot.id === selectedRunId ? mergeRunSnapshot(item, run) : item,
+          ),
+        );
+      } catch {
+        setConnected(false);
+      }
+    });
+    return () => source.close();
+  }, [demo, selectedRunId]);
   const openRun = (id: string) => {
     setSelectedRunId(id);
     window.history.pushState(null, "", `#runs/${id}`);
@@ -75,9 +113,15 @@ export const useFactoryRuns = (demo: boolean) => {
       const { run } = await api(`/api/runs/${id}/execute`, runResponseSchema.parse, {
         method: "POST",
       });
-      setRuns((previous) => previous.map((item) => (item.snapshot.id === id ? run : item)));
+      setRuns((previous) =>
+        previous.map((item) => (item.snapshot.id === id ? mergeRunSnapshot(item, run) : item)),
+      );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not execute run.");
+      if (error instanceof ApiError) setNotice(error.message);
+      else {
+        setConnected(false);
+        setNotice("Connection lost. Execution state is unknown; reconnect to inspect this run.");
+      }
     } finally {
       setExecutingRunId(null);
     }
@@ -89,7 +133,11 @@ export const useFactoryRuns = (demo: boolean) => {
       });
       setRuns((previous) => previous.map((item) => (item.snapshot.id === id ? run : item)));
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not cancel run.");
+      if (error instanceof ApiError) setNotice(error.message);
+      else {
+        setConnected(false);
+        setNotice("Connection lost. Cancellation state is unknown; reconnect to inspect this run.");
+      }
     }
   };
   return {
@@ -106,5 +154,6 @@ export const useFactoryRuns = (demo: boolean) => {
     execute,
     cancel,
     executingRunId,
+    connected,
   };
 };

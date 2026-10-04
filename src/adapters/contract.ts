@@ -38,6 +38,9 @@ export interface StepSession {
 export type AdapterEvent =
   | ({ type: "started" } & StepSession)
   | ({ type: "message"; text: string } & StepSession)
+  | ({ type: "tool"; title: string; detail?: string; state?: string } & StepSession)
+  | ({ type: "check"; title: string; detail?: string; state?: string } & StepSession)
+  | ({ type: "error"; text: string } & StepSession)
   | ({ type: "completed"; outcome: "succeeded" | "failed"; output: string } & StepSession);
 
 /** The factory owns loop scheduling. An adapter executes one assigned step. */

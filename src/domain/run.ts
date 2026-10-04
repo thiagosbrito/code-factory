@@ -50,7 +50,7 @@ export const attemptSchema = z.strictObject({
   id: z.uuid(),
   number: z.number().int().positive(),
   implementationRound: z.number().int().positive(),
-  status: z.enum(["running", "succeeded", "failed", "canceled"]),
+  status: z.enum(["running", "succeeded", "failed", "canceled", "interrupted"]),
   startedAt: z.iso.datetime(),
   endedAt: z.iso.datetime().optional(),
   sessionId: z.string().optional(),
@@ -208,17 +208,35 @@ const validateProvenance = (
 const validateEvidence = (record: RunRecordShape, report: Report): void => {
   const evidenceIds = new Set<string>();
   const eventSequences = new Set<number>();
+  let lastEventSequence = -1;
   const stepIds = new Set(record.snapshot.loop.steps.map(({ id }) => id));
   const attemptOwners = new Map(
     record.steps.flatMap((step) =>
       step.attempts.map((attempt) => [attempt.id, step.stepId] as const),
     ),
   );
+  const attemptsById = new Map(
+    record.steps.flatMap((step) => step.attempts.map((attempt) => [attempt.id, attempt] as const)),
+  );
   for (const receipt of record.evidence) {
     if (evidenceIds.has(receipt.id)) report(`Duplicate evidence ID ${receipt.id}.`);
     if (receipt.kind === "event" && eventSequences.has(receipt.sequence))
       report(`Duplicate event sequence ${receipt.sequence}.`);
-    if (receipt.kind === "event") eventSequences.add(receipt.sequence);
+    if (receipt.kind === "event") {
+      if (receipt.sequence !== lastEventSequence + 1)
+        report("Event sequences must be contiguous in persisted order.");
+      lastEventSequence = receipt.sequence;
+      eventSequences.add(receipt.sequence);
+      if (Boolean(receipt.sessionId) !== Boolean(receipt.turnId))
+        report("Event has incomplete native session identity.");
+      if (
+        receipt.sessionId &&
+        receipt.attemptId &&
+        (attemptsById.get(receipt.attemptId)?.sessionId !== receipt.sessionId ||
+          attemptsById.get(receipt.attemptId)?.turnId !== receipt.turnId)
+      )
+        report("Event native session does not match its attempt.");
+    }
     if (receipt.runId !== record.snapshot.id) report("Evidence references another run.");
     if (receipt.stepId && !stepIds.has(receipt.stepId))
       report("Evidence references a missing step.");

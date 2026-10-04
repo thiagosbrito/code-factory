@@ -305,7 +305,7 @@ export class CodexAdapter implements AgentAdapter {
         };
         return;
       }
-      yield* feed.stream(session);
+      yield* feed.stream(session, this.turnOutput(turn));
     } finally {
       feed.close();
     }
@@ -337,7 +337,10 @@ export class CodexAdapter implements AgentAdapter {
   private events(
     seed: StepSession,
     signal: AbortSignal,
-  ): { stream(session: StepSession): AsyncIterable<AdapterEvent>; close(): void } {
+  ): {
+    stream(session: StepSession, initialOutput?: string): AsyncIterable<AdapterEvent>;
+    close(): void;
+  } {
     const queue: RpcMessage[] = [];
     let wake: (() => void) | undefined;
     const unsubscribe = this.rpc.subscribe((message) => {
@@ -347,8 +350,11 @@ export class CodexAdapter implements AgentAdapter {
       wake?.();
     });
     // An async generator needs function syntax; arrows cannot yield.
-    const stream = async function* (session: StepSession): AsyncIterable<AdapterEvent> {
-      let output = "";
+    const stream = async function* (
+      session: StepSession,
+      initialOutput = "",
+    ): AsyncIterable<AdapterEvent> {
+      let output = initialOutput;
       try {
         while (true) {
           signal.throwIfAborted();
@@ -367,6 +373,38 @@ export class CodexAdapter implements AgentAdapter {
             if (typeof delta === "string") {
               output += delta;
               yield { type: "message", text: delta, ...session };
+            }
+          }
+          if (message.method === "item/started" || message.method === "item/completed") {
+            const item = message.params?.item;
+            if (
+              item &&
+              typeof item === "object" &&
+              !Array.isArray(item) &&
+              "type" in item &&
+              (item.type === "commandExecution" || item.type === "fileChange")
+            ) {
+              const tool = object(item);
+              const title =
+                tool.type === "commandExecution"
+                  ? typeof tool.command === "string"
+                    ? tool.command
+                    : "Command"
+                  : "File change";
+              const detail =
+                tool.type === "commandExecution" && typeof tool.aggregatedOutput === "string"
+                  ? tool.aggregatedOutput
+                  : undefined;
+              yield {
+                type: "tool",
+                title,
+                ...(detail ? { detail } : {}),
+                state:
+                  message.method === "item/started"
+                    ? "running"
+                    : String(tool.status ?? "completed"),
+                ...session,
+              };
             }
           }
           if (message.method === "transport/closed" || message.method === "error")

@@ -1,16 +1,19 @@
 import type { RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
+import { RunActivity } from "./RunActivity";
 
 export const RunExecution = ({
   run,
   executing,
   onExecute,
   onCancel,
+  connected = true,
 }: {
   run: RunRecord;
   executing: boolean;
   onExecute: () => void;
   onCancel: () => void;
+  connected?: boolean;
 }) => {
   const reviews = run.evidence.filter((item) => item.kind === "review");
   const checks = run.evidence.filter((item) => item.kind === "check");
@@ -23,7 +26,7 @@ export const RunExecution = ({
             {run.status === "rejected"
               ? "Review rejected the final permitted candidate. The workspace and evidence remain available."
               : run.status === "unavailable"
-                ? "The selected agent connection is unavailable."
+                ? "Execution is unavailable or recovery could not be verified. Inspect activity before retrying."
                 : run.status === "blocked"
                   ? "A reviewer could not finish its review. The candidate and evidence remain available."
                   : run.status === "failed"
@@ -40,7 +43,7 @@ export const RunExecution = ({
             {executing ? "Executing…" : "Execute run"}
           </Button>
         )}
-        {(executing || run.status === "running") && (
+        {(executing || run.status === "running") && connected && (
           <Button variant="outline" onClick={onCancel}>
             Cancel run
           </Button>
@@ -73,6 +76,7 @@ export const RunExecution = ({
           {reviews.length} review receipts · {checks.length} check receipts
         </div>
       )}
+      <RunActivity run={run} connected={connected} />
     </section>
   );
 };

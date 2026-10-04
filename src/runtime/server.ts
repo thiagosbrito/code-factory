@@ -8,6 +8,7 @@ import { listLoops, readDraft, readPublishedVersion, saveDraft, publishDraft } f
 import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
 import { cancelRun, executeRun } from "./scheduler.js";
+import { eventsAfter, parseEventCursor, streamRunEvents } from "./events.js";
 import { listPublishedLoops, listRuns, readRun } from "./storage.js";
 import { linearTracker, ticketIdSchema, type TicketTracker } from "./tracker.js";
 import {
@@ -115,6 +116,7 @@ export const startLocalServer = async (options: {
   tracker?: TicketTracker;
 }) => {
   const projectDirectory = await validateProjectDirectory(options.projectDirectory);
+  const recoveryRuns = (await listRuns(projectDirectory)).filter((run) => run.status === "running");
   const connections = options.connections ?? new ConnectionRegistry(projectDirectory);
   const tracker =
     options.tracker ??
@@ -224,10 +226,16 @@ export const startLocalServer = async (options: {
       }
       const executePath = /^\/api\/runs\/([0-9a-f-]{36})\/execute$/i.exec(pathname);
       if (executePath?.[1] && request.method === "POST") {
-        const run = await executeRun(projectDirectory, executePath[1], (provider) =>
+        const run = await readRun(projectDirectory, executePath[1]);
+        if (!run) return json(response, 404, { error: "Run not found." });
+        if (run.status !== "pending" && run.status !== "running")
+          return json(response, 409, { error: "Run cannot be started from its current state." });
+        void executeRun(projectDirectory, executePath[1], (provider) =>
           connections.adapter(provider),
+        ).catch((error: unknown) =>
+          console.error(error instanceof Error ? error.message : "Run execution failed"),
         );
-        return json(response, 200, { run });
+        return json(response, 202, { run });
       }
       const cancelPath = /^\/api\/runs\/([0-9a-f-]{36})\/cancel$/i.exec(pathname);
       if (cancelPath?.[1] && request.method === "POST") {
@@ -259,6 +267,32 @@ export const startLocalServer = async (options: {
         return json(response, 200, { loops: await listPublishedLoops(projectDirectory) });
       if (pathname === "/api/runs")
         return json(response, 200, { runs: await listRuns(projectDirectory) });
+      const eventsPath = /^\/api\/runs\/([0-9a-f-]{36})\/events$/i.exec(pathname);
+      if (eventsPath?.[1]) {
+        const run = await readRun(projectDirectory, eventsPath[1]);
+        if (!run) return json(response, 404, { error: "Run not found." });
+        const url = new URL(request.url ?? "/", `http://${hosts[0]}`);
+        let cursor: number;
+        try {
+          const lastId = request.headers["last-event-id"];
+          cursor = parseEventCursor(
+            typeof lastId === "string" && lastId
+              ? lastId
+              : (url.searchParams.get("cursor") ?? undefined),
+          );
+        } catch {
+          return json(response, 400, { error: "Invalid event cursor." });
+        }
+        if (request.headers.accept?.includes("text/event-stream"))
+          return streamRunEvents(projectDirectory, eventsPath[1], response, cursor);
+        const events = eventsAfter(run, cursor);
+        return json(response, 200, {
+          events,
+          cursor: events.at(-1)?.sequence ?? cursor,
+          revision: run.revision,
+          status: run.status,
+        });
+      }
       if (pathname === "/api/tracker")
         return json(response, 200, {
           configured: Boolean(tracker),
@@ -302,5 +336,12 @@ export const startLocalServer = async (options: {
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Runtime has no TCP address.");
+  for (const run of recoveryRuns) {
+    void executeRun(projectDirectory, run.snapshot.id, (provider) =>
+      connections.adapter(provider),
+    ).catch((error: unknown) =>
+      console.error(error instanceof Error ? error.message : "Run recovery failed"),
+    );
+  }
   return { server, url: `http://127.0.0.1:${address.port}` };
 };
