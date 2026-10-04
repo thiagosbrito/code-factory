@@ -62,7 +62,7 @@ export function LoopEditor({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const busyRef = useRef(false);
   const backRef = useRef<HTMLButtonElement>(null);
   const focusReturn = useRef<HTMLElement | null>(null);
   const loop = history.present;
@@ -78,6 +78,7 @@ export function LoopEditor({
     }
   }, [selectedId, selected]);
   const apply = (action: (current: LoopDefinition) => LoopDefinition) => {
+    if (busyRef.current) return false;
     try {
       setHistory(commit(history, action(history.present)));
       setMessage("");
@@ -100,35 +101,22 @@ export function LoopEditor({
   };
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && selectedId) {
+      if (event.key === "Escape" && selectedId && !busyRef.current) {
         event.preventDefault();
         closeDrawer();
       }
-      if (event.key === "Tab" && selectedId && dialogRef.current) {
-        const focusable = [
-          ...dialogRef.current.querySelectorAll<HTMLElement>(
-            "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])",
-          ),
-        ];
-        const first = focusable[0],
-          last = focusable.at(-1);
-        if (event.shiftKey && document.activeElement === first && last) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last && first) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
-        setHistory((current) => (event.shiftKey ? redo(current) : undo(current)));
+        if (!busyRef.current)
+          setHistory((current) => (event.shiftKey ? redo(current) : undo(current)));
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [selectedId]);
   const save = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const response = await api<{ loop: LoopDefinition }>(`/api/loops/${loop.id}/draft`, {
@@ -141,16 +129,19 @@ export function LoopEditor({
     } catch (cause) {
       setMessage(describeError(cause));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
   const publish = async () => {
+    if (busyRef.current) return;
     try {
       const errors = publicationErrors(loop, project, agents);
       if (errors.length) {
         setMessage(errors.join(" "));
         return;
       }
+      busyRef.current = true;
       setBusy(true);
       await api(`/api/loops/${loop.id}/draft`, {
         method: "PUT",
@@ -170,6 +161,7 @@ export function LoopEditor({
     } catch (cause) {
       setMessage(describeError(cause));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -177,7 +169,7 @@ export function LoopEditor({
     <div className="mt-5 min-h-[680px] rounded-xl border bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
         <div className="flex items-center gap-3">
-          <Button ref={backRef} variant="ghost" onClick={onBack}>
+          <Button ref={backRef} variant="ghost" disabled={busy} onClick={onBack}>
             ← Loops
           </Button>
           <span className="h-6 border-l" />
@@ -187,6 +179,7 @@ export function LoopEditor({
               id="loop-title"
               aria-label="Loop title"
               value={loop.name}
+              disabled={busy}
               onChange={(event) =>
                 apply((current) => parseLoop({ ...current, name: event.target.value }))
               }
@@ -198,14 +191,14 @@ export function LoopEditor({
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
-            disabled={!history.past.length}
+            disabled={busy || !history.past.length}
             onClick={() => setHistory(undo)}
           >
             Undo
           </Button>
           <Button
             variant="outline"
-            disabled={!history.future.length}
+            disabled={busy || !history.future.length}
             onClick={() => setHistory(redo)}
           >
             Redo
@@ -223,10 +216,10 @@ export function LoopEditor({
           {message}
         </p>
       )}
-      <div className="grid min-h-[590px] lg:grid-cols-[210px_minmax(0,1fr)]">
+      <fieldset disabled={busy} className="grid min-h-[590px] lg:grid-cols-[210px_minmax(0,1fr)]">
         <LoopPalette loop={loop} apply={apply} setMessage={setMessage} />
         <LoopStageBoard loop={loop} apply={apply} openDrawer={openDrawer} setMessage={setMessage} />
-      </div>
+      </fieldset>
       {selected && (
         <LoopStepDrawer
           key={selected.id}
@@ -237,7 +230,7 @@ export function LoopEditor({
           message={message}
           apply={apply}
           closeDrawer={closeDrawer}
-          dialogRef={dialogRef}
+          busy={busy}
         />
       )}
     </div>
