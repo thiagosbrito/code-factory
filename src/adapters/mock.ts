@@ -35,7 +35,9 @@ export const mockAdapter: AgentAdapter = {
     yield {
       type: "completed",
       outcome: "succeeded",
-      output: "Mock output. No project files were changed.",
+      output: input.allowedOutcomes?.includes("pass")
+        ? "pass"
+        : (input.allowedOutcomes?.[0] ?? "Mock output. No project files were changed."),
       ...session,
     };
   },

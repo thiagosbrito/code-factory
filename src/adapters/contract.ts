@@ -24,6 +24,7 @@ export interface StepExecutionInput {
   stepId: string;
   attempt: number;
   instruction: string;
+  allowedOutcomes?: string[];
   binding: ExecutionBinding;
   projectDirectory: string;
 }

@@ -15,10 +15,12 @@ export const useFactoryRuns = (demo: boolean) => {
   const [publishedLoops, setPublishedLoops] = useState<LoopDefinition[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [trackerConfigured, setTrackerConfigured] = useState(false);
+  const [executingRunId, setExecutingRunId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState(
     () => location.hash.match(/^#runs\/([0-9a-f-]{36})$/i)?.[1] ?? "",
   );
   const selectedRun = runs.find((run) => run.snapshot.id === selectedRunId);
+  const pollingRunId = executingRunId ?? (selectedRun?.status === "running" ? selectedRunId : null);
   useEffect(() => {
     if (demo) return;
     void Promise.all([
@@ -35,6 +37,19 @@ export const useFactoryRuns = (demo: boolean) => {
         setNotice(error instanceof Error ? error.message : "Could not load run history."),
       );
   }, [demo]);
+  useEffect(() => {
+    if (!pollingRunId || demo) return;
+    const timer = window.setInterval(() => {
+      void api(`/api/runs/${pollingRunId}`, runResponseSchema.parse)
+        .then(({ run }) =>
+          setRuns((previous) =>
+            previous.map((item) => (item.snapshot.id === pollingRunId ? run : item)),
+          ),
+        )
+        .catch(() => undefined);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [demo, pollingRunId]);
   const openRun = (id: string) => {
     setSelectedRunId(id);
     window.history.pushState(null, "", `#runs/${id}`);
@@ -53,6 +68,30 @@ export const useFactoryRuns = (demo: boolean) => {
         setNotice(error instanceof Error ? error.message : "Could not load run."),
       );
   };
+  const execute = async (id: string) => {
+    setExecutingRunId(id);
+    setNotice("");
+    try {
+      const { run } = await api(`/api/runs/${id}/execute`, runResponseSchema.parse, {
+        method: "POST",
+      });
+      setRuns((previous) => previous.map((item) => (item.snapshot.id === id ? run : item)));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not execute run.");
+    } finally {
+      setExecutingRunId(null);
+    }
+  };
+  const cancel = async (id: string) => {
+    try {
+      const { run } = await api(`/api/runs/${id}/cancel`, runResponseSchema.parse, {
+        method: "POST",
+      });
+      setRuns((previous) => previous.map((item) => (item.snapshot.id === id ? run : item)));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not cancel run.");
+    }
+  };
   return {
     notice,
     setNotice,
@@ -64,5 +103,8 @@ export const useFactoryRuns = (demo: boolean) => {
     setSelectedRunId,
     openRun,
     onStarted,
+    execute,
+    cancel,
+    executingRunId,
   };
 };

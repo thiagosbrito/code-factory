@@ -68,6 +68,7 @@ export const reviewReceiptSchema = z.strictObject({
   scope: z.string().min(1),
   verdict: z.enum(["pass", "changes-requested", "blocked"]),
   findings: z.array(z.string().min(1)),
+  inputHash: z.string().min(1).optional(),
   provenance: provenanceSchema,
   freshness: freshnessSchema,
 });
