@@ -243,7 +243,8 @@ function validateAcyclic(
   const ready = [...pending].filter(([, count]) => count === 0).map(([id]) => id);
   let visited = 0;
   while (ready.length) {
-    const id = ready.pop()!;
+    const id = ready.pop();
+    if (id === undefined) break;
     visited++;
     for (const successor of dependencies.outgoing.get(id) ?? []) {
       const count = pending.get(successor);

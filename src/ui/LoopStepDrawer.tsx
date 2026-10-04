@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import type { AgentConnection } from "../adapters/contract.js";
 import { parseLoop, type LoopDefinition } from "../domain/loop.js";
@@ -6,21 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ProjectResponse } from "./project-api";
 import { StepBindingSelectors } from "./StepBindingSelectors";
-import {
-  deleteStep,
-  moveVisual,
-  removeDecision,
-  removeJoin,
-  setDecision,
-  setJoin,
-  stageOf,
-  type EditorStep,
-} from "./loop-editor-model";
+import { LoopJoinSection, LoopDecisionSection } from "./LoopGraphSections";
+import { deleteStep, moveVisual, stageOf, type EditorStep } from "./loop-editor-model";
 
 const label = "block w-full text-sm font-medium";
 const field = "mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm";
 
-export function LoopStepDrawer({
+export const LoopStepDrawer = ({
   loop,
   selected,
   project,
@@ -38,61 +30,7 @@ export function LoopStepDrawer({
   apply: (action: (current: LoopDefinition) => LoopDefinition) => boolean;
   closeDrawer: () => void;
   busy: boolean;
-}) {
-  const existingJoin = loop.joins.find((item) => item.stepId === selected.id);
-  const joinSignature = JSON.stringify(existingJoin ?? null);
-  const decision = loop.decisions.find((item) => item.stepId === selected.id);
-  const decisionSignature = JSON.stringify(decision ?? null);
-  const existingBranches = decision?.branches ?? [];
-  const [joinDraft, setJoinDraft] = useState(() => ({
-    source: joinSignature,
-    sources: existingJoin?.from ?? [],
-    mode: existingJoin?.mode ?? ("all" as const),
-  }));
-  const [decisionDraft, setDecisionDraft] = useState(() => ({
-    source: decisionSignature,
-    branches: existingBranches.length
-      ? existingBranches
-      : [
-          { outcome: "pass", to: "" },
-          { outcome: "repair", to: "" },
-        ],
-  }));
-  if (joinDraft.source !== joinSignature) {
-    setJoinDraft({
-      source: joinSignature,
-      sources: existingJoin?.from ?? [],
-      mode: existingJoin?.mode ?? "all",
-    });
-  }
-  if (decisionDraft.source !== decisionSignature) {
-    setDecisionDraft({
-      source: decisionSignature,
-      branches: decision?.branches ?? [
-        { outcome: "pass", to: "" },
-        { outcome: "repair", to: "" },
-      ],
-    });
-  }
-  const joinSources =
-    joinDraft.source === joinSignature ? joinDraft.sources : (existingJoin?.from ?? []);
-  const joinMode =
-    joinDraft.source === joinSignature ? joinDraft.mode : (existingJoin?.mode ?? "all");
-  const branches =
-    decisionDraft.source === decisionSignature
-      ? decisionDraft.branches
-      : (decision?.branches ?? [
-          { outcome: "pass", to: "" },
-          { outcome: "repair", to: "" },
-        ]);
-  const [branchOne, branchTwo, ...extraBranches] = branches;
-  const updateBranch = (index: number, patch: Partial<(typeof branches)[number]>) =>
-    setDecisionDraft({
-      source: decisionSignature,
-      branches: branches.map((branch, position) =>
-        position === index ? { ...branch, ...patch } : branch,
-      ),
-    });
+}) => {
   const drawerRef = useRef<HTMLInputElement>(null);
   const updateStep = (patch: Partial<EditorStep>) =>
     apply((current) =>
@@ -192,174 +130,8 @@ export function LoopStepDrawer({
                   projectDefault={project.project?.defaultBinding ?? null}
                 />
               </div>
-              <div className="mt-6 border-t pt-4">
-                <h4 className="font-semibold">Join</h4>
-                <p className="text-xs text-muted-foreground">
-                  Choose two or more predecessors and whether all or any must finish.
-                </p>
-                {loop.steps
-                  .filter((step) => step.id !== selected.id)
-                  .map((step) => (
-                    <label key={step.id} className="mt-2 flex gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={joinSources.includes(step.id)}
-                        onChange={() =>
-                          setJoinDraft({
-                            source: joinSignature,
-                            sources: joinSources.includes(step.id)
-                              ? joinSources.filter((id) => id !== step.id)
-                              : [...joinSources, step.id],
-                            mode: joinMode,
-                          })
-                        }
-                      />
-                      {step.name}
-                    </label>
-                  ))}
-                <select
-                  aria-label="Join mode"
-                  className={field}
-                  value={joinMode}
-                  onChange={(event) =>
-                    setJoinDraft({
-                      source: joinSignature,
-                      sources: joinSources,
-                      mode: event.target.value as "all" | "any",
-                    })
-                  }
-                >
-                  <option value="all">All</option>
-                  <option value="any">Any</option>
-                </select>
-                <Button
-                  className="mt-2"
-                  variant="outline"
-                  onClick={() =>
-                    apply((current) => setJoin(current, selected.id, joinSources, joinMode))
-                  }
-                >
-                  Set join
-                </Button>
-                {loop.joins.some((join) => join.stepId === selected.id) && (
-                  <Button
-                    className="mt-2 ml-2"
-                    variant="ghost"
-                    onClick={() => apply((current) => removeJoin(current, selected.id))}
-                  >
-                    Remove join
-                  </Button>
-                )}
-              </div>
-              <div className="mt-6 border-t pt-4">
-                <h4 className="font-semibold">Decision branches</h4>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <Input
-                    aria-label="First outcome"
-                    value={branchOne?.outcome ?? ""}
-                    onChange={(event) => updateBranch(0, { outcome: event.target.value })}
-                  />
-                  <select
-                    aria-label="First target"
-                    className={field}
-                    value={branchOne?.to ?? ""}
-                    onChange={(event) => updateBranch(0, { to: event.target.value })}
-                  >
-                    <option value="">Target</option>
-                    {loop.steps
-                      .filter((step) => step.id !== selected.id)
-                      .map((step) => (
-                        <option key={step.id} value={step.id}>
-                          {step.name}
-                        </option>
-                      ))}
-                  </select>
-                  <Input
-                    aria-label="Second outcome"
-                    value={branchTwo?.outcome ?? ""}
-                    onChange={(event) => updateBranch(1, { outcome: event.target.value })}
-                  />
-                  <select
-                    aria-label="Second target"
-                    className={field}
-                    value={branchTwo?.to ?? ""}
-                    onChange={(event) => updateBranch(1, { to: event.target.value })}
-                  >
-                    <option value="">Target</option>
-                    {loop.steps
-                      .filter((step) => step.id !== selected.id)
-                      .map((step) => (
-                        <option key={step.id} value={step.id}>
-                          {step.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-                {extraBranches.map((branch, index) => (
-                  <div key={index} className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-2">
-                    <Input
-                      aria-label={`Outcome ${index + 3}`}
-                      value={branch.outcome}
-                      onChange={(event) => updateBranch(index + 2, { outcome: event.target.value })}
-                    />
-                    <select
-                      aria-label={`Target ${index + 3}`}
-                      className={field}
-                      value={branch.to}
-                      onChange={(event) => updateBranch(index + 2, { to: event.target.value })}
-                    >
-                      <option value="">Target</option>
-                      {loop.steps
-                        .filter((step) => step.id !== selected.id)
-                        .map((step) => (
-                          <option key={step.id} value={step.id}>
-                            {step.name}
-                          </option>
-                        ))}
-                    </select>
-                    <Button
-                      variant="ghost"
-                      aria-label={`Remove branch ${index + 3}`}
-                      onClick={() =>
-                        setDecisionDraft({
-                          source: decisionSignature,
-                          branches: branches.filter((_, position) => position !== index + 2),
-                        })
-                      }
-                    >
-                      ×
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  className="mt-2"
-                  variant="ghost"
-                  onClick={() =>
-                    setDecisionDraft({
-                      source: decisionSignature,
-                      branches: [...branches, { outcome: "", to: "" }],
-                    })
-                  }
-                >
-                  Add branch
-                </Button>
-                <Button
-                  className="mt-2"
-                  variant="outline"
-                  onClick={() => apply((current) => setDecision(current, selected.id, branches))}
-                >
-                  Set decision
-                </Button>
-                {loop.decisions.some((decision) => decision.stepId === selected.id) && (
-                  <Button
-                    className="mt-2 ml-2"
-                    variant="ghost"
-                    onClick={() => apply((current) => removeDecision(current, selected.id))}
-                  >
-                    Remove decision
-                  </Button>
-                )}
-              </div>
+              <LoopJoinSection loop={loop} selected={selected} apply={apply} />
+              <LoopDecisionSection loop={loop} selected={selected} apply={apply} />
               <div className="mt-6 border-t pt-4">
                 <h4 className="font-semibold">Canvas position</h4>
                 <Button
@@ -399,4 +171,4 @@ export function LoopStepDrawer({
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   );
-}
+};

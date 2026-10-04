@@ -159,8 +159,8 @@ export async function startLocalServer(options: {
         /^\/api\/loops\/([a-z][a-z0-9-]{0,63})(?:\/(draft|publish|versions\/([1-9][0-9]*)))?$/.exec(
           pathname,
         );
-      if (loopPath) {
-        const id = loopPath[1]!;
+      if (loopPath?.[1]) {
+        const id = loopPath[1];
         const operation = loopPath[2];
         if (request.method === "GET" && operation === "draft")
           return json(response, 200, { loop: await readDraft(projectDirectory, id) });

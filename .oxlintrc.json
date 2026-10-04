@@ -2,6 +2,15 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "react", "jsx-a11y", "vitest"],
   "categories": { "correctness": "error" },
-  "rules": { "typescript/no-explicit-any": "error" },
+  "rules": {
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error"
+  },
+  "overrides": [
+    {
+      "files": ["tests/**"],
+      "rules": { "typescript/no-non-null-assertion": "off" }
+    }
+  ],
   "ignorePatterns": ["dist/**", ".pnpm-*/**"]
 }

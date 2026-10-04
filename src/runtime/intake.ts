@@ -88,7 +88,7 @@ async function startOnce(
   }
   if (input.ticketId && !tracker)
     throw new ProjectError("Configure a tracker before retrieving tickets.", 422);
-  const ticket = input.ticketId ? await tracker!.retrieve(input.ticketId) : undefined;
+  const ticket = input.ticketId && tracker ? await tracker.retrieve(input.ticketId) : undefined;
   const baseline = await captureGitBaseline(project).catch((error: unknown) => {
     throw new ProjectError(
       `Cannot capture Git baseline: ${error instanceof Error ? error.message : String(error)}`,

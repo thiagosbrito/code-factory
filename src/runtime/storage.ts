@@ -165,8 +165,9 @@ export async function listLoops(project: string): Promise<
       loopId(id);
       const draft = await readDraft(project, id);
       const versions = await listPublishedVersions(project, id);
-      const published = versions.length
-        ? await readPublishedVersion(project, id, versions[versions.length - 1]!)
+      const latestVersion = versions.at(-1);
+      const published = latestVersion
+        ? await readPublishedVersion(project, id, latestVersion)
         : null;
       return { id, draft, published, versions };
     }),
