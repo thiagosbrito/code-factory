@@ -15,6 +15,7 @@ export type StepResult = {
   inputHash?: string;
   exitCode?: number | null;
   summary?: string;
+  findings?: string[];
 };
 
 const update = (record: RunRecord, steps: Step[], status = record.status): RunRecord =>

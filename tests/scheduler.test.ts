@@ -343,9 +343,9 @@ describe("portable scheduler", () => {
       const joinReceipt = result.evidence.find(
         (item) => item.kind === "review" && item.stepId === "join",
       );
-      expect(joinReceipt?.kind === "review" && joinReceipt.provenance.inputReceiptIds).toEqual(
-        reviews.map((item) => item.id),
-      );
+      expect(
+        joinReceipt?.kind === "review" && [...joinReceipt.provenance.inputReceiptIds].sort(),
+      ).toEqual(reviews.map((item) => item.id).sort());
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -573,7 +573,10 @@ describe("portable scheduler", () => {
             type: "completed",
             ...identity,
             outcome: "succeeded",
-            output: input.stepId === "review" ? "changes-requested" : "done",
+            output:
+              input.stepId === "review"
+                ? "changes-requested\nFix the result file before approval."
+                : "done",
           };
         },
       };
@@ -584,7 +587,12 @@ describe("portable scheduler", () => {
       expect(buildInstructions[0]).not.toContain("Input from review");
       expect(buildInstructions[1]).toContain("Input from review");
       expect(buildInstructions[1]).toContain("changes-requested");
+      expect(buildInstructions[1]).toContain("Fix the result file before approval.");
       expect(result.evidence.filter((item) => item.kind === "review")).toHaveLength(2);
+      expect(result.evidence.filter((item) => item.kind === "review")).toEqual([
+        expect.objectContaining({ findings: ["Fix the result file before approval."] }),
+        expect.objectContaining({ findings: ["Fix the result file before approval."] }),
+      ]);
       expect(await readFile(join(workspace, "result.txt"), "utf8")).toBe("round 2");
     } finally {
       await rm(root, { recursive: true, force: true });

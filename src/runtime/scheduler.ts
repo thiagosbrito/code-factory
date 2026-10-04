@@ -110,6 +110,14 @@ const stepInputs = (record: RunRecord, stepId: string) => {
   };
 };
 
+const reviewResult = (output: string): Pick<StepResult, "outcome" | "findings"> => {
+  const [verdict, ...lines] = output.trim().split(/\r?\n/);
+  return {
+    outcome: verdict?.trim() ?? "",
+    findings: lines.map((line) => line.trim()).filter(Boolean),
+  };
+};
+
 const checkCommand = async (
   command: string,
   cwd: string,
@@ -237,7 +245,10 @@ const executeOnce = async (
             instruction: [
               definition.instruction,
               inputs.context,
-              allowedOutcomes && `Return exactly one outcome: ${allowedOutcomes.join(", ")}.`,
+              allowedOutcomes &&
+                (definition.stage === "review"
+                  ? `Put exactly one verdict on the first line: ${allowedOutcomes.join(", ")}. Add concrete findings on subsequent lines when requesting changes.`
+                  : `Return exactly one outcome: ${allowedOutcomes.join(", ")}.`),
             ]
               .filter(Boolean)
               .join("\n\n"),
@@ -260,7 +271,9 @@ const executeOnce = async (
               if (event.type === "completed")
                 result = {
                   status: event.outcome,
-                  outcome: event.output.trim(),
+                  ...(definition.stage === "review"
+                    ? reviewResult(event.output)
+                    : { outcome: event.output.trim() }),
                   summary: event.output,
                 };
               await commit((current) => appendEvent(current, stepId, attempt.id, event));
@@ -290,11 +303,15 @@ const executeOnce = async (
       if (
         result.status === "succeeded" &&
         definition.stage === "review" &&
-        !["pass", "changes-requested", "blocked"].includes(result.outcome ?? "")
+        (!["pass", "changes-requested", "blocked"].includes(result.outcome ?? "") ||
+          (result.outcome === "changes-requested" && !result.findings?.length))
       )
         result = {
           status: "failed",
-          summary: `Undeclared review verdict: ${result.outcome ?? "none"}`,
+          summary:
+            result.outcome === "changes-requested"
+              ? "Review requested changes without actionable findings."
+              : `Undeclared review verdict: ${result.outcome ?? "none"}`,
         };
       const candidateId =
         definition.kind === "check" && step.candidateId
@@ -454,8 +471,7 @@ const appendReceipt = (
               : result.outcome === "changes-requested"
                 ? "changes-requested"
                 : "blocked",
-          findings:
-            result.outcome === "changes-requested" ? [result.summary ?? "Changes requested"] : [],
+          findings: result.findings ?? [],
           inputHash: step.inputHash,
         };
   return runRecordSchema.parse({
