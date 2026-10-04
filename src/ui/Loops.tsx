@@ -68,10 +68,12 @@ export function Loops({
   project,
   agents,
   onTemplate,
+  onPublished,
 }: {
   project: ProjectResponse;
   agents: AgentConnection[];
   onTemplate: () => void;
+  onPublished?: (loop: LoopDefinition) => void;
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [selected, setSelected] = useState<LoopDefinition | null>(null);
@@ -121,8 +123,9 @@ export function Loops({
           void load();
           requestAnimationFrame(() => createRef.current?.focus());
         }}
-        onPublished={async () => {
+        onPublished={async (loop) => {
           await load();
+          onPublished?.(loop);
         }}
       />
     );

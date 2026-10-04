@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createLoopDraft, parseLoop, type LoopDefinition } from "../src/domain/loop.js";
+import type { AgentConnection } from "../src/adapters/contract.js";
 import { Loops } from "../src/ui/Loops.js";
 import { setParallelGroup } from "../src/ui/loop-editor-model.js";
 import type { ProjectResponse } from "../src/ui/project-api.js";
@@ -44,6 +45,48 @@ afterEach(() => {
 });
 
 describe("loops library UI", () => {
+  it("reports a newly published loop to the factory run intake", async () => {
+    const user = userEvent.setup();
+    const agent: AgentConnection = {
+      provider: "codex",
+      executable: "/bin/codex",
+      installation: "detected",
+      authentication: "authenticated",
+      protocol: "app-server",
+      version: "test",
+      identity: "codex",
+      capabilities: { streaming: "supported", steering: "unknown", resume: "unknown" },
+      models: [{ id: "agent-default", displayName: "Default" }],
+    };
+    const published = parseLoop({ ...draft(), status: "published" });
+    const onPublished = vi.fn<(loop: LoopDefinition) => void>();
+    vi.stubGlobal("fetch", async (path: string, options?: RequestInit) => {
+      if (path === "/api/loops")
+        return Response.json({ loops: [{ id: "sample", draft: draft(), published: null }] });
+      if (path === "/api/loops/sample/draft" && options?.method === "PUT")
+        return Response.json({ loop: draft() });
+      if (path === "/api/loops/sample/publish" && options?.method === "POST")
+        return Response.json({ loop: published });
+      throw new Error(`Unexpected ${options?.method ?? "GET"} ${path}`);
+    });
+    render(
+      <Loops
+        project={{
+          ...project,
+          project: {
+            ...project.project!,
+            defaultBinding: { provider: "codex", model: "agent-default" },
+          },
+        }}
+        agents={[agent]}
+        onTemplate={() => undefined}
+        onPublished={onPublished}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Edit draft" }));
+    await user.click(screen.getByRole("button", { name: "Publish v1" }));
+    await waitFor(() => expect(onPublished).toHaveBeenCalledWith(published));
+  });
   it("shows saved draft and published content separately", async () => {
     const published = parseLoop({ ...draft(), name: "Published plan", status: "published" });
     vi.stubGlobal("fetch", async () =>

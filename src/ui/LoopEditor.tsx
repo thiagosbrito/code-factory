@@ -55,7 +55,7 @@ export function LoopEditor({
   project: ProjectResponse;
   agents: AgentConnection[];
   onBack: () => void;
-  onPublished: () => Promise<void>;
+  onPublished: (loop: LoopDefinition) => Promise<void>;
 }) {
   const [history, setHistory] = useState<History>({ present: initial, past: [], future: [] });
   const [saved, setSaved] = useState(JSON.stringify(initial));
@@ -166,7 +166,7 @@ export function LoopEditor({
       setMessage(
         `Published immutable version ${response.loop.version}. Future edits target draft v${next.version}.`,
       );
-      await onPublished();
+      await onPublished(response.loop);
     } catch (cause) {
       setMessage(describeError(cause));
     } finally {
