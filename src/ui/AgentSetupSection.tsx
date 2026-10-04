@@ -7,7 +7,7 @@ import { AgentCandidates } from "./AgentCandidates";
 import { AgentCapabilities } from "./AgentCapabilities";
 import { SetupSection } from "./SetupSection";
 
-export function AgentSetupSection({
+export const AgentSetupSection = ({
   displayedAgents,
   agentError,
   selected,
@@ -29,7 +29,7 @@ export function AgentSetupSection({
   onCustomExecutableChange: (value: string) => void;
   onVerify: () => Promise<void>;
   onRefresh: () => Promise<void>;
-}) {
+}) => {
   const models = displayedAgents.map(connectionViewModel);
   const active = models.find((item) => item.id === selected);
   const activeConnection = displayedAgents.find((item) => item.provider === selected);
@@ -102,4 +102,4 @@ export function AgentSetupSection({
       </p>
     </SetupSection>
   );
-}
+};

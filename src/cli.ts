@@ -7,7 +7,7 @@ import { startLocalServer } from "./runtime/server.js";
 
 const help = `Code Factory\n\n  code-factory init [directory]\n  code-factory doctor\n  code-factory start [--project directory] [--port 4310]\n\nFoundation mode: project setup, candidate discovery, and a local UI.\nReal agent execution is not connected yet.\n`;
 
-async function main() {
+const main = async () => {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
     options: {
@@ -43,7 +43,7 @@ async function main() {
   });
   console.log(`Code Factory: ${url}\nAgent execution is not connected yet. Press Ctrl+C to stop.`);
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => server.close());
-}
+};
 
 main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : "Code Factory failed.");

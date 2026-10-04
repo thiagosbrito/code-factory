@@ -3,11 +3,11 @@ import { cn } from "@/lib/utils";
 
 export const Select = SelectPrimitive.Root;
 export const SelectValue = SelectPrimitive.Value;
-export function SelectTrigger({
+export const SelectTrigger = ({
   className,
   children,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Trigger>) {
+}: React.ComponentProps<typeof SelectPrimitive.Trigger>) => {
   return (
     <SelectPrimitive.Trigger
       className={cn(
@@ -20,8 +20,8 @@ export function SelectTrigger({
       <SelectPrimitive.Icon>⌄</SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
-}
-export function SelectContent({ children }: { children: React.ReactNode }) {
+};
+export const SelectContent = ({ children }: { children: React.ReactNode }) => {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -32,8 +32,8 @@ export function SelectContent({ children }: { children: React.ReactNode }) {
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   );
-}
-export function SelectItem({ value, children }: { value: string; children: React.ReactNode }) {
+};
+export const SelectItem = ({ value, children }: { value: string; children: React.ReactNode }) => {
   return (
     <SelectPrimitive.Item
       value={value}
@@ -42,4 +42,4 @@ export function SelectItem({ value, children }: { value: string; children: React
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
     </SelectPrimitive.Item>
   );
-}
+};

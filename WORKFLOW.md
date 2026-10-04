@@ -117,17 +117,18 @@ branch, edits, and evidence. Do not restart completed work without a reason.
    Apply the TypeScript and React standards in CONTRIBUTING.md to new and changed
    code: separate rendering, state orchestration, domain rules, persistence, and
    adapters; split components by cohesive behavior and typed props; prefer
-   composition and explicit interfaces; use arrow functions for new application
-   functions unless semantics require otherwise; preserve strict types and
-   validate untrusted input at boundaries. Avoid style-only codebase rewrites.
+   composition and explicit interfaces; use arrow functions throughout application
+   source, with documented semantic exceptions; preserve strict types and
+   validate untrusted input at boundaries. Keep the application-wide Oxlint function style and arrow callback gates passing.
 5. Run pnpm check. Run pnpm test:package when packaging, the CLI, or asset serving
    changes. For Symphony scripts, also run pnpm test:symphony. Use meaningful
    behavior tests and record commands/results. Validate UI interactions when changed.
 6. Review the final diff and inspect any existing PR's CI and review feedback.
    Resolve actionable findings. Do not claim CI passed when none is configured.
    Keep commit/PR titles and descriptions accurate to the final implementation.
-   Compare the diff against the CONTRIBUTING.md standards and record remaining
-   debt separately in the workpad. Add lint checks only for demonstrated risks.
+   Compare the diff and application source against the CONTRIBUTING.md standards.
+   Audit mixed responsibilities, nested conditionals, unvalidated data boundaries,
+   and arrow coverage; record remaining debt separately in the workpad.
 7. Once every acceptance criterion is met and no blockers remain, call the supplied
    `symphony_publish_review` tool with ready=true, blockers=[], an explicit list
    of every changed ticket source file, commitMessage, title, and body. This host

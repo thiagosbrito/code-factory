@@ -2,15 +2,15 @@ import type { AgentConnection } from "../adapters/contract.js";
 import type { ProviderId } from "../domain/loop.js";
 import { connectionViewModel } from "./connection";
 
-function candidateStatus(connection: AgentConnection): string {
+const candidateStatus = (connection: AgentConnection): string => {
   const view = connectionViewModel(connection);
   if (view.connected) return "Connected";
   if (view.verified) return "Identity verified";
   if (connection.installation === "detected") return "Executable detected";
   return "Not detected";
-}
+};
 
-export function AgentCandidates({
+export const AgentCandidates = ({
   agents,
   selected,
   onSelect,
@@ -18,7 +18,7 @@ export function AgentCandidates({
   agents: AgentConnection[];
   selected: ProviderId | null;
   onSelect: (provider: ProviderId | null) => void;
-}) {
+}) => {
   return (
     <>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -53,4 +53,4 @@ export function AgentCandidates({
       )}
     </>
   );
-}
+};

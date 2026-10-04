@@ -4,6 +4,7 @@ import { createLoopDraft, type LoopDefinition } from "../domain/loop.js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api, type ProjectResponse } from "./project-api";
+import { loopEntriesResponseSchema, loopResponseSchema } from "./project-api";
 import { LoopEditor } from "./LoopEditor";
 
 type Entry = {
@@ -13,7 +14,7 @@ type Entry = {
   versions: number[];
 };
 
-function LoopCard({
+const LoopCard = ({
   loop,
   versions,
   onEdit,
@@ -21,7 +22,7 @@ function LoopCard({
   loop: LoopDefinition;
   versions?: number[];
   onEdit?: () => void;
-}) {
+}) => {
   return (
     <Card className="grid gap-3 bg-white p-5 sm:grid-cols-[8rem_1fr_auto] sm:items-center">
       <div
@@ -63,8 +64,8 @@ function LoopCard({
       )}
     </Card>
   );
-}
-export function Loops({
+};
+export const Loops = ({
   project,
   agents,
   onTemplate,
@@ -74,7 +75,7 @@ export function Loops({
   agents: AgentConnection[];
   onTemplate: () => void;
   onPublished?: (loop: LoopDefinition) => void;
-}) {
+}) => {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [selected, setSelected] = useState<LoopDefinition | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,7 +83,7 @@ export function Loops({
   const createRef = useRef<HTMLButtonElement>(null);
   const load = async () => {
     try {
-      setEntries((await api<{ loops: Entry[] }>("/api/loops")).loops);
+      setEntries((await api("/api/loops", loopEntriesResponseSchema.parse)).loops);
       setError("");
     } catch (cause) {
       setError(String(cause));
@@ -91,7 +92,7 @@ export function Loops({
     }
   };
   useEffect(() => {
-    api<{ loops: Entry[] }>("/api/loops")
+    api("/api/loops", loopEntriesResponseSchema.parse)
       .then((response) => setEntries(response.loops))
       .catch((cause: unknown) => setError(String(cause)))
       .finally(() => setLoading(false));
@@ -100,7 +101,7 @@ export function Loops({
     try {
       const id = `loop-${crypto.randomUUID()}`;
       const draft = createLoopDraft(id, "Untitled loop");
-      const result = await api<{ loop: LoopDefinition }>(`/api/loops/${id}/draft`, {
+      const result = await api(`/api/loops/${id}/draft`, loopResponseSchema.parse, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(draft),
@@ -180,4 +181,4 @@ export function Loops({
       )}
     </section>
   );
-}
+};

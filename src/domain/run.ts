@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { executionBindingSchema, parseLoop, loopSchema, type ExecutionBinding } from "./loop.js";
 import { evidenceSchema } from "./evidence.js";
@@ -85,11 +84,11 @@ type Attempt = StepRun["attempts"][number];
 type Receipt = RunRecordShape["evidence"][number];
 type Report = (message: string) => void;
 
-function hasDuplicates<T>(values: T[]): boolean {
+const hasDuplicates = <T>(values: T[]): boolean => {
   return new Set(values).size !== values.length;
-}
+};
 
-function validateRoundHistory(record: RunRecordShape, report: Report): void {
+const validateRoundHistory = (record: RunRecordShape, report: Report): void => {
   if (record.implementationRound > record.snapshot.loop.policy.maxImplementationRounds)
     report("Implementation round exceeds loop policy.");
   const hasConsecutiveNumbers = record.rounds.every(({ number }, index) => number === index + 1);
@@ -99,16 +98,16 @@ function validateRoundHistory(record: RunRecordShape, report: Report): void {
     hasDuplicates(record.rounds.map(({ id }) => id))
   )
     report("Implementation round history must have stable consecutive identities.");
-}
+};
 
-function validateAttempt(
+const validateAttempt = (
   attempt: Attempt,
   previous: Attempt | undefined,
   index: number,
   stepId: string,
   currentRound: number,
   report: Report,
-): void {
+): void => {
   if (attempt.number !== index + 1) report(`Step ${stepId} attempt numbers must be consecutive.`);
   if (attempt.implementationRound > currentRound)
     report(`Step ${stepId} attempt refers to a future round.`);
@@ -118,9 +117,9 @@ function validateAttempt(
     report(`Step ${stepId} attempt ${attempt.number} has an invalid end time.`);
   if (Boolean(attempt.sessionId) !== Boolean(attempt.turnId))
     report(`Step ${stepId} attempt ${attempt.number} has incomplete resume identity.`);
-}
+};
 
-function validateStepRun(step: StepRun, record: RunRecordShape, report: Report): void {
+const validateStepRun = (step: StepRun, record: RunRecordShape, report: Report): void => {
   if (step.attempts.length > record.snapshot.loop.policy.maxAttemptsPerStep)
     report(`Step ${step.stepId} exceeds attempt policy.`);
   const active = step.attempts.filter(({ status }) => status === "running");
@@ -138,9 +137,9 @@ function validateStepRun(step: StepRun, record: RunRecordShape, report: Report):
       report,
     ),
   );
-}
+};
 
-function validateSteps(record: RunRecordShape, report: Report): void {
+const validateSteps = (record: RunRecordShape, report: Report): void => {
   const loopStepIds = record.snapshot.loop.steps.map(({ id }) => id);
   const runStepIds = record.steps.map(({ stepId }) => stepId);
   if (
@@ -153,9 +152,9 @@ function validateSteps(record: RunRecordShape, report: Report): void {
   const attempts = record.steps.flatMap(({ attempts }) => attempts);
   if (hasDuplicates(attempts.map(({ id }) => id))) report("Attempt IDs must be unique.");
   for (const step of record.steps) validateStepRun(step, record, report);
-}
+};
 
-function validateBindings(record: RunRecordShape, report: Report): void {
+const validateBindings = (record: RunRecordShape, report: Report): void => {
   const { loop, bindings, projectDefault } = record.snapshot;
   const stepIds = loop.steps.map(({ id }) => id);
   if (Object.keys(bindings).length !== stepIds.length || stepIds.some((id) => !bindings[id]))
@@ -165,14 +164,14 @@ function validateBindings(record: RunRecordShape, report: Report): void {
     if (JSON.stringify(bindings[step.id]) !== JSON.stringify(expected))
       report(`Resolved binding for ${step.id} differs from the selected loop and project default.`);
   }
-}
+};
 
-function validateProvenance(
+const validateProvenance = (
   receipt: Receipt,
   record: RunRecordShape,
   precedingIds: Set<string>,
   report: Report,
-): void {
+): void => {
   if (!("provenance" in receipt)) return;
   for (const inputId of receipt.provenance.inputReceiptIds) {
     if (!precedingIds.has(inputId))
@@ -185,9 +184,9 @@ function validateProvenance(
     receipt.freshness.checkedAgainstCandidateId !== receipt.provenance.candidateId
   )
     report("Current evidence must be checked against its candidate.");
-}
+};
 
-function validateEvidence(record: RunRecordShape, report: Report): void {
+const validateEvidence = (record: RunRecordShape, report: Report): void => {
   const evidenceIds = new Set<string>();
   const eventSequences = new Set<number>();
   const stepIds = new Set(record.snapshot.loop.steps.map(({ id }) => id));
@@ -215,7 +214,7 @@ function validateEvidence(record: RunRecordShape, report: Report): void {
     validateProvenance(receipt, record, evidenceIds, report);
     evidenceIds.add(receipt.id);
   }
-}
+};
 
 export const runRecordSchema = baseRunRecordSchema.superRefine((record, context) => {
   const report: Report = (message) => context.addIssue({ code: "custom", message });
@@ -228,20 +227,20 @@ export const runRecordSchema = baseRunRecordSchema.superRefine((record, context)
 export type RunRecord = z.infer<typeof runRecordSchema>;
 
 /** Snapshot all inputs once; callers supply the actual protected baseline when available. */
-export function createRunSnapshot(
+export const createRunSnapshot = (
   loopInput: unknown,
   taskInput: unknown,
   defaultBinding: ExecutionBinding,
   baselineInput?: Baseline,
-  id: string = randomUUID(),
-): RunSnapshot {
+  id: string = crypto.randomUUID(),
+): RunSnapshot => {
   const loop = parseLoop(loopInput);
   if (loop.status !== "published") throw new Error("Publish the loop before creating a run.");
   const task = taskSchema.parse(taskInput);
   const binding = executionBindingSchema.parse(defaultBinding);
   const baseline = baselineSchema.parse(
     baselineInput ?? {
-      id: randomUUID(),
+      id: crypto.randomUUID(),
       kind: "unversioned",
       capturedAt: new Date().toISOString(),
     },
@@ -258,26 +257,26 @@ export function createRunSnapshot(
       baseline,
     }),
   );
-}
-export function createRunRecord(snapshot: RunSnapshot): RunRecord {
+};
+export const createRunRecord = (snapshot: RunSnapshot): RunRecord => {
   return runRecordSchema.parse({
     schemaVersion: 2,
     revision: 0,
     snapshot,
     status: "pending",
     implementationRound: 1,
-    rounds: [{ id: randomUUID(), number: 1, startedAt: new Date().toISOString() }],
+    rounds: [{ id: crypto.randomUUID(), number: 1, startedAt: new Date().toISOString() }],
     steps: snapshot.loop.steps.map((step) => ({
-      id: randomUUID(),
+      id: crypto.randomUUID(),
       stepId: step.id,
       status: "pending",
       attempts: [],
     })),
     evidence: [],
   });
-}
+};
 /** A retry increments the attempt only. Repair scheduling explicitly advances the round. */
-export function startAttempt(record: RunRecord, stepId: string): RunRecord {
+export const startAttempt = (record: RunRecord, stepId: string): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
   if (!step) throw new Error(`Unknown step: ${stepId}`);
   if (step.attempts.length >= record.snapshot.loop.policy.maxAttemptsPerStep)
@@ -296,7 +295,7 @@ export function startAttempt(record: RunRecord, stepId: string): RunRecord {
             attempts: [
               ...item.attempts,
               {
-                id: randomUUID(),
+                id: crypto.randomUUID(),
                 number: item.attempts.length + 1,
                 implementationRound: record.implementationRound,
                 status: "running",
@@ -307,12 +306,12 @@ export function startAttempt(record: RunRecord, stepId: string): RunRecord {
         : item,
     ),
   });
-}
-export function finishAttempt(
+};
+export const finishAttempt = (
   record: RunRecord,
   stepId: string,
   status: "succeeded" | "failed" | "canceled",
-): RunRecord {
+): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
   if (!step?.attempts.some((attempt) => attempt.status === "running"))
     throw new Error(`No running attempt for ${stepId}.`);
@@ -333,14 +332,14 @@ export function finishAttempt(
         : item,
     ),
   });
-}
+};
 /** Record native resume handles once the adapter returns them; they remain fixed afterward. */
-export function attachAttemptSession(
+export const attachAttemptSession = (
   record: RunRecord,
   stepId: string,
   sessionId: string,
   turnId: string,
-): RunRecord {
+): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
   const attempt = step?.attempts.at(-1);
   if (!attempt || attempt.status !== "running" || attempt.sessionId || attempt.turnId)
@@ -360,8 +359,8 @@ export function attachAttemptSession(
         : item,
     ),
   });
-}
-export function advanceImplementationRound(record: RunRecord): RunRecord {
+};
+export const advanceImplementationRound = (record: RunRecord): RunRecord => {
   if (record.implementationRound >= record.snapshot.loop.policy.maxImplementationRounds)
     throw new Error("Implementation round limit reached.");
   if (record.steps.some((step) => step.attempts.some((attempt) => attempt.status === "running")))
@@ -373,16 +372,16 @@ export function advanceImplementationRound(record: RunRecord): RunRecord {
     rounds: [
       ...record.rounds,
       {
-        id: randomUUID(),
+        id: crypto.randomUUID(),
         number: record.implementationRound + 1,
         startedAt: new Date().toISOString(),
       },
     ],
   });
-}
-export function migrateRun(input: unknown): unknown {
+};
+export const migrateRun = (input: unknown): unknown => {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input;
-  const value = input as Record<string, unknown>;
+  const value = z.record(z.string(), z.unknown()).parse(input);
   // The foundation's detached snapshots predated a schemaVersion field.
   if (
     value.schemaVersion !== 1 &&
@@ -392,7 +391,7 @@ export function migrateRun(input: unknown): unknown {
   const loop = parseLoop(value.loop);
   const priorBindings =
     value.bindings && typeof value.bindings === "object" && !Array.isArray(value.bindings)
-      ? (value.bindings as Record<string, unknown>)
+      ? z.record(z.string(), z.unknown()).parse(value.bindings)
       : {};
   const unboundStep = loop.steps.find((step) => !step.binding);
   const binding = executionBindingSchema.parse(
@@ -411,4 +410,4 @@ export function migrateRun(input: unknown): unknown {
       capturedAt: value.createdAt,
     },
   };
-}
+};

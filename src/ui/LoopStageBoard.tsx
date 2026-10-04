@@ -2,7 +2,7 @@ import type { LoopDefinition } from "../domain/loop.js";
 import { Button } from "@/components/ui/button";
 import { addStep, semanticDrop, stageOf, stages } from "./loop-editor-model";
 
-export function LoopStageBoard({
+export const LoopStageBoard = ({
   loop,
   apply,
   openDrawer,
@@ -12,7 +12,7 @@ export function LoopStageBoard({
   apply: (action: (current: LoopDefinition) => LoopDefinition) => boolean;
   openDrawer: (id: string, origin?: HTMLElement) => void;
   setMessage: (message: string) => void;
-}) {
+}) => {
   return (
     <div className="overflow-x-auto bg-[radial-gradient(#c8cbc7_.6px,transparent_.6px)] bg-[length:17px_17px] bg-[#f4f3ef] p-4">
       <div className="flex items-center justify-between">
@@ -154,4 +154,4 @@ export function LoopStageBoard({
       </div>
     </div>
   );
-}
+};

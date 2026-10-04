@@ -7,17 +7,17 @@ import type { Baseline } from "../domain/run.js";
 
 const run = promisify(execFile);
 
-async function git(project: string, ...args: string[]): Promise<string> {
+const git = async (project: string, ...args: string[]): Promise<string> => {
   const { stdout } = await run("git", ["-C", project, ...args], {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
   });
   return stdout;
-}
+};
 
-async function rejectEscapingLinks(workspace: string): Promise<void> {
+const rejectEscapingLinks = async (workspace: string): Promise<void> => {
   const root = await realpath(workspace);
-  async function inspect(directory: string): Promise<void> {
+  const inspect = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       if (directory === workspace && entry.name === ".git") continue;
       const path = join(directory, entry.name);
@@ -30,12 +30,12 @@ async function rejectEscapingLinks(workspace: string): Promise<void> {
           );
       }
     }
-  }
+  };
   await inspect(workspace);
-}
+};
 
 /** A private clone receives the selected HEAD plus tracked edits, deletions and untracked files. */
-export async function captureGitBaseline(project: string): Promise<Baseline> {
+export const captureGitBaseline = async (project: string): Promise<Baseline> => {
   const top = (await git(project, "rev-parse", "--show-toplevel")).trim();
   if (top !== (await realpath(project)))
     throw new Error("The selected project must be the Git repository root.");
@@ -129,4 +129,4 @@ export async function captureGitBaseline(project: string): Promise<Baseline> {
     await rm(workspace, { recursive: true, force: true });
     throw error;
   }
-}
+};

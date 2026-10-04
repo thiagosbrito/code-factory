@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 
-export function ErrorView({ message, onRetry }: { message: string; onRetry: () => void }) {
+export const ErrorView = ({ message, onRetry }: { message: string; onRetry: () => void }) => {
   return (
     <main className="mx-auto max-w-xl p-8">
       <h1 className="text-2xl font-semibold">Cannot open project</h1>
@@ -12,4 +12,4 @@ export function ErrorView({ message, onRetry }: { message: string; onRetry: () =
       </Button>
     </main>
   );
-}
+};

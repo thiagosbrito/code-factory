@@ -22,18 +22,18 @@ import {
 } from "../domain/run.js";
 import type { ExecutionBinding } from "../domain/loop.js";
 
-function missing(error: unknown): boolean {
+const missing = (error: unknown): boolean => {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
-}
-async function factoryRoot(projectDirectory: string): Promise<string> {
+};
+const factoryRoot = async (projectDirectory: string): Promise<string> => {
   const project = await realpath(projectDirectory);
   const root = join(project, ".code-factory");
   await mkdir(root, { recursive: true });
   if ((await lstat(root)).isSymbolicLink())
     throw new Error(".code-factory must be a real directory.");
   return root;
-}
-function explain(path: string, error: unknown): Error {
+};
+const explain = (path: string, error: unknown): Error => {
   if (error instanceof ZodError)
     return new Error(
       `Invalid ${path}: ${error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`,
@@ -42,17 +42,17 @@ function explain(path: string, error: unknown): Error {
   if (error instanceof SyntaxError)
     return new Error(`Invalid JSON in ${path}: ${error.message}`, { cause: error });
   return error instanceof Error ? error : new Error(String(error));
-}
-async function readJson(path: string): Promise<unknown | undefined> {
+};
+const readJson = async (path: string): Promise<unknown | undefined> => {
   try {
     await rejectLinkedFile(path);
-    return JSON.parse(await readFile(path, "utf8")) as unknown;
+    return JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
     if (missing(error)) return undefined;
     throw explain(path, error);
   }
-}
-async function rejectLinkedFile(path: string): Promise<void> {
+};
+const rejectLinkedFile = async (path: string): Promise<void> => {
   try {
     const entry = await lstat(path);
     if (entry.isSymbolicLink() || !entry.isFile())
@@ -61,8 +61,8 @@ async function rejectLinkedFile(path: string): Promise<void> {
     if (missing(error)) return;
     throw error;
   }
-}
-async function atomicWrite(path: string, value: unknown): Promise<void> {
+};
+const atomicWrite = async (path: string, value: unknown): Promise<void> => {
   await rejectLinkedFile(path);
   const temp = `${path}.${randomUUID()}.tmp`;
   await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
@@ -71,8 +71,8 @@ async function atomicWrite(path: string, value: unknown): Promise<void> {
   } finally {
     await rm(temp, { force: true });
   }
-}
-async function exclusiveWrite(path: string, value: unknown): Promise<void> {
+};
+const exclusiveWrite = async (path: string, value: unknown): Promise<void> => {
   const temp = `${path}.${randomUUID()}.tmp`;
   await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
   try {
@@ -80,12 +80,12 @@ async function exclusiveWrite(path: string, value: unknown): Promise<void> {
   } finally {
     await rm(temp, { force: true });
   }
-}
-function loopId(id: string): string {
+};
+const loopId = (id: string): string => {
   if (!/^[a-z][a-z0-9-]{0,63}$/.test(id)) throw new Error(`Invalid loop ID: ${id}`);
   return id;
-}
-async function rejectLinkedDirectory(path: string): Promise<void> {
+};
+const rejectLinkedDirectory = async (path: string): Promise<void> => {
   try {
     const entry = await lstat(path);
     if (entry.isSymbolicLink() || !entry.isDirectory())
@@ -94,15 +94,15 @@ async function rejectLinkedDirectory(path: string): Promise<void> {
     if (missing(error)) return;
     throw error;
   }
-}
-async function loopDirectory(project: string, id: string): Promise<string> {
+};
+const loopDirectory = async (project: string, id: string): Promise<string> => {
   const loops = join(await factoryRoot(project), "loops");
   const directory = join(loops, loopId(id));
   await rejectLinkedDirectory(loops);
   await rejectLinkedDirectory(directory);
   return directory;
-}
-export async function listPublishedLoops(project: string): Promise<LoopDefinition[]> {
+};
+export const listPublishedLoops = async (project: string): Promise<LoopDefinition[]> => {
   const root = join(await factoryRoot(project), "loops");
   await rejectLinkedDirectory(root);
   let entries;
@@ -121,13 +121,13 @@ export async function listPublishedLoops(project: string): Promise<LoopDefinitio
     }
   }
   return loops;
-}
-async function runDirectory(project: string): Promise<string> {
+};
+const runDirectory = async (project: string): Promise<string> => {
   const directory = join(await factoryRoot(project), "runs");
   await rejectLinkedDirectory(directory);
   return directory;
-}
-export async function listPublishedVersions(project: string, id: string): Promise<number[]> {
+};
+export const listPublishedVersions = async (project: string, id: string): Promise<number[]> => {
   const directory = join(await loopDirectory(project, id), "versions");
   await rejectLinkedDirectory(directory);
   try {
@@ -139,16 +139,18 @@ export async function listPublishedVersions(project: string, id: string): Promis
     if (missing(error)) return [];
     throw error;
   }
-}
+};
 /** List only persisted definitions; a new project has no implicit starter loops. */
-export async function listLoops(project: string): Promise<
+export const listLoops = async (
+  project: string,
+): Promise<
   {
     id: string;
     draft: LoopDefinition | null;
     published: LoopDefinition | null;
     versions: number[];
   }[]
-> {
+> => {
   const directory = join(await factoryRoot(project), "loops");
   await rejectLinkedDirectory(directory);
   let names: string[];
@@ -172,8 +174,8 @@ export async function listLoops(project: string): Promise<
       return { id, draft, published, versions };
     }),
   );
-}
-export async function readDraft(project: string, id: string): Promise<LoopDefinition | null> {
+};
+export const readDraft = async (project: string, id: string): Promise<LoopDefinition | null> => {
   const path = join(await loopDirectory(project, id), "draft.json");
   const raw = await readJson(path);
   if (raw === undefined) return null;
@@ -185,12 +187,12 @@ export async function readDraft(project: string, id: string): Promise<LoopDefini
   } catch (error) {
     throw explain(path, error);
   }
-}
-export async function readPublishedVersion(
+};
+export const readPublishedVersion = async (
   project: string,
   id: string,
   version: number,
-): Promise<LoopDefinition | null> {
+): Promise<LoopDefinition | null> => {
   if (!Number.isSafeInteger(version) || version < 1) throw new Error("Invalid loop version.");
   const directory = join(await loopDirectory(project, id), "versions");
   await rejectLinkedDirectory(directory);
@@ -205,9 +207,9 @@ export async function readPublishedVersion(
   } catch (error) {
     throw explain(path, error);
   }
-}
+};
 /** Import validation finishes before a file is replaced. Published versions are never draft targets. */
-export async function saveDraft(project: string, input: unknown): Promise<LoopDefinition> {
+export const saveDraft = async (project: string, input: unknown): Promise<LoopDefinition> => {
   const loop = parseLoop(input);
   if (loop.status !== "draft") throw new Error("Only a draft can be saved as a draft.");
   const directory = await loopDirectory(project, loop.id);
@@ -221,8 +223,8 @@ export async function saveDraft(project: string, input: unknown): Promise<LoopDe
   await rejectLinkedDirectory(directory);
   await atomicWrite(join(directory, "draft.json"), loop);
   return loop;
-}
-export async function publishDraft(project: string, id: string): Promise<LoopDefinition> {
+};
+export const publishDraft = async (project: string, id: string): Promise<LoopDefinition> => {
   const draft = await readDraft(project, id);
   if (!draft) throw new Error(`No saved draft for ${id}.`);
   const versions = await listPublishedVersions(project, id);
@@ -238,8 +240,8 @@ export async function publishDraft(project: string, id: string): Promise<LoopDef
     version: draft.version + 1,
   });
   return published;
-}
-export async function readRun(project: string, id: string): Promise<RunRecord | null> {
+};
+export const readRun = async (project: string, id: string): Promise<RunRecord | null> => {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid run ID.");
   const path = join(await runDirectory(project), `${id}.json`);
   const raw = await readJson(path);
@@ -251,8 +253,8 @@ export async function readRun(project: string, id: string): Promise<RunRecord | 
   } catch (error) {
     throw explain(path, error);
   }
-}
-export async function listRuns(project: string): Promise<RunRecord[]> {
+};
+export const listRuns = async (project: string): Promise<RunRecord[]> => {
   const directory = await runDirectory(project);
   try {
     const files = (await readdir(directory)).filter((name) => /^[0-9a-f-]{36}\.json$/i.test(name));
@@ -264,8 +266,8 @@ export async function listRuns(project: string): Promise<RunRecord[]> {
     if (missing(error)) return [];
     throw error;
   }
-}
-export async function createRun(project: string, input: RunRecord): Promise<RunRecord> {
+};
+export const createRun = async (project: string, input: RunRecord): Promise<RunRecord> => {
   const record = runRecordSchema.parse(input);
   if (record.revision !== 0) throw new Error("A new run must start at revision zero.");
   const directory = await runDirectory(project);
@@ -273,24 +275,24 @@ export async function createRun(project: string, input: RunRecord): Promise<RunR
   await rejectLinkedDirectory(directory);
   await exclusiveWrite(join(directory, `${record.snapshot.id}.json`), record);
   return record;
-}
-export async function createRunFromPublished(
+};
+export const createRunFromPublished = async (
   project: string,
   loopId: string,
   version: number,
   task: unknown,
   defaultBinding: ExecutionBinding,
   baseline: Baseline,
-): Promise<RunRecord> {
+): Promise<RunRecord> => {
   const loop = await readPublishedVersion(project, loopId, version);
   if (!loop) throw new Error(`Published loop ${loopId} v${version} does not exist.`);
   return createRun(
     project,
     createRunRecord(createRunSnapshot(loop, task, defaultBinding, baseline)),
   );
-}
+};
 /** Serialized updates preserve immutable inputs and reject stale, destructive history writes. */
-export async function updateRun(project: string, input: RunRecord): Promise<RunRecord> {
+export const updateRun = async (project: string, input: RunRecord): Promise<RunRecord> => {
   const record = runRecordSchema.parse(input);
   const directory = await runDirectory(project);
   const path = join(directory, `${record.snapshot.id}.json`);
@@ -354,4 +356,4 @@ export async function updateRun(project: string, input: RunRecord): Promise<RunR
   } finally {
     await rm(lock, { recursive: true, force: true });
   }
-}
+};

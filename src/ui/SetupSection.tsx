@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 
-export function SetupSection({
+export const SetupSection = ({
   number,
   title,
   description,
@@ -11,7 +11,7 @@ export function SetupSection({
   title: string;
   description: string;
   children: ReactNode;
-}) {
+}) => {
   return (
     <Card className="p-5">
       <div className="flex items-center gap-3">
@@ -26,4 +26,4 @@ export function SetupSection({
       <div className="mt-5">{children}</div>
     </Card>
   );
-}
+};

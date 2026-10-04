@@ -2,7 +2,7 @@ import type { RefObject } from "react";
 import { Input } from "@/components/ui/input";
 import { SetupSection } from "./SetupSection";
 
-export function ProjectSetupSection({
+export const ProjectSetupSection = ({
   statePath,
   name,
   nameRef,
@@ -14,7 +14,7 @@ export function ProjectSetupSection({
   nameRef: RefObject<HTMLInputElement | null>;
   error: string;
   onNameChange: (value: string) => void;
-}) {
+}) => {
   return (
     <SetupSection
       number={1}
@@ -51,4 +51,4 @@ export function ProjectSetupSection({
       </div>
     </SetupSection>
   );
-}
+};

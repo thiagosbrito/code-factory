@@ -25,21 +25,21 @@ export type StartRunInput = z.infer<typeof startRunInputSchema>;
 
 const activeRequests = new Map<string, { input: StartRunInput; work: Promise<RunRecord> }>();
 
-function matchesRequest(record: RunRecord, input: StartRunInput): boolean {
+const matchesRequest = (record: RunRecord, input: StartRunInput): boolean => {
   return (
     record.snapshot.loop.id === input.loopId &&
     record.snapshot.loop.version === input.loopVersion &&
     record.snapshot.task.description === input.description &&
     record.snapshot.task.ticket?.id === input.ticketId?.toUpperCase()
   );
-}
+};
 
-export async function startRun(
+export const startRun = async (
   project: string,
   raw: unknown,
   agents: AgentConnection[],
   tracker?: TicketTracker,
-): Promise<RunRecord> {
+): Promise<RunRecord> => {
   const input = startRunInputSchema.parse(raw);
   const key = `${project}:${input.requestId}`;
   const running = activeRequests.get(key);
@@ -55,14 +55,14 @@ export async function startRun(
   } finally {
     activeRequests.delete(key);
   }
-}
+};
 
-async function startOnce(
+const startOnce = async (
   project: string,
   input: StartRunInput,
   agents: AgentConnection[],
   tracker?: TicketTracker,
-): Promise<RunRecord> {
+): Promise<RunRecord> => {
   const existing = await readRun(project, input.requestId);
   if (existing) {
     if (!matchesRequest(existing, input))
@@ -116,4 +116,4 @@ async function startOnce(
     }
     throw error;
   }
-}
+};

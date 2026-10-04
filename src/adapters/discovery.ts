@@ -10,10 +10,10 @@ const executableNames = [
   { provider: "claude-code", names: ["claude"] },
 ] as const;
 
-async function findExecutable(
+const findExecutable = async (
   names: readonly string[],
   searchPath: string,
-): Promise<string | null> {
+): Promise<string | null> => {
   for (const directory of searchPath.split(delimiter).filter(Boolean)) {
     for (const name of names) {
       const candidates =
@@ -31,12 +31,12 @@ async function findExecutable(
     }
   }
   return null;
-}
+};
 
 /** Detect executable candidates without launching agents or reading credentials. */
-export async function discoverAgents(
+export const discoverAgents = async (
   searchPath = process.env.PATH ?? "",
-): Promise<AgentConnection[]> {
+): Promise<AgentConnection[]> => {
   const discovered: AgentConnection[] = await Promise.all(
     executableNames.map(async ({ provider, names }) => {
       const executable = await findExecutable(names, searchPath);
@@ -64,4 +64,4 @@ export async function discoverAgents(
       reason: "Choose an executable and supported protocol, then verify the handshake.",
     },
   ];
-}
+};

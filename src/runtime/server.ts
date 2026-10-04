@@ -27,25 +27,25 @@ const contentTypes: Record<string, string> = {
 };
 const defaultUiDirectory = fileURLToPath(new URL("../../ui/", import.meta.url));
 
-function json(response: ServerResponse, status: number, body: unknown) {
+const json = (response: ServerResponse, status: number, body: unknown) => {
   response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
   response.end(JSON.stringify(body));
-}
+};
 
-async function readBody(request: import("node:http").IncomingMessage): Promise<unknown> {
+const readBody = async (request: import("node:http").IncomingMessage): Promise<unknown> => {
   let body = "";
   for await (const chunk of request) {
     body += String(chunk);
     if (body.length > 1_048_576) throw new ProjectError("Request body is too large.", 413);
   }
   try {
-    return JSON.parse(body) as unknown;
+    return JSON.parse(body);
   } catch {
     throw new ProjectError("Send valid JSON.", 400);
   }
-}
+};
 
-async function entryCount(directory: string, suffix?: string): Promise<number> {
+const entryCount = async (directory: string, suffix?: string): Promise<number> => {
   try {
     return (await readdir(directory, { withFileTypes: true })).filter((entry) =>
       suffix ? entry.isFile() && entry.name.endsWith(suffix) : entry.isDirectory(),
@@ -54,12 +54,12 @@ async function entryCount(directory: string, suffix?: string): Promise<number> {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return 0;
     throw error;
   }
-}
+};
 
-async function validateDefaultBinding(
+const validateDefaultBinding = async (
   input: Parameters<typeof saveProjectSetup>[1],
   connections: ConnectionRegistry,
-): Promise<void> {
+): Promise<void> => {
   const binding = input.defaultBinding;
   if (!binding) return;
 
@@ -81,9 +81,9 @@ async function validateDefaultBinding(
   const verifiedPath = configuredPath ? await realpath(configuredPath).catch(() => null) : null;
   if (verifiedPath !== connection.executable)
     throw new ProjectError("Verify the current custom executable before saving its default.", 422);
-}
+};
 
-async function serveAsset(response: ServerResponse, pathname: string, uiDirectory: string) {
+const serveAsset = async (response: ServerResponse, pathname: string, uiDirectory: string) => {
   const root = resolve(uiDirectory);
   const path = resolve(root, pathname === "/" ? "index.html" : `.${pathname}`);
   if (!path.startsWith(`${root}${sep}`)) return json(response, 403, { error: "Forbidden path" });
@@ -102,17 +102,17 @@ async function serveAsset(response: ServerResponse, pathname: string, uiDirector
       return json(response, 404, { error: "UI asset missing. Build the package or use pnpm dev." });
     throw error;
   }
-}
+};
 
 /** Bind only to loopback; project setup writes to the CLI-selected workspace. */
-export async function startLocalServer(options: {
+export const startLocalServer = async (options: {
   projectDirectory: string;
   port?: number;
   uiDirectory?: string;
   devOrigin?: string;
   connections?: ConnectionRegistry;
   tracker?: TicketTracker;
-}) {
+}) => {
   const projectDirectory = await validateProjectDirectory(options.projectDirectory);
   const connections = options.connections ?? new ConnectionRegistry(projectDirectory);
   const tracker =
@@ -290,4 +290,4 @@ export async function startLocalServer(options: {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Runtime has no TCP address.");
   return { server, url: `http://127.0.0.1:${address.port}` };
-}
+};

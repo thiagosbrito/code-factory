@@ -1,9 +1,7 @@
-import { useRef, useState } from "react";
 import type { LoopDefinition } from "../domain/loop.js";
 import type { ExecutionBinding } from "../domain/loop.js";
 import type { RunRecord } from "../domain/run.js";
 import type { AgentConnection } from "../adapters/contract.js";
-import type { RetrievedTicket } from "../runtime/tracker.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,12 +13,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, ApiError } from "./project-api";
-import { bindingError } from "./connection";
 
-type TicketState = "idle" | "loading" | "found" | "not-found" | "auth" | "error";
+import { useNewRunForm } from "./useNewRunForm";
 
-export function NewRunDialog({
+export const NewRunDialog = ({
   open,
   onOpenChange,
   projectName,
@@ -40,94 +36,25 @@ export function NewRunDialog({
   agents: AgentConnection[];
   defaultBinding: ExecutionBinding | null;
   onStarted: (id: string, run?: RunRecord) => void;
-}) {
-  const [loopKey, setLoopKey] = useState("");
-  const [description, setDescription] = useState("");
-  const [ticketId, setTicketId] = useState("");
-  const [ticket, setTicket] = useState<RetrievedTicket | null>(null);
-  const [ticketState, setTicketState] = useState<TicketState>("idle");
-  const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const requestSequence = useRef(0);
-  const ticketInput = useRef<HTMLInputElement>(null);
-  const submitLock = useRef(false);
-  const requestId = useRef(crypto.randomUUID());
-  const selected = loops.find((loop) => `${loop.id}:${loop.version}` === loopKey) ?? loops[0];
-  const connectionError = selected?.steps
-    .map((step) => bindingError(step.binding ?? defaultBinding, agents))
-    .find(Boolean);
-  const hasTicketInput = Boolean(ticketId.trim());
-  const ticketReady =
-    !hasTicketInput || (ticketState === "found" && ticket?.id === ticketId.trim().toUpperCase());
-
-  async function retrieve() {
-    const id = ticketId.trim().toUpperCase();
-    if (!id) return;
-    const sequence = ++requestSequence.current;
-    setTicket(null);
-    setTicketState("loading");
-    setError("");
-    try {
-      const result = await api<{ ticket: RetrievedTicket }>("/api/tickets/retrieve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      if (sequence !== requestSequence.current) return;
-      setTicket(result.ticket);
-      setTicketState("found");
-    } catch (caught) {
-      if (sequence !== requestSequence.current) return;
-      setTicketState(
-        caught instanceof ApiError && caught.status === 404
-          ? "not-found"
-          : caught instanceof ApiError && caught.status === 401
-            ? "auth"
-            : "error",
-      );
-    }
-  }
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (submitLock.current) return;
-    if (!selected) return setError("Publish a loop before starting a run.");
-    if (!description.trim() && !hasTicketInput)
-      return setError("Enter a description or retrieve a ticket.");
-    if (!ticketReady)
-      return setError("Retrieve this ticket, or clear it to start from the description.");
-    if (!canStart || connectionError)
-      return setError(connectionError ?? "Verify the selected agent connection before starting.");
-    submitLock.current = true;
-    setSubmitting(true);
-    setError("");
-    try {
-      const result = await api<{ runId: string; run?: RunRecord }>("/api/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requestId: requestId.current,
-          project: "selected",
-          loopId: selected.id,
-          loopVersion: selected.version,
-          description: description.trim(),
-          ...(hasTicketInput ? { ticketId: ticketId.trim().toUpperCase() } : {}),
-        }),
-      });
-      onStarted(result.runId, result.run);
-      requestId.current = crypto.randomUUID();
-      setDescription("");
-      setTicketId("");
-      setTicket(null);
-      setTicketState("idle");
-      onOpenChange(false);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not start the run.");
-    } finally {
-      submitLock.current = false;
-      setSubmitting(false);
-    }
-  }
+}) => {
+  const {
+    description,
+    ticketId,
+    ticket,
+    ticketState,
+    error,
+    submitting,
+    ticketInput,
+    selected,
+    connectionError,
+    hasTicketInput,
+    ticketReady,
+    retrieve,
+    submit,
+    changeLoop,
+    changeTicket,
+    changeDescription,
+  } = useNewRunForm({ loops, agents, defaultBinding, canStart, onStarted, onOpenChange });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -164,10 +91,7 @@ export function NewRunDialog({
               </span>
               <Select
                 value={selected ? `${selected.id}:${selected.version}` : ""}
-                onValueChange={(value) => {
-                  setLoopKey(value);
-                  requestId.current = crypto.randomUUID();
-                }}
+                onValueChange={changeLoop}
               >
                 <SelectTrigger aria-labelledby="loop-label">
                   <SelectValue placeholder="Select a published loop" />
@@ -204,14 +128,7 @@ export function NewRunDialog({
                 id="ticket-id"
                 ref={ticketInput}
                 value={ticketId}
-                onChange={(event) => {
-                  requestSequence.current++;
-                  setTicketId(event.target.value);
-                  setTicket(null);
-                  setTicketState("idle");
-                  setError("");
-                  requestId.current = crypto.randomUUID();
-                }}
+                onChange={(event) => changeTicket(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     event.preventDefault();
@@ -281,11 +198,7 @@ export function NewRunDialog({
             <Textarea
               id="task-description"
               value={description}
-              onChange={(event) => {
-                setDescription(event.target.value);
-                setError("");
-                requestId.current = crypto.randomUUID();
-              }}
+              onChange={(event) => changeDescription(event.target.value)}
               placeholder="Describe the change, constraints and expected outcome…"
             />
           </div>
@@ -321,4 +234,4 @@ export function NewRunDialog({
       </DialogContent>
     </Dialog>
   );
-}
+};

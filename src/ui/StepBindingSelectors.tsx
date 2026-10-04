@@ -1,13 +1,13 @@
 import type { AgentConnection } from "../adapters/contract.js";
-import type { ExecutionBinding, ProviderId } from "../domain/loop.js";
+import { providerIdSchema, type ExecutionBinding, type ProviderId } from "../domain/loop.js";
 import { bindingError, connectionViewModel } from "./connection";
 
 /** A null draft inherits the project default. THI-17 can place this in the step drawer. */
-export function switchStepProvider(provider: ProviderId | null): ExecutionBinding | null {
+export const switchStepProvider = (provider: ProviderId | null): ExecutionBinding | null => {
   return provider ? { provider, model: "agent-default" } : null;
-}
+};
 
-export function StepBindingSelectors({
+export const StepBindingSelectors = ({
   value,
   onChange,
   agents,
@@ -17,7 +17,7 @@ export function StepBindingSelectors({
   onChange: (binding: ExecutionBinding | null) => void;
   agents: AgentConnection[];
   projectDefault: ExecutionBinding | null;
-}) {
+}) => {
   const connection = agents.find((item) => item.provider === value?.provider);
   const connected = connection && connectionViewModel(connection).connected;
   const model = connection?.models?.find((item) => item.id === value?.model);
@@ -32,7 +32,9 @@ export function StepBindingSelectors({
           value={value?.provider ?? ""}
           onChange={(event) =>
             onChange(
-              switchStepProvider(event.target.value ? (event.target.value as ProviderId) : null),
+              switchStepProvider(
+                event.target.value ? providerIdSchema.parse(event.target.value) : null,
+              ),
             )
           }
           className="h-10 rounded-md border border-input bg-canvas px-3"
@@ -110,4 +112,4 @@ export function StepBindingSelectors({
       )}
     </div>
   );
-}
+};
