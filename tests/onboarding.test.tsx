@@ -38,6 +38,8 @@ function runtime(initial: ProjectConfig | null = null) {
       body = { project, path: "/canonical/project", revision };
     } else if (path === "/api/factory" && method === "GET") {
       body = { loops: 0, runs: 0 };
+    } else if (path === "/api/loops" && method === "GET") {
+      body = { loops: [] };
     } else if (path === "/api/agents" && method === "GET") {
       if (failAgents) {
         status = 503;

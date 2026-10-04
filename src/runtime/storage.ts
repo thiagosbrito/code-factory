@@ -140,6 +140,38 @@ export async function listPublishedVersions(project: string, id: string): Promis
     throw error;
   }
 }
+/** List only persisted definitions; a new project has no implicit starter loops. */
+export async function listLoops(project: string): Promise<
+  {
+    id: string;
+    draft: LoopDefinition | null;
+    published: LoopDefinition | null;
+    versions: number[];
+  }[]
+> {
+  const directory = join(await factoryRoot(project), "loops");
+  await rejectLinkedDirectory(directory);
+  let names: string[];
+  try {
+    names = (await readdir(directory, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name);
+  } catch (error) {
+    if (missing(error)) return [];
+    throw error;
+  }
+  return Promise.all(
+    names.sort().map(async (id) => {
+      loopId(id);
+      const draft = await readDraft(project, id);
+      const versions = await listPublishedVersions(project, id);
+      const published = versions.length
+        ? await readPublishedVersion(project, id, versions[versions.length - 1]!)
+        : null;
+      return { id, draft, published, versions };
+    }),
+  );
+}
 export async function readDraft(project: string, id: string): Promise<LoopDefinition | null> {
   const path = join(await loopDirectory(project, id), "draft.json");
   const raw = await readJson(path);

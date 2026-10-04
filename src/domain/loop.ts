@@ -18,12 +18,13 @@ export const executionBindingSchema = z.strictObject({
 
 const stepSchema = z.strictObject({
   id: identifierSchema,
-  name: z.string().trim().min(1),
+  name: z.string(),
   kind: z.enum(["agent", "check"]),
-  role: z.string().trim().min(1),
-  instruction: z.string().trim().min(1),
+  stage: z.enum(["evidence", "planning", "implementation", "review", "validation"]).optional(),
+  role: z.string(),
+  instruction: z.string(),
   binding: executionBindingSchema.optional(),
-  expectedOutputs: z.array(z.string().trim().min(1)).default([]),
+  expectedOutputs: z.array(z.string()).default([]),
   groupId: identifierSchema.optional(),
   position: z.strictObject({ x: z.number().finite(), y: z.number().finite() }).optional(),
 });
@@ -49,7 +50,7 @@ const groupSchema = z.discriminatedUnion("kind", [
 const baseLoopSchema = z.strictObject({
   schemaVersion: z.literal(2),
   id: identifierSchema,
-  name: z.string().trim().min(1),
+  name: z.string(),
   version: z.number().int().positive(),
   status: z.enum(["draft", "published"]),
   steps: z.array(stepSchema),
@@ -260,6 +261,14 @@ export const loopSchema = baseLoopSchema.superRefine((loop, context) => {
   const report: Report = (message) => context.addIssue({ code: "custom", message });
   if (stepIds.size !== loop.steps.length) report("Step IDs must be unique.");
   if (loop.status === "published" && !loop.steps.length) report("A published loop needs a step.");
+  if (loop.status === "published") {
+    if (!loop.name.trim()) report("A published loop needs a title.");
+    for (const step of loop.steps) {
+      if (!step.name.trim()) report(`Step ${step.id} needs a title.`);
+      if (!step.role.trim()) report(`Step ${step.id} needs a role.`);
+      if (!step.instruction.trim()) report(`Step ${step.id} needs instructions.`);
+    }
+  }
   const dependencies = validateDependencies(loop, stepIds, report);
   validateGroups(loop, stepIds, report);
   validateJoins(loop, stepIds, dependencies, report);
