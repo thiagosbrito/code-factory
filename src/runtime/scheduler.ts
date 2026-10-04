@@ -55,6 +55,61 @@ const fileDigest = async (directory: string): Promise<string> => {
   return hash.digest("hex");
 };
 
+const stepInputs = (record: RunRecord, stepId: string) => {
+  const sourceIds = record.snapshot.loop.dependencies
+    .filter((edge) => edge.to === stepId)
+    .map((edge) => edge.from)
+    .filter((id) => record.steps.find((step) => step.stepId === id)?.status === "succeeded");
+  const repeat = record.snapshot.loop.groups.find(
+    (group) =>
+      group.kind === "repeat" && group.continueWhen.to === stepId && record.implementationRound > 1,
+  );
+  if (repeat?.kind === "repeat") sourceIds.push(repeat.exitWhen.stepId);
+  const sources = [...new Set(sourceIds)].map((id) => {
+    const step = record.steps.find((item) => item.stepId === id);
+    const attemptId = step?.attempts.at(-1)?.id;
+    const evidence = record.evidence.filter(
+      (item) => item.stepId === id && item.attemptId === attemptId,
+    );
+    const receipts = evidence.filter((item) => ["check", "review", "output"].includes(item.kind));
+    const completed = [...evidence]
+      .reverse()
+      .find((item) => item.kind === "event" && item.title === "completed");
+    return {
+      stepId: id,
+      outcome: step?.outcome,
+      candidateId: step?.candidateId,
+      attemptId,
+      receipts: receipts.map((item) => item.id),
+      output: [
+        completed?.kind === "event" ? completed.detail : undefined,
+        ...receipts.map((item) => JSON.stringify(item)),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+  });
+  const task = record.snapshot.task;
+  const context = [
+    task.description && `Task description:\n${task.description}`,
+    task.ticket &&
+      `Retrieved ticket ${task.ticket.id}: ${task.ticket.title}\n${task.ticket.summary}`,
+    task.ticket?.attachments.length &&
+      `Ticket attachments:\n${task.ticket.attachments.map((item) => `${item.title}: ${item.url}`).join("\n")}`,
+    ...sources.map(
+      (source) =>
+        `Input from ${source.stepId} (outcome: ${source.outcome ?? "none"}, candidate: ${source.candidateId ?? "none"}):\n${source.output ?? ""}`,
+    ),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  return {
+    context,
+    receiptIds: sources.flatMap((source) => source.receipts),
+    identities: sources,
+  };
+};
+
 const checkCommand = async (
   command: string,
   cwd: string,
@@ -150,9 +205,19 @@ const executeOnce = async (
       const step = record.steps.find((item) => item.stepId === stepId);
       const attempt = step?.attempts.at(-1);
       if (!step || !attempt) throw new Error("Claimed attempt missing.");
+      const inputs = stepInputs(record, stepId);
       let result: StepResult;
+      let staleCheck = false;
       if (definition.kind === "check") {
         result = await checkCommand(definition.instruction, executionDirectory, signal);
+        staleCheck = (await fileDigest(workspace)) !== step.candidateId;
+        if (staleCheck)
+          result = {
+            status: "failed",
+            outcome: "failed",
+            summary: "Check changed the candidate; its result is stale.",
+            exitCode: result.exitCode ?? null,
+          };
       } else {
         const binding = record.snapshot.bindings[stepId];
         const adapter = binding ? resolveAdapter(binding.provider) : null;
@@ -169,9 +234,13 @@ const executeOnce = async (
             runId,
             stepId,
             attempt: attempt.number,
-            instruction: allowedOutcomes
-              ? `${definition.instruction}\n\nReturn exactly one outcome: ${allowedOutcomes.join(", ")}.`
-              : definition.instruction,
+            instruction: [
+              definition.instruction,
+              inputs.context,
+              allowedOutcomes && `Return exactly one outcome: ${allowedOutcomes.join(", ")}.`,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
             ...(allowedOutcomes ? { allowedOutcomes } : {}),
             binding,
             projectDirectory: executionDirectory,
@@ -227,14 +296,25 @@ const executeOnce = async (
           status: "failed",
           summary: `Undeclared review verdict: ${result.outcome ?? "none"}`,
         };
-      const candidateId = await fileDigest(workspace);
+      const candidateId =
+        definition.kind === "check" && step.candidateId
+          ? step.candidateId
+          : await fileDigest(workspace);
       await commit((current) => completeStep(current, stepId, { ...result, candidateId }));
       if (
         definition.kind === "check" ||
         (definition.stage === "review" && result.status === "succeeded")
       )
         await commit((current) =>
-          appendReceipt(current, stepId, attempt.id, definition.instruction, result),
+          appendReceipt(
+            current,
+            stepId,
+            attempt.id,
+            definition.instruction,
+            result,
+            inputs.receiptIds,
+            staleCheck,
+          ),
         );
     } catch (error) {
       if (record.steps.find((step) => step.stepId === stepId)?.status === "running")
@@ -273,18 +353,11 @@ const executeOnce = async (
       : ready;
     const launched: string[] = [];
     for (const definition of selected) {
-      const sources = record.snapshot.loop.dependencies
-        .filter((edge) => edge.to === definition.id)
-        .map((edge) => {
-          const source = record.steps.find((step) => step.stepId === edge.from);
-          return [
-            source?.id,
-            source?.attempts.at(-1)?.id,
-            source?.outcome,
-            source?.candidateId,
-          ].join(":");
-        });
-      const inputHash = hashInputs(candidateId, sources);
+      const inputs = stepInputs(record, definition.id);
+      const inputHash = hashInputs(candidateId, [
+        inputs.context,
+        JSON.stringify(inputs.identities),
+      ]);
       record = await commit((current) => claimStep(current, definition.id, candidateId, inputHash));
       launched.push(definition.id);
     }
@@ -336,6 +409,8 @@ const appendReceipt = (
   attemptId: string,
   instruction: string,
   result: StepResult,
+  inputReceiptIds: string[],
+  stale: boolean,
 ): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
   if (!step?.candidateId || !step.inputHash) throw new Error("Step has no frozen inputs.");
@@ -344,9 +419,12 @@ const appendReceipt = (
     source: definition?.kind === "check" ? "check" : "agent",
     baselineId: record.snapshot.baseline.id,
     candidateId: step.candidateId,
-    inputReceiptIds: [],
+    inputReceiptIds,
   };
-  const freshness = { state: "current", checkedAgainstCandidateId: step.candidateId };
+  const freshness = {
+    state: stale ? "superseded" : "current",
+    checkedAgainstCandidateId: step.candidateId,
+  };
   const common = {
     id: crypto.randomUUID(),
     runId: record.snapshot.id,

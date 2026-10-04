@@ -287,7 +287,15 @@ describe("portable scheduler", () => {
       const record = createRunRecord(
         createRunSnapshot(
           seed.snapshot.loop,
-          { description: "Task" },
+          {
+            description: "Task",
+            ticket: {
+              id: "THI-10",
+              title: "Requested change",
+              summary: "Build the scheduler",
+              attachments: [{ title: "Spec", url: "https://example.com/spec" }],
+            },
+          },
           { provider: "mock", model: "default" },
           {
             id: "baseline",
@@ -300,9 +308,11 @@ describe("portable scheduler", () => {
       );
       await createRun(root, record);
       const seen = new Map<string, string>();
+      const instructions = new Map<string, string>();
       const adapter = {
         ...mockAdapter,
         async *execute(input: Parameters<typeof mockAdapter.execute>[0], signal: AbortSignal) {
+          instructions.set(input.stepId, input.instruction);
           if (input.stepId === "build")
             await writeFile(join(input.projectDirectory, "task.txt"), "candidate");
           if (input.stepId === "quality")
@@ -316,6 +326,11 @@ describe("portable scheduler", () => {
       expect(result.status).toBe("succeeded");
       expect(seen.get("quality")).toBe("candidate");
       expect(seen.get("security")).toBe("candidate");
+      expect(instructions.get("build")).toContain("Task description:\nTask");
+      expect(instructions.get("build")).toContain("THI-10: Requested change");
+      expect(instructions.get("build")).toContain("Spec: https://example.com/spec");
+      expect(instructions.get("join")).toContain("Input from quality");
+      expect(instructions.get("join")).toContain("Input from security");
       expect(await readFile(join(workspace, "task.txt"), "utf8")).toBe("candidate");
       const reviews = result.evidence
         .filter((item) => item.kind === "review")
@@ -323,6 +338,64 @@ describe("portable scheduler", () => {
       expect(reviews).toHaveLength(2);
       expect(reviews[0]?.provenance.candidateId).toBe(reviews[1]?.provenance.candidateId);
       expect(reviews[0]?.inputHash).toBe(reviews[1]?.inputHash);
+      const joined = result.steps.find((item) => item.stepId === "join");
+      expect(joined?.inputHash).toBeTruthy();
+      const joinReceipt = result.evidence.find(
+        (item) => item.kind === "review" && item.stepId === "join",
+      );
+      expect(joinReceipt?.kind === "review" && joinReceipt.provenance.inputReceiptIds).toEqual(
+        reviews.map((item) => item.id),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails a check that mutates its input candidate and marks its receipt stale", async () => {
+    const root = await mkdtemp(join(tmpdir(), "factory-check-"));
+    try {
+      const workspace = join(root, ".code-factory", "workspaces", "candidate");
+      await mkdir(workspace, { recursive: true });
+      await writeFile(join(workspace, "task.txt"), "before");
+      const seed = run({
+        steps: [
+          {
+            id: "check",
+            name: "Check",
+            kind: "check",
+            stage: "validation",
+            role: "checker",
+            instruction: "printf after > task.txt",
+          },
+        ],
+        dependencies: [],
+        groups: [],
+        joins: [],
+      });
+      const record = createRunRecord(
+        createRunSnapshot(
+          seed.snapshot.loop,
+          { description: "Task" },
+          { provider: "mock", model: "default" },
+          {
+            id: "baseline",
+            kind: "git",
+            revision: "abc",
+            workspace: ".code-factory/workspaces/candidate",
+            capturedAt: new Date().toISOString(),
+          },
+        ),
+      );
+      await createRun(root, record);
+      const result = await executeRun(root, record.snapshot.id, () => mockAdapter);
+      const receipt = result.evidence.find((item) => item.kind === "check");
+      expect(result.status).toBe("failed");
+      expect(receipt?.kind === "check" && receipt.outcome).toBe("failed");
+      expect(receipt?.kind === "check" && receipt.freshness.state).toBe("superseded");
+      expect(receipt?.kind === "check" && receipt.provenance.candidateId).toBe(
+        result.steps[0]?.candidateId,
+      );
+      expect(await readFile(join(workspace, "task.txt"), "utf8")).toBe("after");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -478,13 +551,16 @@ describe("portable scheduler", () => {
         ),
       );
       await createRun(root, record);
+      const buildInstructions: string[] = [];
       const adapter = {
         ...mockAdapter,
         async *execute(
           input: Parameters<typeof mockAdapter.execute>[0],
         ): AsyncIterable<AdapterEvent> {
-          if (input.stepId === "build")
+          if (input.stepId === "build") {
+            buildInstructions.push(input.instruction);
             await writeFile(join(input.projectDirectory, "result.txt"), `round ${input.attempt}`);
+          }
           const identity = {
             runId: input.runId,
             stepId: input.stepId,
@@ -505,6 +581,9 @@ describe("portable scheduler", () => {
       expect(result.status).toBe("rejected");
       expect(result.implementationRound).toBe(2);
       expect(result.steps.find((item) => item.stepId === "build")?.attempts).toHaveLength(2);
+      expect(buildInstructions[0]).not.toContain("Input from review");
+      expect(buildInstructions[1]).toContain("Input from review");
+      expect(buildInstructions[1]).toContain("changes-requested");
       expect(result.evidence.filter((item) => item.kind === "review")).toHaveLength(2);
       expect(await readFile(join(workspace, "result.txt"), "utf8")).toBe("round 2");
     } finally {

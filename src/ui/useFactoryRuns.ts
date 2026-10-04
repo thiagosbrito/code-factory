@@ -20,6 +20,7 @@ export const useFactoryRuns = (demo: boolean) => {
     () => location.hash.match(/^#runs\/([0-9a-f-]{36})$/i)?.[1] ?? "",
   );
   const selectedRun = runs.find((run) => run.snapshot.id === selectedRunId);
+  const pollingRunId = executingRunId ?? (selectedRun?.status === "running" ? selectedRunId : null);
   useEffect(() => {
     if (demo) return;
     void Promise.all([
@@ -37,18 +38,18 @@ export const useFactoryRuns = (demo: boolean) => {
       );
   }, [demo]);
   useEffect(() => {
-    if (!executingRunId || demo) return;
+    if (!pollingRunId || demo) return;
     const timer = window.setInterval(() => {
-      void api(`/api/runs/${executingRunId}`, runResponseSchema.parse)
+      void api(`/api/runs/${pollingRunId}`, runResponseSchema.parse)
         .then(({ run }) =>
           setRuns((previous) =>
-            previous.map((item) => (item.snapshot.id === executingRunId ? run : item)),
+            previous.map((item) => (item.snapshot.id === pollingRunId ? run : item)),
           ),
         )
         .catch(() => undefined);
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [demo, executingRunId]);
+  }, [demo, pollingRunId]);
   const openRun = (id: string) => {
     setSelectedRunId(id);
     window.history.pushState(null, "", `#runs/${id}`);

@@ -40,7 +40,7 @@ export const RunExecution = ({
             {executing ? "Executing…" : "Execute run"}
           </Button>
         )}
-        {executing && (
+        {(executing || run.status === "running") && (
           <Button variant="outline" onClick={onCancel}>
             Cancel run
           </Button>
