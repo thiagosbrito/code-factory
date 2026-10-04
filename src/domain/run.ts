@@ -60,6 +60,9 @@ export const stepRunSchema = z.strictObject({
   id: z.uuid(),
   stepId: z.string(),
   status: z.enum(["pending", "running", "waiting", "succeeded", "failed", "skipped"]),
+  outcome: z.string().optional(),
+  candidateId: z.string().optional(),
+  inputHash: z.string().optional(),
   attempts: z.array(attemptSchema),
 });
 export const implementationRoundSchema = z.strictObject({
@@ -71,7 +74,17 @@ const baseRunRecordSchema = z.strictObject({
   schemaVersion: z.literal(2),
   revision: z.number().int().nonnegative(),
   snapshot: runSnapshotSchema,
-  status: z.enum(["pending", "running", "waiting", "succeeded", "failed", "canceled"]),
+  status: z.enum([
+    "pending",
+    "running",
+    "waiting",
+    "succeeded",
+    "failed",
+    "canceled",
+    "rejected",
+    "unavailable",
+    "blocked",
+  ]),
   implementationRound: z.number().int().positive(),
   rounds: z.array(implementationRoundSchema).min(1),
   steps: z.array(stepRunSchema),
@@ -120,7 +133,13 @@ const validateAttempt = (
 };
 
 const validateStepRun = (step: StepRun, record: RunRecordShape, report: Report): void => {
-  if (step.attempts.length > record.snapshot.loop.policy.maxAttemptsPerStep)
+  if (
+    record.rounds.some(
+      (round) =>
+        step.attempts.filter((attempt) => attempt.implementationRound === round.number).length >
+        record.snapshot.loop.policy.maxAttemptsPerStep,
+    )
+  )
     report(`Step ${step.stepId} exceeds attempt policy.`);
   const active = step.attempts.filter(({ status }) => status === "running");
   if (active.length > 1 || (active.length === 1 && step.attempts.at(-1) !== active[0]))
@@ -279,7 +298,10 @@ export const createRunRecord = (snapshot: RunSnapshot): RunRecord => {
 export const startAttempt = (record: RunRecord, stepId: string): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
   if (!step) throw new Error(`Unknown step: ${stepId}`);
-  if (step.attempts.length >= record.snapshot.loop.policy.maxAttemptsPerStep)
+  if (
+    step.attempts.filter((attempt) => attempt.implementationRound === record.implementationRound)
+      .length >= record.snapshot.loop.policy.maxAttemptsPerStep
+  )
     throw new Error(`Attempt limit reached for ${stepId}.`);
   if (step.attempts.some((attempt) => attempt.status === "running"))
     throw new Error(`Step ${stepId} already has a running attempt.`);

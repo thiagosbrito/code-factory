@@ -8,6 +8,7 @@ import { FactorySidebar, screenLabels, type Screen } from "./FactorySidebar";
 import { bindingError, connectionViewModel } from "./connection";
 import { Loops } from "./Loops";
 import { NewRunDialog } from "./NewRunDialog";
+import { RunExecution } from "./RunExecution";
 import { useFactoryRuns } from "./useFactoryRuns";
 
 export const Factory = ({
@@ -43,6 +44,9 @@ export const Factory = ({
     setSelectedRunId,
     openRun,
     onStarted,
+    execute,
+    cancel,
+    executingRunId,
   } = useFactoryRuns(demo);
   const canStart = Boolean(
     project.project?.defaultBinding && !bindingError(project.project.defaultBinding, agents),
@@ -227,9 +231,12 @@ export const Factory = ({
                 </ul>
               </section>
             )}
-            <p className="mt-6 text-xs text-muted-foreground">
-              Pending execution. The scheduler starts in a later implementation slice.
-            </p>
+            <RunExecution
+              run={selectedRun}
+              executing={executingRunId === selectedRun.snapshot.id}
+              onExecute={() => void execute(selectedRun.snapshot.id)}
+              onCancel={() => void cancel(selectedRun.snapshot.id)}
+            />
           </Card>
         ) : screen === "runs" && runs.length > 0 ? (
           <div className="mt-7 space-y-2">

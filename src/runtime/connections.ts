@@ -3,7 +3,8 @@ import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { createCodexAdapter } from "../adapters/codex.js";
-import type { AgentConnection } from "../adapters/contract.js";
+import type { AgentAdapter, AgentConnection } from "../adapters/contract.js";
+import { mockAdapter } from "../adapters/mock.js";
 import { discoverAgents } from "../adapters/discovery.js";
 import { ProjectError } from "./project.js";
 
@@ -20,6 +21,11 @@ export type ConnectionRequest = z.infer<typeof connectionRequestSchema>;
 type InspectableAdapter = {
   inspect(projectDirectory: string): Promise<AgentConnection>;
   close(): void;
+  execute?: AgentAdapter["execute"];
+  attach?: AgentAdapter["attach"];
+  steer?: AgentAdapter["steer"];
+  provider?: AgentAdapter["provider"];
+  capabilities?: AgentAdapter["capabilities"];
 };
 
 const resolveExecutable = async (
@@ -76,6 +82,29 @@ export class ConnectionRegistry {
         };
       return candidate;
     });
+  }
+
+  adapter(provider: string): AgentAdapter | null {
+    if (provider === "mock") return mockAdapter;
+    const active = this.active.get(provider);
+    const adapter = active?.adapter;
+    if (
+      !adapter?.execute ||
+      !adapter.attach ||
+      !adapter.steer ||
+      !adapter.provider ||
+      !adapter.capabilities
+    )
+      return null;
+    return {
+      ...adapter,
+      provider: adapter.provider,
+      capabilities: adapter.capabilities,
+      inspect: adapter.inspect.bind(adapter),
+      execute: adapter.execute.bind(adapter),
+      attach: adapter.attach.bind(adapter),
+      steer: adapter.steer.bind(adapter),
+    };
   }
 
   async connect(request: ConnectionRequest): Promise<AgentConnection> {

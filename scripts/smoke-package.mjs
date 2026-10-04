@@ -86,7 +86,7 @@ try {
   });
   assert.equal(
     (await fetch(`${url}/api/health`).then((response) => response.json())).executionAvailable,
-    false,
+    true,
   );
   const html = await fetch(url).then((response) => response.text());
   assert.match(html, /Code Factory/);

@@ -7,6 +7,7 @@ import { ConnectionRegistry, connectionRequestSchema } from "./connections.js";
 import { listLoops, readDraft, readPublishedVersion, saveDraft, publishDraft } from "./storage.js";
 import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
+import { cancelRun, executeRun } from "./scheduler.js";
 import { listPublishedLoops, listRuns, readRun } from "./storage.js";
 import { linearTracker, ticketIdSchema, type TicketTracker } from "./tracker.js";
 import {
@@ -221,13 +222,25 @@ export const startLocalServer = async (options: {
         );
         return json(response, 201, { runId: run.snapshot.id, run });
       }
+      const executePath = /^\/api\/runs\/([0-9a-f-]{36})\/execute$/i.exec(pathname);
+      if (executePath?.[1] && request.method === "POST") {
+        const run = await executeRun(projectDirectory, executePath[1], (provider) =>
+          connections.adapter(provider),
+        );
+        return json(response, 200, { run });
+      }
+      const cancelPath = /^\/api\/runs\/([0-9a-f-]{36})\/cancel$/i.exec(pathname);
+      if (cancelPath?.[1] && request.method === "POST") {
+        const run = await cancelRun(projectDirectory, cancelPath[1]);
+        return json(response, 200, { run });
+      }
       if (request.method !== "GET")
         return json(response, 405, { error: "Unsupported request method" });
       if (pathname === "/api/health")
         return json(response, 200, {
           status: "ready",
           mode: "foundation",
-          executionAvailable: false,
+          executionAvailable: true,
         });
       if (pathname === "/api/project")
         return json(response, 200, {

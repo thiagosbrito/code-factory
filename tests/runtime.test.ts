@@ -190,7 +190,7 @@ describe("local API", () => {
       await new Promise<void>((resolveClosed) => server.close(() => resolveClosed()));
     }
   });
-  it("serves project state and assets without claiming runtime integration", async () => {
+  it("serves project state and assets with scheduler availability", async () => {
     const directory = await temporaryProject();
     await initializeProject(directory);
     const ui = join(directory, "ui");
@@ -204,7 +204,7 @@ describe("local API", () => {
     try {
       expect(await fetch(`${url}/api/health`).then((response) => response.json())).toMatchObject({
         status: "ready",
-        executionAvailable: false,
+        executionAvailable: true,
       });
       expect(await fetch(`${url}/api/project`).then((response) => response.json())).toMatchObject({
         project: { defaultBinding: null },
