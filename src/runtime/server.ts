@@ -1,8 +1,11 @@
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, realpath, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { ZodError } from "zod";
 import { extname, join, resolve, sep } from "node:path";
 import { ConnectionRegistry, connectionRequestSchema } from "./connections.js";
+import { listLoops, readDraft, readPublishedVersion, saveDraft, publishDraft } from "./storage.js";
+import { parseLoop } from "../domain/loop.js";
 import {
   ProjectError,
   projectRevision,
@@ -30,7 +33,7 @@ async function readBody(request: import("node:http").IncomingMessage): Promise<u
   let body = "";
   for await (const chunk of request) {
     body += String(chunk);
-    if (body.length > 8192) throw new ProjectError("Request body is too large.", 413);
+    if (body.length > 1_048_576) throw new ProjectError("Request body is too large.", 413);
   }
   try {
     return JSON.parse(body) as unknown;
@@ -141,6 +144,53 @@ export async function startLocalServer(options: {
           });
         return json(response, 200, { connection: await connections.connect(parsed.data) });
       }
+      if (pathname === "/api/loops" && request.method === "GET")
+        return json(response, 200, { loops: await listLoops(projectDirectory) });
+      const loopPath =
+        /^\/api\/loops\/([a-z][a-z0-9-]{0,63})(?:\/(draft|publish|versions\/([1-9][0-9]*)))?$/.exec(
+          pathname,
+        );
+      if (loopPath) {
+        const id = loopPath[1]!;
+        const operation = loopPath[2];
+        if (request.method === "GET" && operation === "draft")
+          return json(response, 200, { loop: await readDraft(projectDirectory, id) });
+        if (request.method === "GET" && operation?.startsWith("versions/"))
+          return json(response, 200, {
+            loop: await readPublishedVersion(projectDirectory, id, Number(loopPath[3])),
+          });
+        if (request.method === "PUT" && operation === "draft") {
+          const loop = parseLoop(await readBody(request));
+          if (loop.id !== id) throw new ProjectError("Loop path and draft ID differ.", 400);
+          return json(response, 200, { loop: await saveDraft(projectDirectory, loop) });
+        }
+        if (request.method === "POST" && operation === "publish") {
+          const draft = await readDraft(projectDirectory, id);
+          if (!draft) throw new ProjectError("Save the draft before publishing.", 404);
+          if (!draft.steps.length) throw new ProjectError("Add a step before publishing.", 422);
+          const project = await readProjectConfig(projectDirectory);
+          const agents = await connections.list();
+          for (const step of draft.steps) {
+            if (
+              !step.expectedOutputs.length ||
+              step.expectedOutputs.some((output) => !output.trim())
+            )
+              throw new ProjectError(`${step.name} needs nonempty expected outputs.`, 422);
+            const binding = step.binding ?? project?.defaultBinding;
+            if (!binding)
+              throw new ProjectError(`${step.name} needs a project default or step binding.`, 422);
+            const connection = agents.find((agent) => agent.provider === binding.provider);
+            if (!connection?.protocol || connection.authentication !== "authenticated")
+              throw new ProjectError(`${step.name} needs a verified, authenticated agent.`, 422);
+            const model = connection.models?.find((item) => item.id === binding.model);
+            if (binding.model !== "agent-default" && !model)
+              throw new ProjectError(`${step.name} selects an unavailable model.`, 422);
+            if (binding.effort && !model?.efforts?.includes(binding.effort))
+              throw new ProjectError(`${step.name} selects an unavailable effort.`, 422);
+          }
+          return json(response, 200, { loop: await publishDraft(projectDirectory, id) });
+        }
+      }
       if (request.method !== "GET")
         return json(response, 405, { error: "Unsupported request method" });
       if (pathname === "/api/health")
@@ -166,9 +216,18 @@ export async function startLocalServer(options: {
       return serveAsset(response, pathname, options.uiDirectory ?? defaultUiDirectory);
     })().catch((error: unknown) => {
       if (!response.headersSent)
-        json(response, error instanceof ProjectError ? error.status : 500, {
-          error: error instanceof ProjectError ? error.message : "Runtime request failed",
-        });
+        json(
+          response,
+          error instanceof ProjectError ? error.status : error instanceof ZodError ? 422 : 500,
+          {
+            error:
+              error instanceof ProjectError
+                ? error.message
+                : error instanceof ZodError
+                  ? error.issues.map((issue) => issue.message).join("; ")
+                  : "Runtime request failed",
+          },
+        );
       else response.end();
       console.error(error instanceof Error ? error.message : "Unknown runtime error");
     });

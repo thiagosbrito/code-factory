@@ -6,6 +6,7 @@ import type { FactoryResponse, ProjectResponse } from "./project-api";
 import { FactoryEmptyState } from "./FactoryEmptyState";
 import { FactorySidebar, screenLabels, type Screen } from "./FactorySidebar";
 import { bindingError, connectionViewModel } from "./connection";
+import { Loops } from "./Loops";
 
 export function Factory({
   project,
@@ -35,11 +36,13 @@ export function Factory({
   }, [screen]);
   const showCreate = () => {
     setScreen("loops");
-    setNotice("Loop creation opens here when the loop editor is installed.");
+    setNotice("");
   };
   const showTemplate = () => {
     setScreen("loops");
-    setNotice("Starter templates become available with the loop library.");
+    setNotice(
+      "Starter templates become available when the optional template library is installed.",
+    );
   };
   return (
     <div className="min-h-screen bg-canvas md:flex">
@@ -82,7 +85,9 @@ export function Factory({
         {notice && (
           <output className="mt-5 block rounded-md border bg-white p-3 text-sm">{notice}</output>
         )}
-        {screen === "settings" ? (
+        {screen === "loops" && !demo ? (
+          <Loops project={project} agents={agents} onTemplate={showTemplate} />
+        ) : screen === "settings" ? (
           <Card className="mt-7 p-6">
             <h2 className="font-semibold">Project</h2>
             <p className="mt-2 text-sm">{project.project?.name}</p>

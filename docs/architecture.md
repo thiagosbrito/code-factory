@@ -46,6 +46,8 @@ Bind to loopback and serve the packaged UI from its installed directory, indepen
 
 Keep local React state near its components. Use reducers for complex editor transitions; add server-state caching when runtime endpoints exist. The backend's durable run state will remain authoritative. Do not duplicate execution ownership in UI state or simulate model acknowledgment without an actual provider reply.
 
+The loops library reads saved drafts and the latest publication from the local registry. The five-stage board is a view of portable steps; `stage` and canvas coordinates do not grant execution order. Explicit before/after targets change dependency edges, while group, join, and decision controls change their corresponding portable structures. The editor keeps immutable undo/redo states, saves drafts through the runtime, and validates publication against current connection catalogs and project defaults. Publications stay numbered and immutable; later edits target the next draft version. Optional templates and import/export are owned by THI-18.
+
 ## Next slices
 
 1. Consume the THI-6 native receipt when integrating connection verification, scoped approval UI, and the production runner; rerun the proof for a different native environment.
