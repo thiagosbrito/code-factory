@@ -3,17 +3,32 @@ import { z } from "zod";
 import { executionBindingSchema, parseLoop, loopSchema, type ExecutionBinding } from "./loop.js";
 import { evidenceSchema } from "./evidence.js";
 
-export const taskSchema = z.strictObject({
-  description: z.string().trim().min(1),
-  ticket: z
-    .strictObject({ id: z.string().min(1), title: z.string().min(1), summary: z.string().min(1) })
-    .optional(),
-});
+export const taskSchema = z
+  .strictObject({
+    description: z.string().trim(),
+    ticket: z
+      .strictObject({
+        id: z.string().min(1),
+        title: z.string().min(1),
+        summary: z.string(),
+        attachments: z
+          .array(z.strictObject({ title: z.string().min(1), url: z.url() }))
+          .default([]),
+      })
+      .optional(),
+  })
+  .refine(
+    (task) => Boolean(task.description || task.ticket),
+    "Enter a description or retrieve a ticket.",
+  );
 export const baselineSchema = z
   .strictObject({
     id: z.string().min(1),
     kind: z.enum(["git", "unversioned"]),
     revision: z.string().min(1).optional(),
+    sourceRevision: z.string().min(1).optional(),
+    workspace: z.string().min(1).optional(),
+    changes: z.array(z.string()).optional(),
     capturedAt: z.iso.datetime(),
   })
   .refine((baseline) => baseline.kind !== "git" || Boolean(baseline.revision), {
@@ -218,6 +233,7 @@ export function createRunSnapshot(
   taskInput: unknown,
   defaultBinding: ExecutionBinding,
   baselineInput?: Baseline,
+  id: string = randomUUID(),
 ): RunSnapshot {
   const loop = parseLoop(loopInput);
   if (loop.status !== "published") throw new Error("Publish the loop before creating a run.");
@@ -233,7 +249,7 @@ export function createRunSnapshot(
   return runSnapshotSchema.parse(
     structuredClone({
       schemaVersion: 2,
-      id: randomUUID(),
+      id,
       createdAt: new Date().toISOString(),
       task,
       loop,

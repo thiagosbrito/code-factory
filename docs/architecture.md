@@ -42,6 +42,10 @@ The mock emits started/message/completed events and supports cancellation. It de
 
 ## Local runtime and UI state
 
+Run intake uses the CLI-selected project only. It reads an actual immutable published loop version, checks every resolved binding against the current verified connection catalog, retrieves ticket material on the server when requested, and writes a pending run with the returned UUID as an idempotency key. A repeated request with that UUID returns the saved run; a changed payload conflicts. No scheduler starts at intake time.
+
+Git baselines are isolated by cloning the selected repository into `.code-factory/workspaces/<uuid>`, checking out the captured HEAD, then overlaying staged, unstaged, deleted, and untracked files. The clone records that state as a local baseline commit; the snapshot retains both its revision and the source HEAD. The clone receives its own Git metadata, so concurrent writing runs do not share a worktree or index. The original project remains untouched. Factory metadata is excluded from the source overlay. Non-Git projects cannot start a writing run. When a scheduler is added, it must execute each run inside its snapshot workspace and retain or clean it up only through an explicit lifecycle.
+
 Bind to loopback and serve the packaged UI from its installed directory, independent of the user's project directory. Reject foreign Host/Origin headers and unsupported mutations. Filesystem paths come from the CLI-selected workspace, rather than arbitrary browser input. Future mutation endpoints require explicit validation, ownership, and concurrency controls.
 
 Keep local React state near its components. Use reducers for complex editor transitions; add server-state caching when runtime endpoints exist. The backend's durable run state will remain authoritative. Do not duplicate execution ownership in UI state or simulate model acknowledgment without an actual provider reply.

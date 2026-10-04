@@ -7,6 +7,15 @@ export type ProjectResponse = {
 };
 export type FactoryResponse = { loops: number; runs: number };
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, options);
   const data: unknown = await response.json();
@@ -15,7 +24,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       data && typeof data === "object" && "error" in data && typeof data.error === "string"
         ? data.error
         : `Request failed (${response.status}).`;
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
   return data as T;
 }

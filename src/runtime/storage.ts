@@ -102,6 +102,26 @@ async function loopDirectory(project: string, id: string): Promise<string> {
   await rejectLinkedDirectory(directory);
   return directory;
 }
+export async function listPublishedLoops(project: string): Promise<LoopDefinition[]> {
+  const root = join(await factoryRoot(project), "loops");
+  await rejectLinkedDirectory(root);
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (missing(error)) return [];
+    throw error;
+  }
+  const loops: LoopDefinition[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^[a-z][a-z0-9-]{0,63}$/.test(entry.name)) continue;
+    for (const version of await listPublishedVersions(project, entry.name)) {
+      const loop = await readPublishedVersion(project, entry.name, version);
+      if (loop) loops.push(loop);
+    }
+  }
+  return loops;
+}
 async function runDirectory(project: string): Promise<string> {
   const directory = join(await factoryRoot(project), "runs");
   await rejectLinkedDirectory(directory);
@@ -197,6 +217,19 @@ export async function readRun(project: string, id: string): Promise<RunRecord | 
     return record;
   } catch (error) {
     throw explain(path, error);
+  }
+}
+export async function listRuns(project: string): Promise<RunRecord[]> {
+  const directory = await runDirectory(project);
+  try {
+    const files = (await readdir(directory)).filter((name) => /^[0-9a-f-]{36}\.json$/i.test(name));
+    const runs = await Promise.all(files.map((name) => readRun(project, name.slice(0, -5))));
+    return runs
+      .filter((run): run is RunRecord => run !== null)
+      .sort((a, b) => b.snapshot.createdAt.localeCompare(a.snapshot.createdAt));
+  } catch (error) {
+    if (missing(error)) return [];
+    throw error;
   }
 }
 export async function createRun(project: string, input: RunRecord): Promise<RunRecord> {
