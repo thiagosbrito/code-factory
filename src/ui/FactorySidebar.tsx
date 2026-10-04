@@ -8,7 +8,7 @@ export const screenLabels: Record<Screen, string> = {
   settings: "Settings",
 };
 
-export function FactorySidebar({
+export const FactorySidebar = ({
   projectName,
   screen,
   setScreen,
@@ -22,7 +22,7 @@ export function FactorySidebar({
   runs: number;
   demo: boolean;
   onExitDemo: () => void;
-}) {
+}) => {
   return (
     <aside className="flex min-h-screen w-full flex-col bg-graphite p-5 text-white md:w-60">
       <Brand />
@@ -59,4 +59,4 @@ export function FactorySidebar({
       </div>
     </aside>
   );
-}
+};

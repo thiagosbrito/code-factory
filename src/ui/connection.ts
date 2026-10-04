@@ -16,7 +16,7 @@ const names: Record<AgentConnection["provider"], string> = {
   custom: "Custom",
   mock: "Mock",
 };
-export function unavailableCandidates(): AgentConnection[] {
+export const unavailableCandidates = (): AgentConnection[] => {
   return (["codex", "cursor", "kiro", "claude-code", "custom"] as const).map((provider) => ({
     provider,
     executable: null,
@@ -25,8 +25,8 @@ export function unavailableCandidates(): AgentConnection[] {
     capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
     reason: "Discovery unavailable. Recheck to read local adapter results.",
   }));
-}
-function connectionDetail(connection: AgentConnection, verified: boolean, connected: boolean) {
+};
+const connectionDetail = (connection: AgentConnection, verified: boolean, connected: boolean) => {
   if (connection.reason) return connection.reason;
   if (connection.installation === "missing") return "Executable not found";
   if (connected) return `${connection.identity} ${connection.version} · Connected`;
@@ -34,9 +34,9 @@ function connectionDetail(connection: AgentConnection, verified: boolean, connec
     return `${connection.identity} ${connection.version} · Authentication required`;
   if (connection.provider === "codex") return "Detected; verification required";
   return "Detected; connection adapter unavailable";
-}
+};
 
-export function connectionViewModel(connection: AgentConnection): ConnectionViewModel {
+export const connectionViewModel = (connection: AgentConnection): ConnectionViewModel => {
   const verified =
     connection.installation !== "missing" &&
     Boolean(connection.version && connection.protocol && connection.identity);
@@ -49,16 +49,16 @@ export function connectionViewModel(connection: AgentConnection): ConnectionView
     connected,
     models: connected ? (connection.models ?? []) : [],
   };
-}
+};
 
-export function bindingError(
+export const bindingError = (
   binding: {
     provider: AgentConnection["provider"];
     model: string;
     effort?: string | undefined;
   } | null,
   agents: AgentConnection[],
-): string | null {
+): string | null => {
   if (!binding) return null;
   const connection = agents.find((item) => item.provider === binding.provider);
   if (!connection || !connectionViewModel(connection).connected)
@@ -69,4 +69,4 @@ export function bindingError(
   if (binding.effort && !model?.efforts?.includes(binding.effort))
     return `Effort ${binding.effort} is unavailable for this model.`;
   return null;
-}
+};

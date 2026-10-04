@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { execFile } from "node:child_process";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
+import { z } from "zod";
 import type {
   AgentAdapter,
   AgentConnection,
@@ -10,13 +11,16 @@ import type {
   StepSession,
 } from "./contract.js";
 
-type RpcMessage = {
-  id?: number | string;
-  method?: string;
-  params?: Record<string, unknown>;
-  result?: unknown;
-  error?: { message?: string };
-};
+const rpcMessageSchema = z.object({
+  id: z.union([z.number(), z.string()]).optional(),
+  method: z.string().optional(),
+  params: z.record(z.string(), z.unknown()).optional(),
+  result: z.unknown().optional(),
+  error: z.object({ message: z.string().optional() }).optional(),
+});
+type RpcMessage = z.infer<typeof rpcMessageSchema>;
+export const parseCodexMessage = (line: string): RpcMessage =>
+  rpcMessageSchema.parse(JSON.parse(line));
 
 type RpcDispatch = {
   response(message: RpcMessage): void;
@@ -26,7 +30,7 @@ type RpcDispatch = {
 };
 
 /** Route app-server messages, declining approvals and rejecting unknown requests by default. */
-export function dispatchCodexMessage(message: RpcMessage, handlers: RpcDispatch): void {
+export const dispatchCodexMessage = (message: RpcMessage, handlers: RpcDispatch): void => {
   if (message.method && (typeof message.id === "number" || typeof message.id === "string")) {
     const approvalMethods = new Set([
       "item/commandExecution/requestApproval",
@@ -54,7 +58,7 @@ export function dispatchCodexMessage(message: RpcMessage, handlers: RpcDispatch)
   if (message.method) handlers.notification(message);
   else if (typeof message.id === "number" || typeof message.id === "string")
     handlers.response(message);
-}
+};
 export interface CodexRpc {
   request(method: string, params: Record<string, unknown>): Promise<unknown>;
   notify(method: string, params?: Record<string, unknown>): void;
@@ -80,7 +84,7 @@ export class CodexStdioRpc implements CodexRpc {
     createInterface({ input: this.child.stdout }).on("line", (line) => {
       let message: RpcMessage;
       try {
-        message = JSON.parse(line) as RpcMessage;
+        message = parseCodexMessage(line);
       } catch {
         return;
       }
@@ -135,24 +139,25 @@ export class CodexStdioRpc implements CodexRpc {
 }
 
 /** Verify the executable before starting its native protocol process. */
-export async function createCodexAdapter(executable: string): Promise<CodexAdapter> {
+export const createCodexAdapter = async (executable: string): Promise<CodexAdapter> => {
   const { stdout } = await promisify(execFile)(executable, ["--version"], { timeout: 5000 });
   const version = /^codex-cli (\d+\.\d+\.\d+)(?:\s|$)/.exec(stdout.trim())?.[1];
   if (!version) throw new Error("Executable is not a supported Codex CLI");
   return new CodexAdapter(new CodexStdioRpc(executable), executable, version);
-}
+};
 
-function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object") throw new Error("Invalid Codex response");
-  return value as Record<string, unknown>;
-}
-function identifier(value: unknown): string {
+const object = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid Codex response");
+  return z.record(z.string(), z.unknown()).parse(value);
+};
+const identifier = (value: unknown): string => {
   if (typeof value !== "string" || !value) throw new Error("Missing Codex identity");
   return value;
-}
-function textInput(text: string) {
+};
+const textInput = (text: string) => {
   return [{ type: "text", text, text_elements: [] }];
-}
+};
 
 /** One assigned factory step is one Codex thread and turn. Retry creates a new thread. */
 export class CodexAdapter implements AgentAdapter {
@@ -341,6 +346,7 @@ export class CodexAdapter implements AgentAdapter {
       queue.push(message);
       wake?.();
     });
+    // An async generator needs function syntax; arrows cannot yield.
     const stream = async function* (session: StepSession): AsyncIterable<AdapterEvent> {
       let output = "";
       try {

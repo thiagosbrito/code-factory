@@ -1,11 +1,69 @@
-import type { ProjectConfig } from "../runtime/project.js";
+import { z } from "zod";
+import { providerIdSchema, loopSchema } from "../domain/loop.js";
+import { runRecordSchema } from "../domain/run.js";
+import { projectConfigSchema } from "../domain/project.js";
+import { retrievedTicketSchema } from "../domain/ticket.js";
 
-export type ProjectResponse = {
-  project: ProjectConfig | null;
-  path: string;
-  revision: string | null;
-};
-export type FactoryResponse = { loops: number; runs: number };
+const capabilitySchema = z.enum(["supported", "unsupported", "unknown"]);
+export const agentConnectionSchema = z.object({
+  provider: providerIdSchema,
+  executable: z.string().nullable(),
+  installation: z.enum(["detected", "missing", "built-in"]),
+  authentication: z.enum(["unknown", "not-required", "authenticated", "unauthenticated"]),
+  authenticationMechanism: z.string().optional(),
+  capabilities: z.object({
+    streaming: capabilitySchema,
+    steering: capabilitySchema,
+    resume: capabilitySchema,
+  }),
+  version: z.string().optional(),
+  protocol: z.string().optional(),
+  identity: z.string().optional(),
+  reason: z.string().optional(),
+  models: z
+    .array(
+      z.object({
+        id: z.string(),
+        displayName: z.string(),
+        efforts: z.array(z.string()).optional(),
+      }),
+    )
+    .optional(),
+});
+export const projectResponseSchema = z.object({
+  project: projectConfigSchema.nullable(),
+  path: z.string(),
+  revision: z.string().nullable(),
+});
+export type ProjectResponse = z.infer<typeof projectResponseSchema>;
+export const factoryResponseSchema = z.object({ loops: z.number(), runs: z.number() });
+export type FactoryResponse = z.infer<typeof factoryResponseSchema>;
+export const agentsResponseSchema = z.object({ agents: z.array(agentConnectionSchema) });
+export const connectionResponseSchema = z.object({ connection: agentConnectionSchema });
+export const loopResponseSchema = z.object({ loop: loopSchema });
+export const publishedLoopsResponseSchema = z.object({ loops: z.array(loopSchema) });
+export const loopEntriesResponseSchema = z.object({
+  loops: z.array(
+    z.object({
+      id: z.string(),
+      draft: loopSchema.nullable(),
+      published: loopSchema.nullable(),
+      versions: z.array(z.number()).default([]),
+    }),
+  ),
+});
+export const runsResponseSchema = z.object({ runs: z.array(runRecordSchema) });
+export const runResponseSchema = z.object({ run: runRecordSchema });
+export const startedRunResponseSchema = z.object({
+  runId: z.string(),
+  run: runRecordSchema.optional(),
+});
+export const trackerStatusResponseSchema = z.object({ configured: z.boolean() });
+export const ticketResponseSchema = z.object({ ticket: retrievedTicketSchema });
+export const savedProjectResponseSchema = z.object({
+  project: projectConfigSchema,
+  revision: z.string(),
+});
 
 export class ApiError extends Error {
   constructor(
@@ -16,7 +74,11 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+export const api = async <T>(
+  path: string,
+  parse: (data: unknown) => T,
+  options?: RequestInit,
+): Promise<T> => {
   const response = await fetch(path, options);
   const data: unknown = await response.json();
   if (!response.ok) {
@@ -26,5 +88,5 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
         : `Request failed (${response.status}).`;
     throw new ApiError(message, response.status);
   }
-  return data as T;
-}
+  return parse(data);
+};

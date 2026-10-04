@@ -1,16 +1,13 @@
-import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
-import type { ProviderId } from "../domain/loop.js";
-import type { ProjectConfig } from "../runtime/project.js";
 import { Button } from "@/components/ui/button";
-import { bindingError, connectionViewModel } from "./connection";
 import { Brand } from "./Brand";
-import { api, type ProjectResponse } from "./project-api";
+import type { ProjectResponse } from "./project-api";
 import { AgentSetupSection } from "./AgentSetupSection";
 import { ModelSetupSection } from "./ModelSetupSection";
 import { ProjectSetupSection } from "./ProjectSetupSection";
+import { useSetupController } from "./useSetupController";
 
-export function Setup({
+export const Setup = ({
   state,
   agents,
   agentError,
@@ -32,130 +29,34 @@ export function Setup({
   onSaved: (state: ProjectResponse) => void;
   onDemo: () => void;
   onCancel?: () => void;
-}) {
-  const [name, setName] = useState(state.project?.name ?? "");
-  const [selected, setSelected] = useState<ProviderId | null>(
-    state.project?.defaultBinding?.provider ?? null,
-  );
-  const [model, setModel] = useState(state.project?.defaultBinding?.model ?? "agent-default");
-  const [effort, setEffort] = useState(state.project?.defaultBinding?.effort ?? "");
-  const [customExecutable, setCustomExecutable] = useState(
-    state.project?.customAgent?.executable ?? "",
-  );
-  const [bindingChanged, setBindingChanged] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const nameRef = useRef<HTMLInputElement>(null);
-  const displayedAgents: AgentConnection[] = agents.map((item) => {
-    if (item.provider !== "custom" || item.executable === customExecutable.trim()) return item;
-    return {
-      provider: "custom",
-      executable: null,
-      installation: "missing",
-      authentication: "unknown",
-      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
-      reason: "Verify the current executable and protocol to connect.",
-    };
-  });
-  const activeConnection = displayedAgents.find((item) => item.provider === selected);
-  const active = activeConnection ? connectionViewModel(activeConnection) : undefined;
-  const savedBinding = state.project?.defaultBinding;
-  const activeModel = activeConnection?.models?.find((item) => item.id === model);
-  const availableEfforts = activeModel?.efforts ?? [];
-  const draftBinding = selected
-    ? { provider: selected, model, ...(effort ? { effort } : {}) }
-    : null;
-  const validation = bindingError(draftBinding, displayedAgents);
-  useEffect(() => {
-    nameRef.current?.focus();
-  }, []);
-  function selectAgent(provider: ProviderId | null) {
-    setSelected(provider);
-    setModel("agent-default");
-    setEffort("");
-    setBindingChanged(true);
-    setError("");
-  }
-  function changeCustomExecutable(value: string) {
-    setCustomExecutable(value);
-    setModel("agent-default");
-    setEffort("");
-    setBindingChanged(true);
-    setError("");
-  }
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    if (!name.trim()) {
-      setError("Enter a project name.");
-      nameRef.current?.focus();
-      return;
-    }
-    if (bindingChanged && validation) {
-      setError(validation);
-      return;
-    }
-    if (customExecutable.trim() && !customExecutable.trim().startsWith("/")) {
-      setError("Enter an absolute custom executable path.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api<{ project: ProjectConfig; revision: string }>("/api/project/setup", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          revision: state.revision,
-          ...(bindingChanged ? { defaultBinding: draftBinding } : {}),
-          ...(customExecutable.trim()
-            ? { customAgent: { executable: customExecutable.trim(), protocol: "codex-app-server" } }
-            : {}),
-        }),
-      });
-      onSaved({ ...state, ...result });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save setup. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function refreshAgents() {
-    setRefreshing(true);
-    setError("");
-    try {
-      await onRefreshAgents();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not recheck agents. Try again.");
-    } finally {
-      setRefreshing(false);
-    }
-  }
-  async function verify() {
-    if (selected !== "codex" && selected !== "custom") return;
-    setVerifying(true);
-    setError("");
-    try {
-      const connection = await onConnect(
-        selected === "codex"
-          ? { provider: "codex", launch: true }
-          : {
-              provider: "custom",
-              launch: true,
-              executable: customExecutable.trim(),
-              protocol: "codex-app-server",
-            },
-      );
-      if (selected === "custom" && connection.executable)
-        setCustomExecutable(connection.executable);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not verify agent connection.");
-    } finally {
-      setVerifying(false);
-    }
-  }
+}) => {
+  const {
+    name,
+    setName,
+    selected,
+    model,
+    setModel,
+    effort,
+    setEffort,
+    customExecutable,
+    setBindingChanged,
+    verifying,
+    error,
+    setError,
+    busy,
+    refreshing,
+    nameRef,
+    displayedAgents,
+    active,
+    savedBinding,
+    availableEfforts,
+    validation,
+    selectAgent,
+    changeCustomExecutable,
+    save,
+    refreshAgents,
+    verify,
+  } = useSetupController({ state, agents, onRefreshAgents, onConnect, onSaved });
   return (
     <div className="min-h-screen bg-canvas lg:grid lg:grid-cols-[280px_1fr]">
       <aside className="flex flex-col bg-graphite p-7 text-white">
@@ -247,4 +148,4 @@ export function Setup({
       </main>
     </div>
   );
-}
+};

@@ -5,9 +5,15 @@ import { ErrorView } from "./ErrorView";
 import type { Screen } from "./FactorySidebar";
 import { Setup } from "./Setup";
 import { api, type FactoryResponse, type ProjectResponse } from "./project-api";
+import {
+  projectResponseSchema,
+  factoryResponseSchema,
+  agentsResponseSchema,
+  connectionResponseSchema,
+} from "./project-api";
 import { unavailableCandidates } from "./connection";
 
-export function App() {
+export const App = () => {
   const [project, setProject] = useState<ProjectResponse | null>(null);
   const [agents, setAgents] = useState<AgentConnection[]>([]);
   const [agentError, setAgentError] = useState("");
@@ -16,12 +22,12 @@ export function App() {
   const [demo, setDemo] = useState(false);
   const [editing, setEditing] = useState(false);
   const [screen, setScreen] = useState<Screen>("runs");
-  async function load() {
+  const load = async () => {
     try {
       const [nextProject, nextCounts, nextAgents] = await Promise.all([
-        api<ProjectResponse>("/api/project"),
-        api<FactoryResponse>("/api/factory"),
-        api<{ agents: AgentConnection[] }>("/api/agents")
+        api("/api/project", projectResponseSchema.parse),
+        api("/api/factory", factoryResponseSchema.parse),
+        api("/api/agents", agentsResponseSchema.parse)
           .then((result) => ({ agents: result.agents, error: "" }))
           .catch(() => ({
             agents: unavailableCandidates(),
@@ -36,7 +42,7 @@ export function App() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load local runtime.");
     }
-  }
+  };
   useEffect(() => {
     void Promise.resolve().then(load);
   }, []);
@@ -49,12 +55,12 @@ export function App() {
         agents={agents}
         agentError={agentError}
         onRefreshAgents={async () => {
-          const result = await api<{ agents: AgentConnection[] }>("/api/agents");
+          const result = await api("/api/agents", agentsResponseSchema.parse);
           setAgents(result.agents);
           setAgentError("");
         }}
         onConnect={async (request) => {
-          const result = await api<{ connection: AgentConnection }>("/api/agents/connect", {
+          const result = await api("/api/agents/connect", connectionResponseSchema.parse, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(request),
@@ -87,4 +93,4 @@ export function App() {
       onEditSetup={() => setEditing(true)}
     />
   );
-}
+};

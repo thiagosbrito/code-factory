@@ -91,15 +91,15 @@ type DependencyIndex = {
   outgoing: Map<string, Set<string>>;
 };
 
-function hasDuplicates(values: string[]): boolean {
+const hasDuplicates = (values: string[]): boolean => {
   return new Set(values).size !== values.length;
-}
+};
 
-function validateDependencies(
+const validateDependencies = (
   loop: LoopShape,
   stepIds: Set<string>,
   report: Report,
-): DependencyIndex {
+): DependencyIndex => {
   const index: DependencyIndex = {
     edges: new Set(),
     incoming: new Map(),
@@ -119,13 +119,13 @@ function validateDependencies(
     index.outgoing.set(from, outgoing);
   }
   return index;
-}
+};
 
-function validateRepeatGroup(
+const validateRepeatGroup = (
   group: Extract<Group, { kind: "repeat" }>,
   loop: LoopShape,
   report: Report,
-): void {
+): void => {
   const decision = loop.decisions.find(({ stepId }) => stepId === group.exitWhen.stepId);
   const exit = decision?.branches.find(({ outcome }) => outcome === group.exitWhen.outcome);
   const continuation = decision?.branches.find(
@@ -139,14 +139,14 @@ function validateRepeatGroup(
     group.continueWhen.outcome !== group.exitWhen.outcome;
   if (!validExit) report(`Repeat ${group.id} needs an exit decision leading outside its body.`);
   if (!validContinuation) report(`Repeat ${group.id} needs a distinct continuation into its body.`);
-}
+};
 
-function validateGroup(group: Group, loop: LoopShape, report: Report): void {
+const validateGroup = (group: Group, loop: LoopShape, report: Report): void => {
   if (hasDuplicates(group.stepIds)) report(`Group ${group.id} repeats a step.`);
   if (group.kind === "repeat") validateRepeatGroup(group, loop, report);
-}
+};
 
-function validateGroups(loop: LoopShape, stepIds: Set<string>, report: Report): void {
+const validateGroups = (loop: LoopShape, stepIds: Set<string>, report: Report): void => {
   if (hasDuplicates(loop.groups.map(({ id }) => id))) report("Group IDs must be unique.");
   loop.groups.forEach((group) => validateGroup(group, loop, report));
   const groupById = new Map(loop.groups.map((group) => [group.id, group]));
@@ -174,14 +174,14 @@ function validateGroups(loop: LoopShape, stepIds: Set<string>, report: Report): 
     )
       report(`Parallel group ${groupId} cannot order its members.`);
   }
-}
+};
 
-function validateJoins(
+const validateJoins = (
   loop: LoopShape,
   stepIds: Set<string>,
   dependencies: DependencyIndex,
   report: Report,
-): void {
+): void => {
   if (hasDuplicates(loop.joins.map(({ stepId }) => stepId))) report("Join steps must be unique.");
   for (const join of loop.joins) {
     if (!stepIds.has(join.stepId)) report(`Join references missing step ${join.stepId}.`);
@@ -193,14 +193,14 @@ function validateJoins(
     if ([...incoming].some((id) => !declared.has(id)))
       report(`Join ${join.stepId} omits an incoming dependency.`);
   }
-}
+};
 
-function validateDecisions(
+const validateDecisions = (
   loop: LoopShape,
   stepIds: Set<string>,
   dependencies: DependencyIndex,
   report: Report,
-): void {
+): void => {
   if (hasDuplicates(loop.decisions.map(({ stepId }) => stepId)))
     report("Decision steps must be unique.");
   const continuations = new Set(
@@ -227,13 +227,13 @@ function validateDecisions(
     if ([...outgoing].some((to) => !targets.has(to)))
       report(`Decision ${decision.stepId} omits an outgoing dependency.`);
   }
-}
+};
 
-function validateAcyclic(
+const validateAcyclic = (
   stepIds: Set<string>,
   dependencies: DependencyIndex,
   report: Report,
-): void {
+): void => {
   const pending = new Map(
     [...stepIds].map((id) => [
       id,
@@ -243,7 +243,8 @@ function validateAcyclic(
   const ready = [...pending].filter(([, count]) => count === 0).map(([id]) => id);
   let visited = 0;
   while (ready.length) {
-    const id = ready.pop()!;
+    const id = ready.pop();
+    if (id === undefined) break;
     visited++;
     for (const successor of dependencies.outgoing.get(id) ?? []) {
       const count = pending.get(successor);
@@ -254,7 +255,7 @@ function validateAcyclic(
   }
   if (visited !== stepIds.size)
     report("Dependency cycles are not allowed; repairs require explicit bounded policy.");
-}
+};
 
 export const loopSchema = baseLoopSchema.superRefine((loop, context) => {
   const stepIds = new Set(loop.steps.map(({ id }) => id));
@@ -280,21 +281,21 @@ export type LoopDefinition = z.infer<typeof loopSchema>;
 export type ExecutionBinding = z.infer<typeof executionBindingSchema>;
 
 /** Validate untrusted imported loop data before it reaches UI or execution code. */
-export function parseLoop(input: unknown): LoopDefinition {
+export const parseLoop = (input: unknown): LoopDefinition => {
   return loopSchema.parse(migrateLoop(input));
-}
+};
 
 /** V1 had only DAG edges and canvas positions. Migration adds semantic containers without inferring them. */
-export function migrateLoop(input: unknown): unknown {
+export const migrateLoop = (input: unknown): unknown => {
   if (!input || typeof input !== "object" || Array.isArray(input) || !("schemaVersion" in input))
     return input;
-  const value = input as Record<string, unknown>;
+  const value = z.record(z.string(), z.unknown()).parse(input);
   if (value.schemaVersion !== 1) return input;
   return { ...value, schemaVersion: 2, groups: [], joins: [], decisions: [] };
-}
+};
 
 /** Create a blank draft. Starter templates are an explicit user choice. */
-export function createLoopDraft(id: string, name: string): LoopDefinition {
+export const createLoopDraft = (id: string, name: string): LoopDefinition => {
   return parseLoop({
     schemaVersion: 2,
     id,
@@ -308,10 +309,10 @@ export function createLoopDraft(id: string, name: string): LoopDefinition {
     decisions: [],
     policy: {},
   });
-}
+};
 
 /** Find all results whose inputs are affected by changing a step's output. */
-export function getDependentStepIds(loop: LoopDefinition, stepId: string): string[] {
+export const getDependentStepIds = (loop: LoopDefinition, stepId: string): string[] => {
   if (!loop.steps.some((step) => step.id === stepId)) throw new Error(`Unknown step: ${stepId}`);
   const descendants = new Set<string>();
   let frontier = [stepId];
@@ -322,4 +323,4 @@ export function getDependentStepIds(loop: LoopDefinition, stepId: string): strin
     for (const id of frontier) descendants.add(id);
   }
   return [...descendants];
-}
+};

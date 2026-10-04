@@ -1,7 +1,7 @@
 import type { ConnectionViewModel } from "./connection";
 import { SetupSection } from "./SetupSection";
 
-export function ModelSetupSection({
+export const ModelSetupSection = ({
   active,
   model,
   effort,
@@ -19,7 +19,7 @@ export function ModelSetupSection({
   validation: string | null;
   onModelChange: (value: string) => void;
   onEffortChange: (value: string) => void;
-}) {
+}) => {
   return (
     <SetupSection
       number={3}
@@ -79,4 +79,4 @@ export function ModelSetupSection({
       )}
     </SetupSection>
   );
-}
+};

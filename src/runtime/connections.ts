@@ -22,10 +22,10 @@ type InspectableAdapter = {
   close(): void;
 };
 
-async function resolveExecutable(
+const resolveExecutable = async (
   request: ConnectionRequest,
   candidates: AgentConnection[],
-): Promise<string> {
+): Promise<string> => {
   if (request.provider === "codex") {
     const executable = candidates.find((item) => item.provider === "codex")?.executable;
     if (!executable)
@@ -43,7 +43,7 @@ async function resolveExecutable(
   } catch {
     throw new ProjectError("Custom executable must be an accessible executable file.", 400);
   }
-}
+};
 
 /** Discovery is read-only. Only an explicit connect request may launch a provider process. */
 export class ConnectionRegistry {

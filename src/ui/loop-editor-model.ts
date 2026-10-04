@@ -23,14 +23,14 @@ export const stages: { id: Stage; name: string; description: string }[] = [
 export type EditorStep = LoopDefinition["steps"][number];
 export type DropTarget = { stepId: string; placement: "before" | "after" };
 
-export function stageOf(step: EditorStep): Stage {
+export const stageOf = (step: EditorStep): Stage => {
   return step.stage ?? (step.kind === "check" ? "validation" : "implementation");
-}
-export function addStep(
+};
+export const addStep = (
   loop: LoopDefinition,
   stage: Stage,
   kind: EditorStep["kind"],
-): LoopDefinition {
+): LoopDefinition => {
   if (kind === "check" && stage !== "validation")
     throw new Error("Check steps belong in Validate.");
   const id = `step-${crypto.randomUUID()}`;
@@ -49,26 +49,26 @@ export function addStep(
       },
     ],
   });
-}
+};
 
 /** Coordinates are presentation only; dependencies change solely through explicit semantic targets. */
-export function moveVisual(
+export const moveVisual = (
   loop: LoopDefinition,
   stepId: string,
   x: number,
   y: number,
-): LoopDefinition {
+): LoopDefinition => {
   return parseLoop({
     ...loop,
     steps: loop.steps.map((step) => (step.id === stepId ? { ...step, position: { x, y } } : step)),
   });
-}
+};
 
-export function semanticDrop(
+export const semanticDrop = (
   loop: LoopDefinition,
   stepId: string,
   target: DropTarget,
-): LoopDefinition {
+): LoopDefinition => {
   if (stepId === target.stepId) return loop;
   const moving = loop.steps.find((step) => step.id === stepId);
   const anchor = loop.steps.find((step) => step.id === target.stepId);
@@ -109,13 +109,13 @@ export function semanticDrop(
     stage: stageOf(anchor),
   });
   return parseLoop({ ...loop, steps, dependencies: edges });
-}
+};
 
-export function setParallelGroup(
+export const setParallelGroup = (
   loop: LoopDefinition,
   ids: string[],
   name: string,
-): LoopDefinition {
+): LoopDefinition => {
   if (
     ids.length < 2 ||
     new Set(ids).size !== ids.length ||
@@ -138,9 +138,9 @@ export function setParallelGroup(
     ],
     steps: loop.steps.map((step) => (members.has(step.id) ? { ...step, groupId: id } : step)),
   });
-}
+};
 
-export function removeGroup(loop: LoopDefinition, id: string): LoopDefinition {
+export const removeGroup = (loop: LoopDefinition, id: string): LoopDefinition => {
   const group = loop.groups.find((item) => item.id === id);
   return parseLoop({
     ...loop,
@@ -151,13 +151,13 @@ export function removeGroup(loop: LoopDefinition, id: string): LoopDefinition {
         : loop.decisions,
     steps: loop.steps.map((step) => (step.groupId === id ? { ...step, groupId: undefined } : step)),
   });
-}
+};
 
-export function assignStepToGroup(
+export const assignStepToGroup = (
   loop: LoopDefinition,
   stepId: string,
   groupId: string,
-): LoopDefinition {
+): LoopDefinition => {
   const step = loop.steps.find((item) => item.id === stepId);
   const group = loop.groups.find((item) => item.id === groupId);
   if (!step || !group) throw new Error("Select an existing step and group.");
@@ -176,27 +176,27 @@ export function assignStepToGroup(
     ),
     steps: loop.steps.map((item) => (item.id === stepId ? { ...item, groupId } : item)),
   });
-}
+};
 
-export function removeJoin(loop: LoopDefinition, stepId: string): LoopDefinition {
+export const removeJoin = (loop: LoopDefinition, stepId: string): LoopDefinition => {
   return parseLoop({ ...loop, joins: loop.joins.filter((join) => join.stepId !== stepId) });
-}
+};
 
-export function removeDecision(loop: LoopDefinition, stepId: string): LoopDefinition {
+export const removeDecision = (loop: LoopDefinition, stepId: string): LoopDefinition => {
   if (loop.groups.some((group) => group.kind === "repeat" && group.exitWhen.stepId === stepId))
     throw new Error("Remove the repeat group before its decision.");
   return parseLoop({
     ...loop,
     decisions: loop.decisions.filter((decision) => decision.stepId !== stepId),
   });
-}
+};
 
-export function setJoin(
+export const setJoin = (
   loop: LoopDefinition,
   stepId: string,
   from: string[],
   mode: "all" | "any",
-): LoopDefinition {
+): LoopDefinition => {
   if (from.length < 2 || new Set(from).size !== from.length || from.includes(stepId))
     throw new Error("A join needs at least two distinct source steps.");
   const joins = [...loop.joins.filter((join) => join.stepId !== stepId), { stepId, from, mode }];
@@ -205,13 +205,13 @@ export function setJoin(
     ...from.map((id) => ({ from: id, to: stepId })),
   ];
   return parseLoop({ ...loop, joins, dependencies });
-}
+};
 
-export function setDecision(
+export const setDecision = (
   loop: LoopDefinition,
   stepId: string,
   branches: { outcome: string; to: string }[],
-): LoopDefinition {
+): LoopDefinition => {
   if (branches.length < 2 || branches.some((branch) => !branch.outcome.trim() || !branch.to))
     throw new Error("A decision needs two named branches and targets.");
   const continuation = new Set(
@@ -232,16 +232,16 @@ export function setDecision(
     dependencies,
     decisions: [...loop.decisions.filter((item) => item.stepId !== stepId), { stepId, branches }],
   });
-}
+};
 
-export function setRepeatGroup(
+export const setRepeatGroup = (
   loop: LoopDefinition,
   ids: string[],
   name: string,
   maxIterations: number,
   exitWhen: { stepId: string; outcome: string; to: string },
   continueWhen: { outcome: string; to: string },
-): LoopDefinition {
+): LoopDefinition => {
   if (!Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > 10)
     throw new Error("Repeat limit must be between 1 and 10.");
   if (
@@ -295,9 +295,9 @@ export function setRepeatGroup(
     ],
     steps: loop.steps.map((step) => (members.has(step.id) ? { ...step, groupId: id } : step)),
   });
-}
+};
 
-export function deleteStep(loop: LoopDefinition, id: string): LoopDefinition {
+export const deleteStep = (loop: LoopDefinition, id: string): LoopDefinition => {
   if (loop.steps.some((step) => step.id === id && step.groupId))
     throw new Error("Remove the group before deleting a member.");
   const incoming = loop.dependencies.filter((edge) => edge.to === id);
@@ -319,14 +319,14 @@ export function deleteStep(loop: LoopDefinition, id: string): LoopDefinition {
       ...(incoming[0] && outgoing[0] ? [{ from: incoming[0].from, to: outgoing[0].to }] : []),
     ],
   });
-}
+};
 
 export type History = { present: LoopDefinition; past: LoopDefinition[]; future: LoopDefinition[] };
-export function commit(history: History, next: LoopDefinition): History {
+export const commit = (history: History, next: LoopDefinition): History => {
   if (JSON.stringify(history.present) === JSON.stringify(next)) return history;
   return { present: next, past: [...history.past, history.present], future: [] };
-}
-export function undo(history: History): History {
+};
+export const undo = (history: History): History => {
   const previous = history.past.at(-1);
   return previous
     ? {
@@ -335,10 +335,10 @@ export function undo(history: History): History {
         future: [history.present, ...history.future],
       }
     : history;
-}
-export function redo(history: History): History {
+};
+export const redo = (history: History): History => {
   const next = history.future[0];
   return next
     ? { present: next, past: [...history.past, history.present], future: history.future.slice(1) }
     : history;
-}
+};

@@ -10,29 +10,13 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
-import { z } from "zod";
-import { executionBindingSchema } from "../domain/loop.js";
+import type { z } from "zod";
+import { projectConfigSchema, projectSetupSchema, type ProjectConfig } from "../domain/project.js";
 
-export const customAgentSchema = z.strictObject({
-  executable: z.string().trim().min(1).refine(isAbsolute, "Enter an absolute executable path."),
-  protocol: z.literal("codex-app-server"),
-});
-
-export const projectConfigSchema = z.strictObject({
-  schemaVersion: z.literal(1),
-  name: z.string().trim().min(1).max(120),
-  defaultBinding: executionBindingSchema.nullable(),
-  customAgent: customAgentSchema.optional(),
-});
-export type ProjectConfig = z.infer<typeof projectConfigSchema>;
-export const projectSetupSchema = z.strictObject({
-  name: z.string().trim().min(1, "Enter a project name.").max(120),
-  revision: z.string().nullable(),
-  defaultBinding: executionBindingSchema.nullable().optional(),
-  customAgent: customAgentSchema.nullable().optional(),
-});
+export { customAgentSchema, projectConfigSchema, projectSetupSchema } from "../domain/project.js";
+export type { ProjectConfig } from "../domain/project.js";
 
 export class ProjectError extends Error {
   constructor(
@@ -43,7 +27,7 @@ export class ProjectError extends Error {
   }
 }
 
-export async function validateProjectDirectory(directory: string): Promise<string> {
+export const validateProjectDirectory = async (directory: string): Promise<string> => {
   let root: string;
   try {
     root = await realpath(directory);
@@ -71,19 +55,19 @@ export async function validateProjectDirectory(directory: string): Promise<strin
     throw error;
   }
   return root;
-}
+};
 
-function isCode(error: unknown, code: string): boolean {
+const isCode = (error: unknown, code: string): boolean => {
   return error instanceof Error && "code" in error && error.code === code;
-}
+};
 
-function storageError(error: unknown, path: string): unknown {
+const storageError = (error: unknown, path: string): unknown => {
   if (isCode(error, "EACCES") || isCode(error, "EPERM"))
     return new ProjectError(`Cannot access ${path}. Check project permissions.`, 403);
   return error;
-}
+};
 
-async function configPath(root: string): Promise<string> {
+const configPath = async (root: string): Promise<string> => {
   const folder = join(root, ".code-factory");
   try {
     const info = await lstat(folder);
@@ -101,14 +85,14 @@ async function configPath(root: string): Promise<string> {
     if (!isCode(error, "ENOENT")) throw storageError(error, path);
   }
   return path;
-}
+};
 
-export async function readProjectConfig(directory: string): Promise<ProjectConfig | null> {
+export const readProjectConfig = async (directory: string): Promise<ProjectConfig | null> => {
   const path = await configPath(directory);
   try {
     const content = await readFile(path, "utf8");
     try {
-      return projectConfigSchema.parse(JSON.parse(content) as unknown);
+      return projectConfigSchema.parse(JSON.parse(content));
     } catch {
       throw new ProjectError(
         `Invalid project configuration at ${path}. Repair it before saving setup.`,
@@ -119,9 +103,9 @@ export async function readProjectConfig(directory: string): Promise<ProjectConfi
     if (isCode(error, "ENOENT")) return null;
     throw storageError(error, path);
   }
-}
+};
 
-export async function projectRevision(directory: string): Promise<string | null> {
+export const projectRevision = async (directory: string): Promise<string | null> => {
   const path = await configPath(directory);
   try {
     return createHash("sha256")
@@ -131,10 +115,10 @@ export async function projectRevision(directory: string): Promise<string | null>
     if (isCode(error, "ENOENT")) return null;
     throw storageError(error, path);
   }
-}
+};
 
 /** Create project configuration exclusively; never replace existing agent files or configuration. */
-export async function initializeProject(directory: string): Promise<ProjectConfig> {
+export const initializeProject = async (directory: string): Promise<ProjectConfig> => {
   const root = await validateProjectDirectory(directory);
   const config = projectConfigSchema.parse({
     schemaVersion: 1,
@@ -149,13 +133,13 @@ export async function initializeProject(directory: string): Promise<ProjectConfi
     { flag: "wx" },
   );
   return config;
-}
+};
 
 /** Only the trusted CLI workspace is writable; setup may change its display name. */
-export async function saveProjectSetup(
+export const saveProjectSetup = async (
   directory: string,
   input: z.infer<typeof projectSetupSchema>,
-): Promise<ProjectConfig> {
+): Promise<ProjectConfig> => {
   const root = await validateProjectDirectory(directory);
   const path = await configPath(root);
   const current = await readProjectConfig(root);
@@ -207,4 +191,4 @@ export async function saveProjectSetup(
     throw error;
   }
   return config;
-}
+};

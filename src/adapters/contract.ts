@@ -11,13 +11,13 @@ export interface AgentConnection {
   executable: string | null;
   installation: "detected" | "missing" | "built-in";
   authentication: "unknown" | "not-required" | "authenticated" | "unauthenticated";
-  authenticationMechanism?: string;
+  authenticationMechanism?: string | undefined;
   capabilities: AgentCapabilities;
-  version?: string;
-  protocol?: string;
-  identity?: string;
-  reason?: string;
-  models?: { id: string; displayName: string; efforts?: string[] }[];
+  version?: string | undefined;
+  protocol?: string | undefined;
+  identity?: string | undefined;
+  reason?: string | undefined;
+  models?: { id: string; displayName: string; efforts?: string[] | undefined }[] | undefined;
 }
 export interface StepExecutionInput {
   runId: string;

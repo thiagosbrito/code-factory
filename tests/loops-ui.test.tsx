@@ -312,4 +312,27 @@ describe("loops library UI", () => {
       ).value,
     ).toBe("");
   });
+  it("drops deleted steps from a pending group selection", async () => {
+    const user = userEvent.setup();
+    render(
+      <LoopEditor
+        initial={draft()}
+        project={project}
+        agents={[]}
+        onBack={() => undefined}
+        onPublished={async () => undefined}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "+ Agent step" }));
+    await user.type(screen.getByRole("textbox", { name: "Group name" }), "Review team");
+    for (const name of ["Build", "Review", "New agent step"])
+      await user.click(screen.getByRole("checkbox", { name }));
+    await user.click(screen.getByRole("button", { name: "New agent step" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Delete step" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Create parallel group" }));
+    expect(screen.getAllByText("agent · parallel: Review team")).toHaveLength(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

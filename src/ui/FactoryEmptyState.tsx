@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-export function FactoryEmptyState({
+export const FactoryEmptyState = ({
   kind,
   onCreate,
   onTemplate,
@@ -9,7 +9,7 @@ export function FactoryEmptyState({
   kind: "runs" | "loops";
   onCreate: () => void;
   onTemplate: () => void;
-}) {
+}) => {
   return (
     <Card className="mt-7 flex min-h-80 flex-col items-center justify-center border-dashed bg-white/60 px-6 py-10 text-center">
       <div className="grid size-12 place-items-center rounded-xl bg-teal-50 text-2xl text-teal-700">
@@ -31,4 +31,4 @@ export function FactoryEmptyState({
       </div>
     </Card>
   );
-}
+};

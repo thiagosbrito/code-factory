@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
-import type { LoopDefinition } from "../domain/loop.js";
-import type { RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { FactoryResponse, ProjectResponse } from "./project-api";
@@ -9,10 +7,10 @@ import { FactoryEmptyState } from "./FactoryEmptyState";
 import { FactorySidebar, screenLabels, type Screen } from "./FactorySidebar";
 import { bindingError, connectionViewModel } from "./connection";
 import { Loops } from "./Loops";
-import { api } from "./project-api";
 import { NewRunDialog } from "./NewRunDialog";
+import { useFactoryRuns } from "./useFactoryRuns";
 
-export function Factory({
+export const Factory = ({
   project,
   agents,
   counts,
@@ -32,50 +30,20 @@ export function Factory({
   onDemo: () => void;
   onExitDemo: () => void;
   onEditSetup: () => void;
-}) {
-  const [notice, setNotice] = useState("");
+}) => {
   const [newRunOpen, setNewRunOpen] = useState(false);
-  const [publishedLoops, setPublishedLoops] = useState<LoopDefinition[]>([]);
-  const [runs, setRuns] = useState<RunRecord[]>([]);
-  const [trackerConfigured, setTrackerConfigured] = useState(false);
-  const [selectedRunId, setSelectedRunId] = useState(
-    () => location.hash.match(/^#runs\/([0-9a-f-]{36})$/i)?.[1] ?? "",
-  );
-  const selectedRun = runs.find((run) => run.snapshot.id === selectedRunId);
-  useEffect(() => {
-    if (demo) return;
-    void Promise.all([
-      api<{ loops: LoopDefinition[] }>("/api/loops/published"),
-      api<{ runs: RunRecord[] }>("/api/runs"),
-      api<{ configured: boolean }>("/api/tracker"),
-    ])
-      .then(([loops, history, tracker]) => {
-        setPublishedLoops(loops.loops);
-        setRuns(history.runs);
-        setTrackerConfigured(tracker.configured);
-      })
-      .catch((error: unknown) =>
-        setNotice(error instanceof Error ? error.message : "Could not load run history."),
-      );
-  }, [demo]);
-  const openRun = (id: string) => {
-    setSelectedRunId(id);
-    window.history.pushState(null, "", `#runs/${id}`);
-  };
-  const onStarted = (id: string, run?: RunRecord) => {
-    openRun(id);
-    if (run) {
-      setRuns((previous) => [run, ...previous.filter((item) => item.snapshot.id !== id)]);
-      return;
-    }
-    void api<{ run: RunRecord }>(`/api/runs/${id}`)
-      .then(({ run }) =>
-        setRuns((previous) => [run, ...previous.filter((item) => item.snapshot.id !== id)]),
-      )
-      .catch((error: unknown) =>
-        setNotice(error instanceof Error ? error.message : "Could not load run."),
-      );
-  };
+  const {
+    notice,
+    setNotice,
+    publishedLoops,
+    setPublishedLoops,
+    runs,
+    trackerConfigured,
+    selectedRun,
+    setSelectedRunId,
+    openRun,
+    onStarted,
+  } = useFactoryRuns(demo);
   const canStart = Boolean(
     project.project?.defaultBinding && !bindingError(project.project.defaultBinding, agents),
   );
@@ -309,4 +277,4 @@ export function Factory({
       </main>
     </div>
   );
-}
+};
