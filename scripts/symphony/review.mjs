@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { readLinearKey, run } from "./common.mjs";
 import {
   assertOwned,
+  readRecord,
   withRepositoryLock,
   workspaceIdentity,
   writeRecord,
@@ -11,6 +12,12 @@ import {
 
 const githubRepository = "thiagosbrito/code-factory";
 const projectId = "bd22686b-05ec-4184-9bea-4dc9a8ef23af";
+const reviewUrl = /^https:\/\/github\.com\/thiagosbrito\/code-factory\/pull\/\d+$/;
+
+export const isDirectStateTransition = (params) =>
+  params?.tool === "linear_graphql" &&
+  JSON.stringify(params.arguments)?.includes("issueUpdate") &&
+  JSON.stringify(params.arguments).includes("stateId");
 
 export function isDirectReviewTransition(params) {
   if (params?.tool !== "linear_graphql") return false;
@@ -46,19 +53,31 @@ export const reviewTool = {
 };
 
 async function linearGraphql(query, variables) {
-  const response = await fetch("https://api.linear.app/graphql", {
-    method: "POST",
-    signal: AbortSignal.timeout(15_000),
-    headers: { "Content-Type": "application/json", Authorization: readLinearKey() },
-    body: JSON.stringify({ query, variables }),
-  });
-  const result = await response.json();
+  let response;
+  try {
+    response = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      signal: AbortSignal.timeout(15_000),
+      headers: { "Content-Type": "application/json", Authorization: readLinearKey() },
+      body: JSON.stringify({ query, variables }),
+    });
+  } catch (error) {
+    throw new LinearRequestError(`Linear request failed: ${error.message}`);
+  }
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new LinearRequestError(`Linear response was invalid (${response.status}).`);
+  }
   if (!response.ok || result.errors || !result.data)
-    throw new Error(
+    throw new LinearRequestError(
       `Linear request failed (${response.status}); review handoff was not confirmed.`,
     );
   return result.data;
 }
+
+class LinearRequestError extends Error {}
 
 function validateRequest(request) {
   if (request?.ready !== true || !Array.isArray(request.blockers) || request.blockers.length)
@@ -225,7 +244,7 @@ function publishBranch(identity, request, command) {
         pr.headRefName !== identity.branch ||
         pr.baseRefName !== "main" ||
         pr.headRefOid !== commit ||
-        !/^https:\/\/github\.com\/thiagosbrito\/code-factory\/pull\/\d+$/.test(pr.url)
+        !reviewUrl.test(pr.url)
       )
         throw new Error("GitHub did not confirm an open PR for the reviewed commit.");
       if (
@@ -262,6 +281,130 @@ function publishBranch(identity, request, command) {
   });
 }
 
+const reviewResult = (pr) => ({
+  success: true,
+  url: pr.url,
+  commit: pr.commit,
+  state: "In Review",
+  checks: pr.statusCheckRollup ?? [],
+  reviewDecision: pr.reviewDecision ?? null,
+});
+
+const verifiedPr = (identity, receipt, command) => {
+  if (!reviewUrl.test(receipt.url) || !/^[a-f0-9]{40}$/.test(receipt.commit))
+    throw new Error("Publication record has an invalid PR URL or commit.");
+  const pr = JSON.parse(
+    command("gh", [
+      "pr",
+      "view",
+      receipt.url,
+      "--repo",
+      githubRepository,
+      "--json",
+      "url,state,isDraft,headRefName,baseRefName,headRefOid,statusCheckRollup,reviewDecision",
+    ]),
+  );
+  if (
+    pr.url !== receipt.url ||
+    pr.state !== "OPEN" ||
+    pr.isDraft ||
+    pr.headRefName !== identity.branch ||
+    pr.baseRefName !== "main" ||
+    pr.headRefOid !== receipt.commit
+  )
+    throw new Error("Recorded PR is not open at the verified commit.");
+  return { ...pr, commit: receipt.commit };
+};
+
+const retryIssue = async (linear, identity) => {
+  let failure;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await fetchIssue(linear, identity);
+    } catch (error) {
+      failure = error;
+      if (!(error instanceof LinearRequestError) || attempt === 3) break;
+    }
+  }
+  throw failure;
+};
+
+export async function reconcileReview(
+  workspace,
+  { command = run, linear = linearGraphql, allowTransition = true } = {},
+) {
+  const identity = workspaceIdentity(workspace);
+  assertOwned(identity);
+  const receipt = readRecord(identity);
+  if (!["review-ready", "review-pending"].includes(receipt.state)) return null;
+  const pr = verifiedPr(identity, receipt, command);
+  const issue = await retryIssue(linear, identity);
+  if (issue.state.name === "In Review") {
+    const result = reviewResult(pr);
+    writeRecord(identity, "review-ready", result);
+    return result;
+  }
+  if (receipt.state === "review-ready" && ["In Progress", "Backlog"].includes(issue.state.name)) {
+    if (!allowTransition) return null;
+    await moveIssue(linear, issue, "In Review");
+    const confirmed = await retryIssue(linear, identity);
+    if (confirmed.state.name !== "In Review")
+      throw new LinearRequestError("Linear did not retain the restored review state.");
+    const result = reviewResult(pr);
+    writeRecord(identity, "review-ready", result);
+    return result;
+  }
+  if (
+    receipt.state === "review-ready" ||
+    !allowTransition ||
+    (!["Todo", "In Progress"].includes(issue.state.name) &&
+      !(receipt.stage === "state-transitioned" && issue.state.name === "Backlog"))
+  )
+    return null;
+  if (receipt.stage !== "state-transitioned") {
+    if (receipt.stage !== "pr-linked") {
+      const attachment = await linear(
+        `mutation($issueId: String!, $url: String!, $title: String!) {
+          attachmentLinkGitHubPR(issueId: $issueId, url: $url, title: $title) { success }
+        }`,
+        { issueId: issue.id, url: pr.url, title: receipt.title },
+      );
+      if (!attachment.attachmentLinkGitHubPR?.success)
+        throw new LinearRequestError("Linear did not confirm the PR link.");
+      writeRecord(identity, "review-pending", { ...receipt, stage: "pr-linked" });
+    }
+    await moveIssue(linear, issue, "In Review");
+    writeRecord(identity, "review-pending", { ...receipt, stage: "state-transitioned" });
+  }
+  let confirmed = await retryIssue(linear, identity);
+  if (
+    confirmed.state.name !== "In Review" &&
+    receipt.stage === "state-transitioned" &&
+    ["In Progress", "Backlog"].includes(confirmed.state.name)
+  ) {
+    await moveIssue(linear, confirmed, "In Review");
+    confirmed = await retryIssue(linear, identity);
+  }
+  if (confirmed.state.name !== "In Review")
+    throw new LinearRequestError("Linear did not retain In Review after publication.");
+  const result = reviewResult(pr);
+  writeRecord(identity, "review-ready", result);
+  return result;
+}
+
+export async function directStateTransitionBlocked(workspace, { linear = linearGraphql } = {}) {
+  const identity = workspaceIdentity(workspace);
+  const receipt = readRecord(identity);
+  if (receipt.state === "review-pending") return true;
+  const issue = await retryIssue(linear, identity);
+  if (issue.state.name === "In Review") return true;
+  if (receipt.state === "review-ready") {
+    // A human may return a reviewed ticket to Todo for fixes.
+    return issue.state.name !== "Todo";
+  }
+  return false;
+}
+
 export async function publishReview(
   workspace,
   request,
@@ -270,42 +413,66 @@ export async function publishReview(
   const identity = workspaceIdentity(workspace);
   assertOwned(identity);
   let issue;
+  let pr;
   try {
+    const previous = readRecord(identity);
+    if (["review-ready", "review-pending"].includes(previous.state)) {
+      const confirmed = await reconcileReview(workspace, { command, linear });
+      if (confirmed) return confirmed;
+      if (previous.state === "review-ready")
+        return {
+          success: false,
+          retryable: false,
+          paused: false,
+          error:
+            "Reviewed ticket was returned for changes; run implementation before publishing again.",
+        };
+    }
     issue = await fetchIssue(linear, identity);
     validateRequest(request);
     if (!["Todo", "In Progress", "In Review"].includes(issue.state.name))
       throw new Error("Ticket is paused or terminal; review publication is not authorized.");
     validateCandidate(command, identity.workspace, request.files);
-    const pr = publishBranch(identity, request, command);
+    pr = publishBranch(identity, request, command);
+    writeRecord(identity, "review-pending", {
+      url: pr.url,
+      commit: pr.commit,
+      title: request.title,
+      stage: "pr-confirmed",
+    });
     // Recheck eligibility after validation/publication; a cancellation must not be overwritten.
     issue = await fetchIssue(linear, identity);
     if (!["Todo", "In Progress", "In Review"].includes(issue.state.name))
       throw new Error("Ticket was paused during publication; leaving its tracker state unchanged.");
-    const attachment = await linear(
-      `mutation($issueId: String!, $url: String!, $title: String!) {
-      attachmentLinkGitHubPR(issueId: $issueId, url: $url, title: $title) { success }
-    }`,
-      { issueId: issue.id, url: pr.url, title: request.title },
-    );
-    if (!attachment.attachmentLinkGitHubPR?.success)
-      throw new Error("Linear did not confirm the PR link.");
-    await moveIssue(linear, issue, "In Review");
-    const result = {
-      success: true,
-      url: pr.url,
-      commit: pr.commit,
-      state: "In Review",
-      checks: pr.statusCheckRollup ?? [],
-      reviewDecision: pr.reviewDecision ?? null,
-    };
-    writeRecord(identity, "review-ready", result);
+    const result = await reconcileReview(workspace, { command, linear });
+    if (!result) throw new Error("Review handoff did not reach In Review.");
     return result;
   } catch (error) {
     let pauseError;
-    if (issue && ["Todo", "In Progress", "In Review"].includes(issue.state.name)) {
+    if (pr || ["review-ready", "review-pending"].includes(readRecord(identity).state)) {
+      const receipt = readRecord(identity);
+      writeRecord(identity, receipt.state === "review-ready" ? "review-ready" : "review-pending", {
+        url: receipt.url ?? pr?.url,
+        commit: receipt.commit ?? pr?.commit,
+        title: receipt.title ?? request?.title,
+        stage: receipt.stage ?? "reconciliation-failed",
+        error: error.message,
+      });
+      return {
+        success: false,
+        error: error.message,
+        retryable: true,
+        paused: false,
+        url: receipt.url ?? pr?.url,
+        commit: receipt.commit ?? pr?.commit,
+      };
+    }
+    if (error instanceof LinearRequestError)
+      return { success: false, error: error.message, retryable: true, paused: false };
+    if (issue && ["Todo", "In Progress"].includes(issue.state.name)) {
       try {
-        const current = await fetchIssue(linear, identity);
-        if (["Todo", "In Progress", "In Review"].includes(current.state.name))
+        const current = await retryIssue(linear, identity);
+        if (["Todo", "In Progress"].includes(current.state.name))
           await moveIssue(linear, current, "Backlog");
         else pauseError = "Ticket state changed; no pause transition was applied.";
       } catch (failure) {
@@ -316,10 +483,7 @@ export async function publishReview(
     return {
       success: false,
       error: error.message,
-      paused:
-        Boolean(issue) &&
-        ["Todo", "In Progress", "In Review"].includes(issue.state.name) &&
-        !pauseError,
+      paused: Boolean(issue) && ["Todo", "In Progress"].includes(issue.state.name) && !pauseError,
       ...(pauseError ? { pauseError } : {}),
     };
   }

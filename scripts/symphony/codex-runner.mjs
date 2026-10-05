@@ -1,15 +1,60 @@
 import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { workspaces } from "./common.mjs";
+import { records, workspaces } from "./common.mjs";
 import { checkpointTool, checkpointContext, saveCheckpoint } from "./context.mjs";
 import { budgetArguments } from "./budgets.mjs";
+import { readRecord, workspaceIdentity } from "./workspace-identity.mjs";
 
-import { isDirectReviewTransition, publishReview, reviewTool } from "./review.mjs";
+import {
+  directStateTransitionBlocked,
+  isDirectReviewTransition,
+  isDirectStateTransition,
+  publishReview,
+  reviewTool,
+} from "./review.mjs";
 
 const workspace = realpathSync(process.cwd());
 if (!workspace.startsWith(`${realpathSync(workspaces)}/`))
   throw new Error("Codex must run inside a ticket worktree.");
+const identity = workspaceIdentity(workspace);
+const servePublishedReview = async () => {
+  const input = createInterface({ input: process.stdin });
+  input.on("line", (line) => {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (message.method === "initialize") {
+      process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + "\n");
+    } else if (message.method === "thread/start") {
+      process.stdout.write(
+        JSON.stringify({
+          id: message.id,
+          result: { thread: { id: `review-${identity.identifier}` } },
+        }) + "\n",
+      );
+    } else if (message.method === "turn/start") {
+      const turn = { id: `review-skip-${identity.identifier}`, status: "completed" };
+      process.stdout.write(JSON.stringify({ id: message.id, result: { turn } }) + "\n");
+      process.stdout.write(JSON.stringify({ method: "turn/completed", params: { turn } }) + "\n");
+    }
+  });
+  await new Promise((resolve) => input.once("close", resolve));
+};
+if (existsSync(join(records, `${identity.identifier}.json`))) {
+  const receipt = readRecord(identity);
+  if (["review-ready", "review-pending"].includes(receipt.state)) {
+    console.error(
+      `Skipping Codex pickup: ${identity.identifier} has a ${receipt.state} review receipt.`,
+    );
+    await servePublishedReview();
+    process.exit(0);
+  }
+}
 const environment = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => !/^(LINEAR_|GITHUB_TOKEN$|GH_TOKEN$)/.test(key)),
 );
@@ -44,6 +89,32 @@ output.on("line", async (line) => {
         }) + "\n",
       );
       return;
+    }
+    if (message.method === "item/tool/call" && isDirectStateTransition(message.params)) {
+      let blocked;
+      try {
+        blocked = await directStateTransitionBlocked(workspace);
+      } catch (error) {
+        blocked = true;
+        console.error(`Could not verify tracker state: ${error.message}`);
+      }
+      if (blocked) {
+        child.stdin.write(
+          JSON.stringify({
+            id: message.id,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: "inputText",
+                  text: "State transition blocked: review handoff is published or its state could not be verified.",
+                },
+              ],
+            },
+          }) + "\n",
+        );
+        return;
+      }
     }
     if (message.method === "item/tool/call" && message.params?.tool === checkpointTool.name) {
       try {
