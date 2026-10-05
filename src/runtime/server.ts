@@ -12,6 +12,7 @@ import { cancelRun, executeRun, retryStep } from "./scheduler.js";
 import { prepareStepRetry } from "../domain/scheduler.js";
 import { guidanceInputSchema, sendGuidance } from "./guidance.js";
 import { eventsAfter, parseEventCursor, streamRunEvents } from "./events.js";
+import { inspectArtifact, inspectDiff, inspectFiles } from "./inspection.js";
 import { listPublishedLoops, listRuns, readRun } from "./storage.js";
 import { linearTracker, ticketIdSchema, type TicketTracker } from "./tracker.js";
 import {
@@ -333,6 +334,24 @@ export const startLocalServer = async (options: {
         return json(response, 200, { loops: await listPublishedLoops(projectDirectory) });
       if (pathname === "/api/runs")
         return json(response, 200, { runs: await listRuns(projectDirectory) });
+      const inspectionPath =
+        /^\/api\/runs\/([0-9a-f-]{36})\/inspection(?:\/(diff|artifact))?$/i.exec(pathname);
+      if (inspectionPath?.[1]) {
+        const run = await readRun(projectDirectory, inspectionPath[1]);
+        if (!run) return json(response, 404, { error: "Run not found." });
+        const url = new URL(request.url ?? "/", `http://${hosts[0]}`);
+        if (inspectionPath[2] === "diff") {
+          const path = url.searchParams.get("path");
+          if (!path) return json(response, 400, { error: "Select a changed path." });
+          return json(response, 200, await inspectDiff(projectDirectory, run, path));
+        }
+        if (inspectionPath[2] === "artifact") {
+          const id = url.searchParams.get("id");
+          if (!id) return json(response, 400, { error: "Select an artifact receipt." });
+          return json(response, 200, await inspectArtifact(projectDirectory, run, id));
+        }
+        return json(response, 200, await inspectFiles(projectDirectory, run));
+      }
       const eventsPath = /^\/api\/runs\/([0-9a-f-]{36})\/events$/i.exec(pathname);
       if (eventsPath?.[1]) {
         const run = await readRun(projectDirectory, eventsPath[1]);
