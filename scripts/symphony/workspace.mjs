@@ -1,5 +1,6 @@
 import { readdirSync } from "node:fs";
 import { ensureDirectories, git, run } from "./common.mjs";
+import { reconcileReview } from "./review.mjs";
 
 import {
   readRecord,
@@ -13,7 +14,8 @@ function create(identity) {
   return withRepositoryLock(() => {
     if (readdirSync(identity.workspace).length > 0) {
       assertOwned(identity);
-      writeRecord(identity, "reused");
+      if (!["review-ready", "review-pending"].includes(readRecord(identity).state))
+        writeRecord(identity, "reused");
       return;
     }
     // Fetch once under the host lock; existing ticket branches are never reset.
@@ -76,13 +78,24 @@ try {
       break;
     case "before-run":
       assertOwned(identity);
+      if (["review-ready", "review-pending"].includes(readRecord(identity).state)) {
+        const confirmed = await reconcileReview(identity.workspace);
+        if (confirmed)
+          throw new Error(`Review already published: ${confirmed.url} at ${confirmed.commit}.`);
+        if (readRecord(identity).state === "review-pending")
+          throw new Error("Review reconciliation is pending; refusing duplicate pickup.");
+      }
       withRepositoryLock(() => git(["fetch", "origin"]));
       run("pnpm", ["install", "--frozen-lockfile"], { cwd: identity.workspace, stdio: "inherit" });
       writeRecord(identity, "running");
       break;
     case "after-run":
       assertOwned(identity);
-      if (!["review-ready", "publication-blocked"].includes(readRecord(identity).state))
+      if (
+        !["review-ready", "review-pending", "publication-blocked"].includes(
+          readRecord(identity).state,
+        )
+      )
         writeRecord(identity, "attempt-ended");
       break;
     case "cleanup":

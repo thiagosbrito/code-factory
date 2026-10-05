@@ -5,7 +5,13 @@ import { workspaces } from "./common.mjs";
 import { checkpointTool, checkpointContext, saveCheckpoint } from "./context.mjs";
 import { budgetArguments } from "./budgets.mjs";
 
-import { isDirectReviewTransition, publishReview, reviewTool } from "./review.mjs";
+import {
+  directStateTransitionBlocked,
+  isDirectReviewTransition,
+  isDirectStateTransition,
+  publishReview,
+  reviewTool,
+} from "./review.mjs";
 
 const workspace = realpathSync(process.cwd());
 if (!workspace.startsWith(`${realpathSync(workspaces)}/`))
@@ -44,6 +50,32 @@ output.on("line", async (line) => {
         }) + "\n",
       );
       return;
+    }
+    if (message.method === "item/tool/call" && isDirectStateTransition(message.params)) {
+      let blocked;
+      try {
+        blocked = await directStateTransitionBlocked(workspace);
+      } catch (error) {
+        blocked = true;
+        console.error(`Could not verify tracker state: ${error.message}`);
+      }
+      if (blocked) {
+        child.stdin.write(
+          JSON.stringify({
+            id: message.id,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: "inputText",
+                  text: "State transition blocked: review handoff is published or its state could not be verified.",
+                },
+              ],
+            },
+          }) + "\n",
+        );
+        return;
+      }
     }
     if (message.method === "item/tool/call" && message.params?.tool === checkpointTool.name) {
       try {
