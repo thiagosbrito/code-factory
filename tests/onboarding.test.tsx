@@ -217,7 +217,7 @@ describe("first-use UI", () => {
     await user.keyboard("{Enter}");
     expect(screen.getByRole("heading", { name: "No user loops yet" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Use starter template" }));
-    expect(screen.getByText(/Starter templates become available/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Implement → Review → Validate" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Open demo factory" }));
     expect(screen.getByText(/Sample loops/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Exit demo" }));

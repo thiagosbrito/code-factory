@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createLoopDraft, parseLoop, type LoopDefinition } from "../src/domain/loop.js";
+import { exportPortableLoop } from "../src/domain/loop-portable.js";
 import type { AgentConnection } from "../src/adapters/contract.js";
 import { Loops } from "../src/ui/Loops.js";
 import { LoopEditor } from "../src/ui/LoopEditor.js";
@@ -46,6 +47,61 @@ afterEach(() => {
 });
 
 describe("loops library UI", () => {
+  it("stays blank until a starter is chosen and saves the full staged starter as a draft", async () => {
+    const user = userEvent.setup();
+    const requests: { path: string; method: string; body?: LoopDefinition }[] = [];
+    vi.stubGlobal("fetch", async (path: string, options?: RequestInit) => {
+      const method = options?.method ?? "GET";
+      const body = options?.body ? (JSON.parse(String(options.body)) as LoopDefinition) : undefined;
+      requests.push({ path, method, ...(body ? { body } : {}) });
+      if (path === "/api/loops" && method === "GET") return Response.json({ loops: [] });
+      if (path.endsWith("/draft") && method === "PUT" && body) return Response.json({ loop: body });
+      throw new Error(`Unexpected ${method} ${path}`);
+    });
+    render(<Loops project={project} agents={[]} />);
+    expect(await screen.findByRole("heading", { name: "No user loops yet" })).toBeTruthy();
+    expect(requests).toEqual([{ path: "/api/loops", method: "GET" }]);
+    await user.click(screen.getByRole("button", { name: "Use starter template" }));
+    const chooser = screen.getByLabelText("Starter templates");
+    expect(
+      within(chooser).getByRole("heading", { name: /Implement.*Review.*Validate/ }),
+    ).toBeTruthy();
+    await user.click(within(chooser).getAllByRole("button", { name: "Create draft" })[1]!);
+    await waitFor(() => expect(requests.some((request) => request.method === "PUT")).toBe(true));
+    const saved = requests.find((request) => request.method === "PUT")!.body!;
+    expect(saved.status).toBe("draft");
+    expect(saved.steps).toHaveLength(15);
+    expect(saved.steps.filter((step) => step.stage === "review")).toHaveLength(6);
+    expect(requests.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("validates a portable import before an explicit confirmation saves a new draft", async () => {
+    const user = userEvent.setup();
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", async (path: string, options?: RequestInit) => {
+      const method = options?.method ?? "GET";
+      requests.push(`${method} ${path}`);
+      if (path === "/api/loops" && method === "GET") return Response.json({ loops: [] });
+      if (path.endsWith("/draft") && method === "PUT")
+        return Response.json({ loop: JSON.parse(String(options?.body)) });
+      throw new Error(`Unexpected ${method} ${path}`);
+    });
+    render(<Loops project={project} agents={[]} />);
+    await screen.findByRole("heading", { name: "No user loops yet" });
+    await user.click(screen.getByRole("button", { name: "Import JSON" }));
+    const input = screen.getByRole("textbox", { name: "Paste a portable loop document" });
+    fireEvent.change(input, { target: { value: "{" } });
+    await user.click(screen.getByRole("button", { name: "Validate import" }));
+    expect(screen.getByRole("alert").textContent).toMatch(/JSON:/);
+    expect(requests).toEqual(["GET /api/loops"]);
+    fireEvent.change(input, { target: { value: exportPortableLoop(draft()) } });
+    await user.click(screen.getByRole("button", { name: "Validate import" }));
+    expect(screen.getByText(/Valid draft with 2 steps/)).toBeTruthy();
+    expect(requests).toEqual(["GET /api/loops"]);
+    await user.click(screen.getByRole("button", { name: "Confirm import: Sample" }));
+    await waitFor(() => expect(requests.some((request) => request.startsWith("PUT "))).toBe(true));
+  });
+
   it("reports a newly published loop to the factory run intake", async () => {
     const user = userEvent.setup();
     const agent: AgentConnection = {
@@ -80,7 +136,6 @@ describe("loops library UI", () => {
           },
         }}
         agents={[agent]}
-        onTemplate={() => undefined}
         onPublished={onPublished}
       />,
     );
@@ -93,7 +148,7 @@ describe("loops library UI", () => {
     vi.stubGlobal("fetch", async () =>
       Response.json({ loops: [{ id: "sample", draft: draft(), published, versions: [1] }] }),
     );
-    render(<Loops project={project} agents={[]} onTemplate={() => undefined} />);
+    render(<Loops project={project} agents={[]} />);
     expect(await screen.findByRole("heading", { name: "Published plan" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Sample" })).toBeTruthy();
     expect(screen.getByText("Published v1")).toBeTruthy();
@@ -116,7 +171,7 @@ describe("loops library UI", () => {
       }
       throw new Error(`Unexpected ${method} ${path}`);
     });
-    render(<Loops project={project} agents={[]} onTemplate={() => undefined} />);
+    render(<Loops project={project} agents={[]} />);
     await user.click(await screen.findByRole("button", { name: "Edit draft" }));
     const build = screen.getByRole("button", { name: "Build" });
     build.focus();
@@ -153,10 +208,47 @@ describe("loops library UI", () => {
         return Response.json({ loops: [{ id: "sample", draft: draft(), published: null }] });
       throw new Error(`Unexpected ${path}`);
     });
-    render(<Loops project={project} agents={[]} onTemplate={() => undefined} />);
+    render(<Loops project={project} agents={[]} />);
     await user.click(await screen.findByRole("button", { name: "Edit draft" }));
     await user.click(screen.getByRole("button", { name: "Publish v1" }));
     expect(screen.getByRole("alert").textContent).toMatch(/project default or step binding/);
+    expect(paths).toEqual(["/api/loops"]);
+  });
+  it("shows an unsupported project model and blocks publication", async () => {
+    const user = userEvent.setup();
+    const paths: string[] = [];
+    const agent: AgentConnection = {
+      provider: "codex",
+      executable: "/bin/codex",
+      installation: "detected",
+      authentication: "authenticated",
+      protocol: "app-server",
+      version: "test",
+      identity: "codex",
+      capabilities: { streaming: "supported", steering: "unknown", resume: "unknown" },
+      models: [{ id: "agent-default", displayName: "Default" }],
+    };
+    vi.stubGlobal("fetch", async (path: string) => {
+      paths.push(path);
+      if (path === "/api/loops")
+        return Response.json({ loops: [{ id: "sample", draft: draft(), published: null }] });
+      throw new Error(`Unexpected ${path}`);
+    });
+    render(
+      <Loops
+        project={{
+          ...project,
+          project: {
+            ...project.project!,
+            defaultBinding: { provider: "codex", model: "old-model" },
+          },
+        }}
+        agents={[agent]}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Edit draft" }));
+    await user.click(screen.getByRole("button", { name: "Publish v1" }));
+    expect(screen.getByRole("alert").textContent).toMatch(/old-model.*unavailable/);
     expect(paths).toEqual(["/api/loops"]);
   });
   it("shows semantic group membership on the board and restores focus when undo removes an open step", async () => {
@@ -171,7 +263,7 @@ describe("loops library UI", () => {
         return Response.json({ loops: [{ id: "sample", draft: grouped, published: null }] });
       throw new Error(`Unexpected ${path}`);
     });
-    render(<Loops project={project} agents={[]} onTemplate={() => undefined} />);
+    render(<Loops project={project} agents={[]} />);
     await user.click(await screen.findByRole("button", { name: "Edit draft" }));
     expect(screen.getAllByText("agent · parallel: Reviews")).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "+ Agent step" }));
