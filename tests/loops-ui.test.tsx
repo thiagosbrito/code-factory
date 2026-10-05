@@ -7,6 +7,7 @@ import { exportPortableLoop } from "../src/domain/loop-portable.js";
 import type { AgentConnection } from "../src/adapters/contract.js";
 import { Loops } from "../src/ui/Loops.js";
 import { LoopEditor } from "../src/ui/LoopEditor.js";
+import { NativeTranslation } from "../src/ui/NativeTranslation.js";
 import { setParallelGroup } from "../src/ui/loop-editor-model.js";
 import type { ProjectResponse } from "../src/ui/project-api.js";
 
@@ -44,6 +45,55 @@ function draft(): LoopDefinition {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it("previews native import losses and waits for explicit application", async () => {
+  const user = userEvent.setup();
+  const imported = parseLoop({
+    ...createLoopDraft("native", "Native"),
+    steps: [{ id: "rule", name: "Review", kind: "agent", role: "", instruction: "Review code" }],
+  });
+  const requests: string[] = [];
+  let appliedRevision = "";
+  vi.stubGlobal("fetch", async (path: string, options?: RequestInit) => {
+    requests.push(path);
+    if (path === "/api/native/formats")
+      return Response.json({
+        formats: [{ format: "cursor-rule-mdc", provider: "cursor", label: "Cursor project rule" }],
+      });
+    if (path.startsWith("/api/native/candidates")) return Response.json({ names: ["review"] });
+    if (path === "/api/native/import/preview" || path === "/api/native/import/apply") {
+      const body = JSON.parse(String(options?.body)) as { expectedRevision?: string };
+      if (path.endsWith("/apply")) appliedRevision = body.expectedRevision ?? "";
+      return Response.json({
+        relativePath: ".cursor/rules/review.mdc",
+        revision: "revision-1",
+        direction: "import",
+        conflicts: [],
+        report: {
+          issues: [{ field: "alwaysApply", kind: "unsupported", message: "Activation omitted" }],
+        },
+        loop: imported,
+      });
+    }
+    throw new Error(`Unexpected ${path}`);
+  });
+  const apply = vi.fn<() => boolean>(() => true);
+  render(
+    <NativeTranslation loop={createLoopDraft("native", "Native")} apply={apply} disabled={false} />,
+  );
+  await screen.findByRole("option", { name: "Cursor project rule" });
+  fireEvent.change(screen.getByRole("combobox", { name: "Configuration name" }), {
+    target: { value: "review" },
+  });
+  await user.click(screen.getByRole("button", { name: "Preview" }));
+  expect(await screen.findByText(/Affected path:/)).toBeTruthy();
+  expect(screen.getByText(/unsupported: alwaysApply/)).toBeTruthy();
+  expect(apply).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Apply import" }));
+  await waitFor(() => expect(apply).toHaveBeenCalledOnce());
+  expect(appliedRevision).toBe("revision-1");
+  expect(requests).toContain("/api/native/import/apply");
 });
 
 describe("loops library UI", () => {
@@ -206,13 +256,14 @@ describe("loops library UI", () => {
       paths.push(path);
       if (path === "/api/loops")
         return Response.json({ loops: [{ id: "sample", draft: draft(), published: null }] });
+      if (path === "/api/native/formats") return Response.json({ formats: [] });
       throw new Error(`Unexpected ${path}`);
     });
     render(<Loops project={project} agents={[]} />);
     await user.click(await screen.findByRole("button", { name: "Edit draft" }));
     await user.click(screen.getByRole("button", { name: "Publish v1" }));
     expect(screen.getByRole("alert").textContent).toMatch(/project default or step binding/);
-    expect(paths).toEqual(["/api/loops"]);
+    expect(paths).toEqual(["/api/loops", "/api/native/formats"]);
   });
   it("shows an unsupported project model and blocks publication", async () => {
     const user = userEvent.setup();
@@ -232,6 +283,7 @@ describe("loops library UI", () => {
       paths.push(path);
       if (path === "/api/loops")
         return Response.json({ loops: [{ id: "sample", draft: draft(), published: null }] });
+      if (path === "/api/native/formats") return Response.json({ formats: [] });
       throw new Error(`Unexpected ${path}`);
     });
     render(
@@ -249,7 +301,7 @@ describe("loops library UI", () => {
     await user.click(await screen.findByRole("button", { name: "Edit draft" }));
     await user.click(screen.getByRole("button", { name: "Publish v1" }));
     expect(screen.getByRole("alert").textContent).toMatch(/old-model.*unavailable/);
-    expect(paths).toEqual(["/api/loops"]);
+    expect(paths).toEqual(["/api/loops", "/api/native/formats"]);
   });
   it("shows semantic group membership on the board and restores focus when undo removes an open step", async () => {
     const user = userEvent.setup();
@@ -297,6 +349,7 @@ describe("loops library UI", () => {
     const requests: string[] = [];
     vi.stubGlobal("fetch", (path: string, options?: RequestInit) => {
       requests.push(`${options?.method} ${path}`);
+      if (path === "/api/native/formats") return Promise.resolve(Response.json({ formats: [] }));
       if (path.endsWith("/draft")) return pendingSave;
       if (path.endsWith("/publish")) return Promise.resolve(Response.json({ loop: published }));
       throw new Error(`Unexpected ${path}`);
@@ -321,13 +374,17 @@ describe("loops library UI", () => {
     expect(screen.getByRole("button", { name: "+ Agent step" }).matches(":disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Undo" }).hasAttribute("disabled")).toBe(true);
     await user.keyboard("{Control>}z{/Control}");
-    expect(requests).toEqual(["PUT /api/loops/sample/draft"]);
+    expect(requests).toEqual(["undefined /api/native/formats", "PUT /api/loops/sample/draft"]);
     finishSave(Response.json({ loop: initial }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Publish v2" })).toBeTruthy());
     expect((screen.getByRole("textbox", { name: "Loop title" }) as HTMLInputElement).value).toBe(
       "Sample",
     );
-    expect(requests).toEqual(["PUT /api/loops/sample/draft", "POST /api/loops/sample/publish"]);
+    expect(requests).toEqual([
+      "undefined /api/native/formats",
+      "PUT /api/loops/sample/draft",
+      "POST /api/loops/sample/publish",
+    ]);
   });
   it("resets join and decision controls when undo changes the selected step graph", async () => {
     const user = userEvent.setup();

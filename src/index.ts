@@ -42,7 +42,17 @@ export type {
   AgentCapabilities,
   AgentConnection,
   AdapterEvent,
-  ConfigurationTranslator,
 } from "./adapters/contract.js";
+export type {
+  ConfigurationTranslator,
+  TranslationReport,
+  TranslationIssue,
+} from "./translators/contract.js";
+export {
+  nativeFormats,
+  nativeCandidates,
+  previewNative,
+  applyNative,
+} from "./runtime/native-translation.js";
 export { mockAdapter } from "./adapters/mock.js";
 export { createCodexAdapter, CodexAdapter } from "./adapters/codex.js";

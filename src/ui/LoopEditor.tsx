@@ -8,6 +8,7 @@ import { LoopStageBoard } from "./LoopStageBoard";
 import { LoopPalette } from "./LoopPalette";
 import { redo, undo } from "./loop-editor-model";
 import { useLoopEditorController } from "./useLoopEditorController";
+import { NativeTranslation } from "./NativeTranslation";
 
 export const LoopEditor = ({
   initial,
@@ -89,6 +90,7 @@ export const LoopEditor = ({
           {message}
         </p>
       )}
+      <NativeTranslation loop={loop} apply={apply} disabled={busy} />
       <fieldset disabled={busy} className="grid min-h-[590px] lg:grid-cols-[210px_minmax(0,1fr)]">
         <LoopPalette loop={loop} apply={apply} setMessage={setMessage} />
         <LoopStageBoard loop={loop} apply={apply} openDrawer={openDrawer} setMessage={setMessage} />
