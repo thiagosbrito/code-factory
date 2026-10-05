@@ -5,6 +5,7 @@ import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import {
   definitionForScope,
+  evidenceFreshness,
   scopeEvidence,
   stepForScope,
   validScope,
@@ -283,7 +284,7 @@ export const RunInspector = ({
                       : item.kind === "artifact"
                         ? item.mediaType
                         : ""}{" "}
-                    · {item.freshness.state}
+                    · {evidenceFreshness(run, item)}
                   </p>
                   <p className="mt-1 break-all text-xs text-muted-foreground">
                     {item.kind === "file" || item.kind === "artifact"

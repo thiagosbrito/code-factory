@@ -275,6 +275,7 @@ export const prepareStepRetry = (
         id: crypto.randomUUID(),
         runId: record.snapshot.id,
         stepId,
+        attemptId: expectedAttemptId,
         createdAt: new Date().toISOString(),
         kind: "event",
         type: "lifecycle",
@@ -282,6 +283,17 @@ export const prepareStepRetry = (
         detail: `Attempt ${step.attempts.length + 1} starts from retained workspace and evidence. ${invalidated.length ? `Results needing revalidation: ${invalidated.map((item) => item.stepId).join(", ")}.` : "No completed downstream results need revalidation."}`,
         sequence,
       },
+      ...invalidated.map((item, index) => ({
+        id: crypto.randomUUID(),
+        runId: record.snapshot.id,
+        stepId: item.stepId,
+        createdAt: new Date().toISOString(),
+        kind: "event" as const,
+        type: "lifecycle" as const,
+        title: "retry-invalidated",
+        detail: `Earlier ${item.stepId} results need revalidation after ${stepId} is retried.`,
+        sequence: sequence + index + 1,
+      })),
     ],
   });
 };

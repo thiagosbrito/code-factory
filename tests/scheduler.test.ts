@@ -6,6 +6,8 @@ import { mockAdapter } from "../src/adapters/mock.js";
 import type { AdapterEvent } from "../src/adapters/contract.js";
 import { cancelRun, executeRun, retryStep } from "../src/runtime/scheduler.js";
 import { createRun, readRun, updateRun } from "../src/runtime/storage.js";
+import { startLocalServer } from "../src/runtime/server.js";
+import { evidenceFreshness } from "../src/ui/run-view-model.js";
 import { parseLoop } from "../src/domain/loop.js";
 import {
   createRunRecord,
@@ -100,7 +102,10 @@ describe("portable scheduler", () => {
     expect(next.steps.find((item) => item.stepId === "quality")?.status).toBe("pending");
     expect(next.steps.find((item) => item.stepId === "security")).toEqual(sibling);
     expect(next.evidence[0]).toEqual(historical);
-    expect(next.evidence.at(-1)).toMatchObject({ title: "selected-step-retry" });
+    expect(next.evidence.at(-1)).toMatchObject({
+      title: "selected-step-retry",
+      attemptId: failed.id,
+    });
     expect(() => prepareStepRetry(next, "quality", failed.id)).toThrow(/failed run/);
     expect(() => prepareStepRetry(record, "security", failed.id)).toThrow(/failed step/);
     let retried = completeStep(claim(next, "quality"), "quality", { status: "failed" });
@@ -141,12 +146,40 @@ describe("portable scheduler", () => {
           : item,
       ),
     });
+    const joinAttempt = record.steps.find((item) => item.stepId === "join")?.attempts[0];
+    const siblingAttempt = record.steps.find((item) => item.stepId === "security")?.attempts[0];
+    if (!joinAttempt || !siblingAttempt) throw new Error("Missing completed attempts");
+    const receipt = (stepId: string, attemptId: string) => ({
+      id: crypto.randomUUID(),
+      runId: record.snapshot.id,
+      stepId,
+      attemptId,
+      createdAt: new Date().toISOString(),
+      kind: "artifact" as const,
+      name: `${stepId}-result`,
+      mediaType: "text/plain",
+      relativePath: `${stepId}.txt`,
+      digest: stepId,
+      provenance: {
+        source: "agent" as const,
+        baselineId: record.snapshot.baseline.id,
+        candidateId: "candidate-a",
+        inputReceiptIds: [],
+      },
+      freshness: { state: "current" as const, checkedAgainstCandidateId: "candidate-a" },
+    });
+    const downstream = receipt("join", joinAttempt.id);
+    const independent = receipt("security", siblingAttempt.id);
+    record = runRecordSchema.parse({ ...record, evidence: [downstream, independent] });
     const sibling = record.steps.find((item) => item.stepId === "security");
     const next = prepareStepRetry(record, "quality", previous.id);
     expect(next.steps.find((item) => item.stepId === "join")?.status).toBe("pending");
     expect(next.steps.find((item) => item.stepId === "join")?.attempts).toHaveLength(1);
     expect(next.steps.find((item) => item.stepId === "security")).toEqual(sibling);
-    expect(next.evidence.at(-1)).toMatchObject({ detail: expect.stringContaining("join") });
+    expect(next.evidence.at(-1)).toMatchObject({ title: "retry-invalidated", stepId: "join" });
+    expect(next.evidence.slice(0, 2)).toEqual([downstream, independent]);
+    expect(evidenceFreshness(next, downstream)).toBe("superseded · needs revalidation");
+    expect(evidenceFreshness(next, independent)).toBe("current");
   });
 
   it("replays only affected descendants after a selected retry, once for duplicate requests", async () => {
@@ -214,6 +247,33 @@ describe("portable scheduler", () => {
       expect(await readFile(join(workspace, "task.txt"), "utf8")).toBe("retained edit");
       expect((await readRun(root, record.snapshot.id))?.revision).toBe(first.revision);
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  it("acknowledges the same HTTP retry key after the new attempt starts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "factory-retry-http-"));
+    const initial = run();
+    await createRun(root, initial);
+    const claimed = await updateRun(root, claim(initial, "build"));
+    const failed = await updateRun(root, completeStep(claimed, "build", { status: "failed" }));
+    const attemptId = failed.steps.find((item) => item.stepId === "build")?.attempts[0]?.id;
+    if (!attemptId) throw new Error("Missing failed attempt");
+    const accepted = prepareStepRetry(failed, "build", attemptId);
+    await updateRun(root, accepted);
+    const running = await updateRun(root, claim(accepted, "build"));
+    const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
+    try {
+      const response = await fetch(`${url}/api/runs/${accepted.snapshot.id}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stepId: "build", attemptId }),
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json()).run.revision).toBe(running.revision);
+      expect((await readRun(root, accepted.snapshot.id))?.steps[0]?.attempts).toHaveLength(2);
+      expect((await readRun(root, accepted.snapshot.id))?.steps[0]?.status).toBe("running");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
       await rm(root, { recursive: true, force: true });
     }
   });

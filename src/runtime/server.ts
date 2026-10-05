@@ -254,10 +254,14 @@ export const startLocalServer = async (options: {
         const run = await readRun(projectDirectory, retryPath[1]);
         if (!run) return json(response, 404, { error: "Run not found." });
         const { stepId, attemptId } = parsed.data;
-        const step = run.steps.find((item) => item.stepId === stepId);
         if (
-          step?.attempts.at(-1)?.id !== attemptId &&
-          step?.attempts.some((item) => item.id === attemptId)
+          run.evidence.some(
+            (item) =>
+              item.kind === "event" &&
+              item.title === "selected-step-retry" &&
+              item.stepId === stepId &&
+              item.attemptId === attemptId,
+          )
         )
           return json(response, 200, { run });
         try {
