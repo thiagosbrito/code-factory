@@ -5,6 +5,7 @@ import {
   startAttempt,
   type RunRecord,
 } from "./run.js";
+import { getDependentStepIds } from "./loop.js";
 
 type Step = RunRecord["steps"][number];
 type Definition = RunRecord["snapshot"]["loop"]["steps"][number];
@@ -223,3 +224,64 @@ export const hashInputs = (candidateId: string, sourceIds: string[]): string =>
   createHash("sha256")
     .update(JSON.stringify([candidateId, [...sourceIds].sort()]))
     .digest("hex");
+
+/** Reopen only the selected failure and results that consumed its output. */
+export const prepareStepRetry = (
+  record: RunRecord,
+  stepId: string,
+  expectedAttemptId: string,
+): RunRecord => {
+  const step = record.steps.find((item) => item.stepId === stepId);
+  if (!step || !record.snapshot.loop.steps.some((item) => item.id === stepId))
+    throw new Error("Unknown retry target.");
+  if (record.status !== "failed" || step.status !== "failed")
+    throw new Error("Only a failed step in a failed run can be retried.");
+  if (record.steps.some((item) => item.status === "running"))
+    throw new Error("Active work must finish before retry.");
+  if (step.attempts.at(-1)?.id !== expectedAttemptId)
+    throw new Error("Retry target changed; reload the run.");
+  if (
+    step.attempts.filter((item) => item.implementationRound === record.implementationRound)
+      .length >= record.snapshot.loop.policy.maxAttemptsPerStep
+  )
+    throw new Error("Attempt limit reached for this step.");
+  const descendants = new Set(getDependentStepIds(record.snapshot.loop, stepId));
+  const invalidated = record.steps.filter(
+    (item) => descendants.has(item.stepId) && item.status !== "pending",
+  );
+  const sequence =
+    Math.max(
+      -1,
+      ...record.evidence.filter((item) => item.kind === "event").map((item) => item.sequence),
+    ) + 1;
+  return runRecordSchema.parse({
+    ...record,
+    revision: record.revision + 1,
+    status: "running",
+    steps: record.steps.map((item) =>
+      item.stepId === stepId || descendants.has(item.stepId)
+        ? {
+            ...item,
+            status: "pending",
+            outcome: undefined,
+            candidateId: undefined,
+            inputHash: undefined,
+          }
+        : item,
+    ),
+    evidence: [
+      ...record.evidence,
+      {
+        id: crypto.randomUUID(),
+        runId: record.snapshot.id,
+        stepId,
+        createdAt: new Date().toISOString(),
+        kind: "event",
+        type: "lifecycle",
+        title: "selected-step-retry",
+        detail: `Attempt ${step.attempts.length + 1} starts from retained workspace and evidence. ${invalidated.length ? `Results needing revalidation: ${invalidated.map((item) => item.stepId).join(", ")}.` : "No completed downstream results need revalidation."}`,
+        sequence,
+      },
+    ],
+  });
+};

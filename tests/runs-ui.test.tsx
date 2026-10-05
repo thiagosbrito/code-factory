@@ -12,7 +12,13 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
-import { createRunRecord, createRunSnapshot, startAttempt } from "../src/domain/run.js";
+import {
+  createRunRecord,
+  createRunSnapshot,
+  startAttempt,
+  finishAttempt,
+  runRecordSchema,
+} from "../src/domain/run.js";
 import { RunDetail } from "../src/ui/RunDetail.js";
 import { RunGraph } from "../src/ui/RunGraph.js";
 import { RunInspector } from "../src/ui/RunInspector.js";
@@ -463,4 +469,54 @@ it("keeps files and artifacts on their exact step attempt with recorded provenan
   await userEvent.setup().click(screen.getByRole("tab", { name: "Details" }));
   expect(screen.getByText(/Candidate candidate-1/)).toBeTruthy();
   expect(screen.getByText("plan")).toBeTruthy();
+});
+
+it("confirms a failed step retry and restores focus after Escape and confirmation", async () => {
+  const loop = parseLoop({
+    schemaVersion: 2,
+    id: "retry",
+    name: "Retry",
+    version: 1,
+    status: "published",
+    steps: [{ id: "build", name: "Build", kind: "agent", role: "builder", instruction: "Build" }],
+    dependencies: [],
+    groups: [],
+    joins: [],
+    decisions: [],
+    policy: { maxAttemptsPerStep: 2, maxImplementationRounds: 2 },
+  });
+  const pending = createRunRecord(
+    createRunSnapshot(loop, { description: "Task" }, { provider: "mock", model: "default" }),
+  );
+  const failed = runRecordSchema.parse({
+    ...finishAttempt(startAttempt(pending, "build"), "build", "failed"),
+    status: "failed",
+  });
+  const attemptId = failed.steps[0]?.attempts[0]?.id;
+  if (!attemptId) throw new Error("Missing attempt");
+  const onRetry = vi.fn<(stepId: string, attemptId: string) => void>();
+  render(
+    <RunInspector
+      run={failed}
+      scope={{ kind: "step", stepId: "build", attemptId }}
+      onScopeChange={vi.fn<(scope: RunScope) => void>()}
+      onClose={vi.fn<() => void>()}
+      connected
+      onRetry={onRetry}
+    />,
+  );
+  const user = userEvent.setup();
+  const trigger = screen.getByRole("button", { name: "Retry…" });
+  await user.click(trigger);
+  const dialog = screen.getByRole("dialog", { name: "Retry Build?" });
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  await user.tab();
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(screen.getByText(/Create Attempt 2 for Build/)).toBeTruthy();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  await user.click(trigger);
+  await user.click(screen.getByRole("button", { name: "Start Attempt 2" }));
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith("build", attemptId);
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
 });

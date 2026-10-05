@@ -11,6 +11,7 @@ import {
   continueRepeat,
   hashInputs,
   readySteps,
+  prepareStepRetry,
   settleRun,
   skipInactive,
   type StepResult,
@@ -18,7 +19,10 @@ import {
 import { readRun, updateRun } from "./storage.js";
 
 type Resolver = (provider: string) => AgentAdapter | null;
-const active = new Map<string, { work: Promise<RunRecord>; controller: AbortController }>();
+const active = new Map<
+  string,
+  { work: Promise<RunRecord>; controller: AbortController; retry?: string }
+>();
 
 const workspaceFor = async (project: string, record: RunRecord): Promise<string> => {
   const relative = record.snapshot.baseline.workspace;
@@ -216,10 +220,41 @@ export const executeRun = async (
 ): Promise<RunRecord> => {
   const key = `${project}:${runId}`;
   const existing = active.get(key);
-  if (existing) return existing.work;
+  if (existing) {
+    if (existing.retry) throw new Error("A selected retry is active.");
+    return existing.work;
+  }
   const controller = new AbortController();
   const work = executeOnce(project, runId, resolveAdapter, controller.signal);
   active.set(key, { work, controller });
+  try {
+    return await work;
+  } finally {
+    active.delete(key);
+  }
+};
+
+/** A repeated request with the same prior attempt shares the one active retry. */
+export const retryStep = async (
+  project: string,
+  runId: string,
+  stepId: string,
+  expectedAttemptId: string,
+  resolveAdapter: Resolver,
+): Promise<RunRecord> => {
+  const key = `${project}:${runId}`;
+  const retry = `${stepId}:${expectedAttemptId}`;
+  const existing = active.get(key);
+  if (existing) {
+    if (existing.retry !== retry) throw new Error("Another execution is active for this run.");
+    return existing.work;
+  }
+  const controller = new AbortController();
+  const work = executeOnce(project, runId, resolveAdapter, controller.signal, {
+    stepId,
+    expectedAttemptId,
+  });
+  active.set(key, { work, controller, retry });
   try {
     return await work;
   } finally {
@@ -239,6 +274,7 @@ const executeOnce = async (
   runId: string,
   resolveAdapter: Resolver,
   signal: AbortSignal,
+  retry?: { stepId: string; expectedAttemptId: string },
 ): Promise<RunRecord> => {
   const initial = await readRun(project, runId);
   if (!initial) throw new Error("Run not found.");
@@ -509,6 +545,18 @@ const executeOnce = async (
       if (reviewRoot) await rm(reviewRoot, { recursive: true, force: true });
     }
   };
+
+  if (retry) {
+    record = await commit((current) =>
+      prepareStepRetry(current, retry.stepId, retry.expectedAttemptId),
+    );
+    const candidateId = await fileDigest(workspace);
+    const inputs = stepInputs(record, retry.stepId);
+    const inputHash = hashInputs(candidateId, [inputs.context, JSON.stringify(inputs.identities)]);
+    record = await commit((current) => claimStep(current, retry.stepId, candidateId, inputHash));
+    await runStep(retry.stepId);
+    if (record.status !== "running") return record;
+  }
 
   const interrupted = record.steps.filter((step) => step.status === "running");
   if (interrupted.length) {

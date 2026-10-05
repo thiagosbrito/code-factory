@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
 import type { Evidence } from "../domain/evidence.js";
+import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import {
   definitionForScope,
@@ -11,6 +12,7 @@ import {
 } from "./run-view-model";
 import { RunInspectorActivity } from "./RunInspectorActivity";
 import { RunInspectorDetails } from "./RunInspectorDetails";
+import { RetryStepDialog } from "./RetryStepDialog";
 
 type Tab = "Activity" | "Files" | "Artifacts" | "Details";
 const tabs: Tab[] = ["Activity", "Files", "Artifacts", "Details"];
@@ -22,6 +24,9 @@ export const RunInspector = ({
   onClose,
   connected,
   initialTab = "Activity",
+  onRetry,
+  agents = [],
+  executing = false,
 }: {
   run: RunRecord;
   scope: RunScope;
@@ -29,10 +34,15 @@ export const RunInspector = ({
   onClose: () => void;
   connected: boolean;
   initialTab?: Tab;
+  onRetry?: ((stepId: string, attemptId: string) => void) | undefined;
+  agents?: AgentConnection[];
+  executing?: boolean;
 }) => {
   const scope = validScope(run, requestedScope);
   const [tab, setTab] = useState<Tab>(initialTab);
   const [width, setWidth] = useState(520);
+  const [retryOpen, setRetryOpen] = useState(false);
+  const retryTrigger = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const drag = useRef(false);
   useEffect(() => {
@@ -40,11 +50,11 @@ export const RunInspector = ({
   }, []);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !retryOpen) onClose();
     };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
-  }, [onClose]);
+  }, [onClose, retryOpen]);
   useEffect(() => {
     if (scope === requestedScope) return;
     onScopeChange(scope);
@@ -75,6 +85,29 @@ export const RunInspector = ({
   const step = stepForScope(run, scope);
   const definition = definitionForScope(run, scope);
   const evidence = scopeEvidence(run, scope);
+  const latestAttempt = step?.attempts.at(-1);
+  const connection =
+    definition &&
+    agents.find((agent) => agent.provider === run.snapshot.bindings[definition.id]?.provider);
+  const connectionReady =
+    definition?.kind === "check" ||
+    run.snapshot.bindings[definition?.id ?? ""]?.provider === "mock" ||
+    connection?.authentication === "authenticated";
+  const retryReason = !connected
+    ? "Reconnect the runtime first."
+    : executing
+      ? "Work is already active."
+      : run.status !== "failed" || step?.status !== "failed"
+        ? "Only failed work can be retried."
+        : scope.kind === "step" && scope.attemptId !== latestAttempt?.id
+          ? "Select the latest attempt to retry."
+          : !connectionReady
+            ? "Verify this step’s connection before retrying."
+            : step &&
+                step.attempts.filter((item) => item.implementationRound === run.implementationRound)
+                  .length >= run.snapshot.loop.policy.maxAttemptsPerStep
+              ? "Attempt limit reached for this step."
+              : "";
   const changeTab = (next: Tab) => setTab(next);
   const handleKeys = (event: React.KeyboardEvent) => {
     if (
@@ -169,7 +202,35 @@ export const RunInspector = ({
               ))}
             </select>
           )}
+          {step && onRetry && (
+            <Button
+              ref={retryTrigger}
+              size="sm"
+              variant="outline"
+              disabled={Boolean(retryReason)}
+              title={retryReason || undefined}
+              onClick={() => setRetryOpen(true)}
+            >
+              Retry…
+            </Button>
+          )}
         </div>
+        {step && latestAttempt && onRetry && (
+          <RetryStepDialog
+            run={run}
+            stepId={step.stepId}
+            open={retryOpen}
+            onOpenChange={setRetryOpen}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              retryTrigger.current?.focus();
+            }}
+            onConfirm={() => {
+              setRetryOpen(false);
+              onRetry(step.stepId, latestAttempt.id);
+            }}
+          />
+        )}
         <div
           role="tablist"
           aria-label="Inspector tabs"

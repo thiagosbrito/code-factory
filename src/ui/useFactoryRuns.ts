@@ -195,6 +195,28 @@ export const useFactoryRuns = (demo: boolean) => {
       }
     }
   };
+  const retry = async (id: string, stepId: string, attemptId: string) => {
+    setExecutingRunId(id);
+    setNotice("");
+    try {
+      const { run } = await api(`/api/runs/${id}/retry`, runResponseSchema.parse, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stepId, attemptId }),
+      });
+      setRuns((previous) =>
+        previous.map((item) => (item.snapshot.id === id ? mergeRunSnapshot(item, run) : item)),
+      );
+    } catch (error) {
+      if (error instanceof ApiError) setNotice(error.message);
+      else {
+        setConnected(false);
+        setNotice("Connection lost. Retry state is unknown; reconnect to inspect this run.");
+      }
+    } finally {
+      setExecutingRunId(null);
+    }
+  };
   return {
     notice,
     setNotice,
@@ -208,6 +230,7 @@ export const useFactoryRuns = (demo: boolean) => {
     onStarted,
     execute,
     cancel,
+    retry,
     executingRunId,
     connected,
     streamConnected: stream?.runId === selectedRunId ? stream.connected : null,

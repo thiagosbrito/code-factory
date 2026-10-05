@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
+import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import { RunGraph } from "./RunGraph";
 import { RunInspector } from "./RunInspector";
@@ -12,6 +13,8 @@ export const RunDetail = ({
   executing,
   onExecute,
   onCancel,
+  onRetry,
+  agents = [],
   onBack,
 }: {
   run: RunRecord;
@@ -20,6 +23,8 @@ export const RunDetail = ({
   executing: boolean;
   onExecute: () => void;
   onCancel: () => void;
+  onRetry?: (stepId: string, attemptId: string) => void;
+  agents?: AgentConnection[];
   onBack: () => void;
 }) => {
   const [scope, setScope] = useState<RunScope | null>(null);
@@ -136,6 +141,9 @@ export const RunDetail = ({
           onClose={close}
           connected={connected}
           initialTab={initialTab}
+          onRetry={onRetry}
+          agents={agents}
+          executing={executing}
         />
       )}
     </div>

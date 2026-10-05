@@ -4,16 +4,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mockAdapter } from "../src/adapters/mock.js";
 import type { AdapterEvent } from "../src/adapters/contract.js";
-import { cancelRun, executeRun } from "../src/runtime/scheduler.js";
-import { createRun, readRun } from "../src/runtime/storage.js";
+import { cancelRun, executeRun, retryStep } from "../src/runtime/scheduler.js";
+import { createRun, readRun, updateRun } from "../src/runtime/storage.js";
 import { parseLoop } from "../src/domain/loop.js";
-import { createRunRecord, createRunSnapshot, type RunRecord } from "../src/domain/run.js";
+import {
+  createRunRecord,
+  createRunSnapshot,
+  runRecordSchema,
+  type RunRecord,
+} from "../src/domain/run.js";
 import {
   claimStep,
   completeStep,
   continueRepeat,
   readySteps,
   settleRun,
+  prepareStepRetry,
 } from "../src/domain/scheduler.js";
 
 const step = (id: string, stage: "implementation" | "review" = "review", groupId?: string) => ({
@@ -62,6 +68,155 @@ const pass = (record: RunRecord, id: string, outcome?: string): RunRecord =>
   completeStep(record, id, { status: "succeeded", ...(outcome ? { outcome } : {}) });
 
 describe("portable scheduler", () => {
+  it("retries the exact failed attempt, preserves history and siblings, and exhausts attempts independently of rounds", () => {
+    let record = pass(claim(run(), "build"), "build");
+    record = pass(claim(record, "security"), "security");
+    record = completeStep(claim(record, "quality"), "quality", { status: "failed" });
+    const failed = record.steps.find((item) => item.stepId === "quality")?.attempts[0];
+    if (!failed) throw new Error("Missing failed attempt");
+    const historical = {
+      id: crypto.randomUUID(),
+      runId: record.snapshot.id,
+      stepId: "quality",
+      attemptId: failed.id,
+      createdAt: new Date().toISOString(),
+      kind: "artifact" as const,
+      name: "review-log",
+      mediaType: "text/plain",
+      relativePath: "review.txt",
+      digest: "old-review",
+      provenance: {
+        source: "agent" as const,
+        baselineId: record.snapshot.baseline.id,
+        candidateId: "candidate-a",
+        inputReceiptIds: [],
+      },
+      freshness: { state: "current" as const, checkedAgainstCandidateId: "candidate-a" },
+    };
+    record = runRecordSchema.parse({ ...record, evidence: [historical] });
+    const sibling = record.steps.find((item) => item.stepId === "security");
+    const next = prepareStepRetry(record, "quality", failed.id);
+    expect(next.implementationRound).toBe(1);
+    expect(next.steps.find((item) => item.stepId === "quality")?.status).toBe("pending");
+    expect(next.steps.find((item) => item.stepId === "security")).toEqual(sibling);
+    expect(next.evidence[0]).toEqual(historical);
+    expect(next.evidence.at(-1)).toMatchObject({ title: "selected-step-retry" });
+    expect(() => prepareStepRetry(next, "quality", failed.id)).toThrow(/failed run/);
+    expect(() => prepareStepRetry(record, "security", failed.id)).toThrow(/failed step/);
+    let retried = completeStep(claim(next, "quality"), "quality", { status: "failed" });
+    expect(
+      retried.steps.find((item) => item.stepId === "quality")?.attempts.map((item) => item.id)[0],
+    ).toBe(failed.id);
+    expect(retried.steps.find((item) => item.stepId === "quality")?.attempts).toHaveLength(2);
+    expect(() =>
+      prepareStepRetry(
+        retried,
+        "quality",
+        retried.steps.find((item) => item.stepId === "quality")?.attempts.at(-1)?.id ?? "",
+      ),
+    ).toThrow(/Attempt limit/);
+  });
+
+  it("invalidates completed consumers while keeping an independent completed sibling", () => {
+    let record = pass(claim(run(), "build"), "build");
+    record = pass(claim(record, "security"), "security");
+    record = pass(claim(record, "quality"), "quality");
+    record = pass(claim(record, "join"), "join");
+    // Model a failed later quality result while retaining an earlier join result.
+    const quality = record.steps.find((item) => item.stepId === "quality");
+    const previous = quality?.attempts.at(-1);
+    if (!previous) throw new Error("Missing quality attempt");
+    record = runRecordSchema.parse({
+      ...record,
+      status: "failed",
+      steps: record.steps.map((item) =>
+        item.stepId === "quality"
+          ? {
+              ...item,
+              status: "failed",
+              attempts: item.attempts.map((attempt) =>
+                attempt.id === previous.id ? { ...attempt, status: "failed" } : attempt,
+              ),
+            }
+          : item,
+      ),
+    });
+    const sibling = record.steps.find((item) => item.stepId === "security");
+    const next = prepareStepRetry(record, "quality", previous.id);
+    expect(next.steps.find((item) => item.stepId === "join")?.status).toBe("pending");
+    expect(next.steps.find((item) => item.stepId === "join")?.attempts).toHaveLength(1);
+    expect(next.steps.find((item) => item.stepId === "security")).toEqual(sibling);
+    expect(next.evidence.at(-1)).toMatchObject({ detail: expect.stringContaining("join") });
+  });
+
+  it("replays only affected descendants after a selected retry, once for duplicate requests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "factory-retry-"));
+    try {
+      const workspace = join(root, ".code-factory", "workspaces", "candidate");
+      await mkdir(workspace, { recursive: true });
+      await writeFile(join(workspace, "task.txt"), "retained edit");
+      const seed = run({
+        steps: [step("build", "implementation"), step("quality"), step("security"), step("join")],
+        dependencies: [
+          { from: "build", to: "quality" },
+          { from: "build", to: "security" },
+          { from: "quality", to: "join" },
+          { from: "security", to: "join" },
+        ],
+        groups: [],
+      });
+      let record = createRunRecord(
+        createRunSnapshot(
+          seed.snapshot.loop,
+          { description: "Task" },
+          { provider: "mock", model: "default" },
+          {
+            id: "baseline",
+            kind: "git",
+            revision: "abc",
+            workspace: ".code-factory/workspaces/candidate",
+            capturedAt: new Date().toISOString(),
+          },
+        ),
+      );
+      await createRun(root, record);
+      const persisted = await readRun(root, record.snapshot.id);
+      if (!persisted) throw new Error("Missing stored run");
+      // Persist the historical transitions as they would occur during execution.
+      let current = persisted;
+      for (const id of ["build", "security", "quality"]) {
+        current = claim(current, id);
+        current = await updateRun(root, current);
+        current =
+          id === "quality" ? completeStep(current, id, { status: "failed" }) : pass(current, id);
+        current = await updateRun(root, current);
+      }
+      record = current;
+      const previous = record.steps.find((item) => item.stepId === "quality")?.attempts[0]?.id;
+      if (!previous) throw new Error("Missing previous attempt");
+      const launches: string[] = [];
+      const adapter = {
+        ...mockAdapter,
+        async *execute(input: Parameters<typeof mockAdapter.execute>[0], signal: AbortSignal) {
+          launches.push(input.stepId);
+          yield* mockAdapter.execute(input, signal);
+        },
+      };
+      const [first, duplicate] = await Promise.all([
+        retryStep(root, record.snapshot.id, "quality", previous, () => adapter),
+        retryStep(root, record.snapshot.id, "quality", previous, () => adapter),
+      ]);
+      expect(first.status).toBe("succeeded");
+      expect(duplicate.revision).toBe(first.revision);
+      expect(launches).toEqual(["quality", "join"]);
+      expect(first.steps.find((item) => item.stepId === "quality")?.attempts).toHaveLength(2);
+      expect(first.steps.find((item) => item.stepId === "security")?.attempts).toHaveLength(1);
+      expect(await readFile(join(workspace, "task.txt"), "utf8")).toBe("retained edit");
+      expect((await readRun(root, record.snapshot.id))?.revision).toBe(first.revision);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("waits for both explicit join sources while parallel reviewers retain independent attempts", () => {
     let record = run();
     expect(readySteps(record).map((item) => item.id)).toEqual(["build"]);

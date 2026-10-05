@@ -2,12 +2,14 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, realpath, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
+import { z } from "zod";
 import { extname, join, resolve, sep } from "node:path";
 import { ConnectionRegistry, connectionRequestSchema } from "./connections.js";
 import { listLoops, readDraft, readPublishedVersion, saveDraft, publishDraft } from "./storage.js";
 import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
-import { cancelRun, executeRun } from "./scheduler.js";
+import { cancelRun, executeRun, retryStep } from "./scheduler.js";
+import { prepareStepRetry } from "../domain/scheduler.js";
 import { eventsAfter, parseEventCursor, streamRunEvents } from "./events.js";
 import { listPublishedLoops, listRuns, readRun } from "./storage.js";
 import { linearTracker, ticketIdSchema, type TicketTracker } from "./tracker.js";
@@ -241,6 +243,50 @@ export const startLocalServer = async (options: {
       if (cancelPath?.[1] && request.method === "POST") {
         const run = await cancelRun(projectDirectory, cancelPath[1]);
         return json(response, 200, { run });
+      }
+      const retryPath = /^\/api\/runs\/([0-9a-f-]{36})\/retry$/i.exec(pathname);
+      if (retryPath?.[1] && request.method === "POST") {
+        const parsed = z
+          .strictObject({ stepId: z.string().min(1), attemptId: z.uuid() })
+          .safeParse(await readBody(request));
+        if (!parsed.success)
+          return json(response, 400, { error: "Select a step and its latest attempt." });
+        const run = await readRun(projectDirectory, retryPath[1]);
+        if (!run) return json(response, 404, { error: "Run not found." });
+        const { stepId, attemptId } = parsed.data;
+        const step = run.steps.find((item) => item.stepId === stepId);
+        if (
+          step?.attempts.at(-1)?.id !== attemptId &&
+          step?.attempts.some((item) => item.id === attemptId)
+        )
+          return json(response, 200, { run });
+        try {
+          prepareStepRetry(run, stepId, attemptId);
+        } catch (error) {
+          return json(response, 409, {
+            error: error instanceof Error ? error.message : "Retry unavailable.",
+          });
+        }
+        const definition = run.snapshot.loop.steps.find((item) => item.id === stepId);
+        const binding = run.snapshot.bindings[stepId];
+        const connection = (await connections.list()).find(
+          (item) => item.provider === binding?.provider,
+        );
+        if (
+          definition?.kind !== "check" &&
+          (!binding ||
+            !connections.adapter(binding.provider) ||
+            (binding.provider !== "mock" && connection?.authentication !== "authenticated"))
+        )
+          return json(response, 422, {
+            error: "Verify and authenticate this step's connection before retrying.",
+          });
+        void retryStep(projectDirectory, run.snapshot.id, stepId, attemptId, (provider) =>
+          connections.adapter(provider),
+        ).catch((error: unknown) =>
+          console.error(error instanceof Error ? error.message : "Step retry failed"),
+        );
+        return json(response, 202, { run });
       }
       if (request.method !== "GET")
         return json(response, 405, { error: "Unsupported request method" });

@@ -47,6 +47,7 @@ export const Factory = ({
     onStarted,
     execute,
     cancel,
+    retry,
     executingRunId,
     connected,
     streamConnected,
@@ -183,6 +184,8 @@ export const Factory = ({
             executing={executingRunId === selectedRun.snapshot.id}
             onExecute={() => void execute(selectedRun.snapshot.id)}
             onCancel={() => void cancel(selectedRun.snapshot.id)}
+            agents={agents}
+            onRetry={(stepId, attemptId) => void retry(selectedRun.snapshot.id, stepId, attemptId)}
             onBack={() => {
               setSelectedRunId("");
               window.history.pushState(null, "", "#runs");
