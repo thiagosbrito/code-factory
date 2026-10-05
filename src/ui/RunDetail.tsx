@@ -13,8 +13,9 @@ export const RunDetail = ({
   executing,
   onExecute,
   onCancel,
-  onBack,
+  onRetry,
   agents = [],
+  onBack,
   onSendGuidance = async () => undefined,
 }: {
   run: RunRecord;
@@ -23,8 +24,9 @@ export const RunDetail = ({
   executing: boolean;
   onExecute: () => void;
   onCancel: () => void;
-  onBack: () => void;
+  onRetry?: (stepId: string, attemptId: string) => void;
   agents?: AgentConnection[];
+  onBack: () => void;
   onSendGuidance?: (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
 }) => {
   const [scope, setScope] = useState<RunScope | null>(null);
@@ -143,6 +145,8 @@ export const RunDetail = ({
           agents={agents}
           onSendGuidance={onSendGuidance}
           initialTab={initialTab}
+          onRetry={onRetry}
+          executing={executing}
         />
       )}
     </div>

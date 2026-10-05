@@ -12,7 +12,13 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
-import { createRunRecord, createRunSnapshot, startAttempt } from "../src/domain/run.js";
+import {
+  createRunRecord,
+  createRunSnapshot,
+  startAttempt,
+  finishAttempt,
+  runRecordSchema,
+} from "../src/domain/run.js";
 import { RunDetail } from "../src/ui/RunDetail.js";
 import { RunGraph } from "../src/ui/RunGraph.js";
 import { RunInspector } from "../src/ui/RunInspector.js";
@@ -517,4 +523,124 @@ it("keeps files and artifacts on their exact step attempt with recorded provenan
   await userEvent.setup().click(screen.getByRole("tab", { name: "Details" }));
   expect(screen.getByText(/Candidate candidate-1/)).toBeTruthy();
   expect(screen.getByText("plan")).toBeTruthy();
+});
+
+it("shows invalidated receipt freshness in Details while an independent sibling stays current", () => {
+  const run = makeRun();
+  const buildAttempt = run.steps.find((step) => step.stepId === "build")?.attempts[0]?.id;
+  const reviewAttempt = run.steps.find((step) => step.stepId === "review")?.attempts[0]?.id;
+  if (!buildAttempt || !reviewAttempt) throw new Error("Missing attempts");
+  const receipt = (stepId: string, attemptId: string) => ({
+    kind: "artifact" as const,
+    id: crypto.randomUUID(),
+    runId: run.snapshot.id,
+    stepId,
+    attemptId,
+    createdAt: new Date().toISOString(),
+    name: `${stepId}.md`,
+    mediaType: "text/markdown",
+    relativePath: `reports/${stepId}.md`,
+    digest: `${stepId}-digest`,
+    provenance: {
+      source: "agent" as const,
+      baselineId: run.snapshot.baseline.id,
+      candidateId: "candidate-1",
+      inputReceiptIds: [],
+    },
+    freshness: { state: "current" as const, checkedAgainstCandidateId: "candidate-1" },
+  });
+  const withInvalidation = {
+    ...run,
+    evidence: [
+      ...run.evidence,
+      receipt("build", buildAttempt),
+      receipt("review", reviewAttempt),
+      {
+        kind: "event" as const,
+        id: crypto.randomUUID(),
+        runId: run.snapshot.id,
+        stepId: "build",
+        createdAt: new Date().toISOString(),
+        type: "lifecycle" as const,
+        title: "retry-invalidated",
+        sequence: 2,
+      },
+    ],
+  };
+  const props = {
+    run: withInvalidation,
+    onScopeChange: vi.fn<(scope: RunScope) => void>(),
+    onClose: vi.fn<() => void>(),
+    connected: true,
+    initialTab: "Details" as const,
+  };
+  const view = render(
+    <RunInspector {...props} scope={{ kind: "step", stepId: "build", attemptId: buildAttempt }} />,
+  );
+  const provenanceSection = screen.getByText("Evidence provenance").parentElement;
+  if (!provenanceSection) throw new Error("Missing provenance section");
+  expect(within(provenanceSection).getByRole("listitem").textContent).toContain(
+    "artifact · agent · superseded · needs revalidation",
+  );
+  view.rerender(
+    <RunInspector
+      {...props}
+      scope={{ kind: "step", stepId: "review", attemptId: reviewAttempt }}
+    />,
+  );
+  const siblingProvenance = screen.getByText("Evidence provenance").parentElement;
+  if (!siblingProvenance) throw new Error("Missing sibling provenance section");
+  expect(within(siblingProvenance).getByRole("listitem").textContent).toContain(
+    "artifact · agent · current",
+  );
+});
+
+it("confirms a failed step retry and restores focus after Escape and confirmation", async () => {
+  const loop = parseLoop({
+    schemaVersion: 2,
+    id: "retry",
+    name: "Retry",
+    version: 1,
+    status: "published",
+    steps: [{ id: "build", name: "Build", kind: "agent", role: "builder", instruction: "Build" }],
+    dependencies: [],
+    groups: [],
+    joins: [],
+    decisions: [],
+    policy: { maxAttemptsPerStep: 2, maxImplementationRounds: 2 },
+  });
+  const pending = createRunRecord(
+    createRunSnapshot(loop, { description: "Task" }, { provider: "mock", model: "default" }),
+  );
+  const failed = runRecordSchema.parse({
+    ...finishAttempt(startAttempt(pending, "build"), "build", "failed"),
+    status: "failed",
+  });
+  const attemptId = failed.steps[0]?.attempts[0]?.id;
+  if (!attemptId) throw new Error("Missing attempt");
+  const onRetry = vi.fn<(stepId: string, attemptId: string) => void>();
+  render(
+    <RunInspector
+      run={failed}
+      scope={{ kind: "step", stepId: "build", attemptId }}
+      onScopeChange={vi.fn<(scope: RunScope) => void>()}
+      onClose={vi.fn<() => void>()}
+      connected
+      onRetry={onRetry}
+    />,
+  );
+  const user = userEvent.setup();
+  const trigger = screen.getByRole("button", { name: "Retry…" });
+  await user.click(trigger);
+  const dialog = screen.getByRole("dialog", { name: "Retry Build?" });
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  await user.tab();
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(screen.getByText(/Create Attempt 2 for Build/)).toBeTruthy();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  await user.click(trigger);
+  await user.click(screen.getByRole("button", { name: "Start Attempt 2" }));
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith("build", attemptId);
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
 });

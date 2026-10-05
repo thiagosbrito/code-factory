@@ -47,6 +47,7 @@ export const Factory = ({
     onStarted,
     execute,
     cancel,
+    retry,
     sendGuidance,
     executingRunId,
     connected,
@@ -185,6 +186,7 @@ export const Factory = ({
             onExecute={() => void execute(selectedRun.snapshot.id)}
             onCancel={() => void cancel(selectedRun.snapshot.id)}
             agents={agents}
+            onRetry={(stepId, attemptId) => void retry(selectedRun.snapshot.id, stepId, attemptId)}
             onSendGuidance={(input) => sendGuidance(selectedRun.snapshot.id, input)}
             onBack={() => {
               setSelectedRunId("");

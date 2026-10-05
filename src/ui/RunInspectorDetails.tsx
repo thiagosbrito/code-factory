@@ -1,5 +1,11 @@
 import type { RunRecord } from "../domain/run.js";
-import { definitionForScope, scopeEvidence, stepForScope, type RunScope } from "./run-view-model";
+import {
+  definitionForScope,
+  evidenceFreshness,
+  scopeEvidence,
+  stepForScope,
+  type RunScope,
+} from "./run-view-model";
 
 export const RunInspectorDetails = ({ run, scope }: { run: RunRecord; scope: RunScope }) => {
   const definition = definitionForScope(run, scope);
@@ -84,7 +90,8 @@ export const RunInspectorDetails = ({ run, scope }: { run: RunRecord; scope: Run
           <ul className="mt-2 space-y-2">
             {receipts.map((item) => (
               <li key={item.id} className="rounded-md border p-2 text-xs">
-                <strong>{item.kind}</strong> · {item.provenance.source} · {item.freshness.state}
+                <strong>{item.kind}</strong> · {item.provenance.source} ·{" "}
+                {evidenceFreshness(run, item)}
                 <div className="mt-1 break-all text-muted-foreground">
                   Candidate {item.provenance.candidateId} · inputs{" "}
                   {item.provenance.inputReceiptIds.join(", ") || "none"}

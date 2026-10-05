@@ -23,6 +23,21 @@ export const scopeEvidence = (run: RunRecord, scope: RunScope): Evidence[] =>
         (scope.attemptId === null || item.attemptId === scope.attemptId),
   );
 
+/** Append-only invalidation events supersede older receipts without rewriting history. */
+export const evidenceFreshness = (run: RunRecord, receipt: Evidence): string => {
+  if (!("freshness" in receipt)) return "unknown";
+  const position = run.evidence.findIndex((item) => item.id === receipt.id);
+  const invalidated = run.evidence
+    .slice(position + 1)
+    .some(
+      (item) =>
+        item.kind === "event" &&
+        item.title === "retry-invalidated" &&
+        item.stepId === receipt.stepId,
+    );
+  return invalidated ? "superseded · needs revalidation" : receipt.freshness.state;
+};
+
 export const stepForScope = (run: RunRecord, scope: RunScope): RunStep | undefined =>
   scope.kind === "step" ? run.steps.find((item) => item.stepId === scope.stepId) : undefined;
 
