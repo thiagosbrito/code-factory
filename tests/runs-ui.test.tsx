@@ -471,6 +471,76 @@ it("keeps files and artifacts on their exact step attempt with recorded provenan
   expect(screen.getByText("plan")).toBeTruthy();
 });
 
+it("shows invalidated receipt freshness in Details while an independent sibling stays current", () => {
+  const run = makeRun();
+  const buildAttempt = run.steps.find((step) => step.stepId === "build")?.attempts[0]?.id;
+  const reviewAttempt = run.steps.find((step) => step.stepId === "review")?.attempts[0]?.id;
+  if (!buildAttempt || !reviewAttempt) throw new Error("Missing attempts");
+  const receipt = (stepId: string, attemptId: string) => ({
+    kind: "artifact" as const,
+    id: crypto.randomUUID(),
+    runId: run.snapshot.id,
+    stepId,
+    attemptId,
+    createdAt: new Date().toISOString(),
+    name: `${stepId}.md`,
+    mediaType: "text/markdown",
+    relativePath: `reports/${stepId}.md`,
+    digest: `${stepId}-digest`,
+    provenance: {
+      source: "agent" as const,
+      baselineId: run.snapshot.baseline.id,
+      candidateId: "candidate-1",
+      inputReceiptIds: [],
+    },
+    freshness: { state: "current" as const, checkedAgainstCandidateId: "candidate-1" },
+  });
+  const withInvalidation = {
+    ...run,
+    evidence: [
+      ...run.evidence,
+      receipt("build", buildAttempt),
+      receipt("review", reviewAttempt),
+      {
+        kind: "event" as const,
+        id: crypto.randomUUID(),
+        runId: run.snapshot.id,
+        stepId: "build",
+        createdAt: new Date().toISOString(),
+        type: "lifecycle" as const,
+        title: "retry-invalidated",
+        sequence: 2,
+      },
+    ],
+  };
+  const props = {
+    run: withInvalidation,
+    onScopeChange: vi.fn<(scope: RunScope) => void>(),
+    onClose: vi.fn<() => void>(),
+    connected: true,
+    initialTab: "Details" as const,
+  };
+  const view = render(
+    <RunInspector {...props} scope={{ kind: "step", stepId: "build", attemptId: buildAttempt }} />,
+  );
+  const provenanceSection = screen.getByText("Evidence provenance").parentElement;
+  if (!provenanceSection) throw new Error("Missing provenance section");
+  expect(within(provenanceSection).getByRole("listitem").textContent).toContain(
+    "artifact · agent · superseded · needs revalidation",
+  );
+  view.rerender(
+    <RunInspector
+      {...props}
+      scope={{ kind: "step", stepId: "review", attemptId: reviewAttempt }}
+    />,
+  );
+  const siblingProvenance = screen.getByText("Evidence provenance").parentElement;
+  if (!siblingProvenance) throw new Error("Missing sibling provenance section");
+  expect(within(siblingProvenance).getByRole("listitem").textContent).toContain(
+    "artifact · agent · current",
+  );
+});
+
 it("confirms a failed step retry and restores focus after Escape and confirmation", async () => {
   const loop = parseLoop({
     schemaVersion: 2,
