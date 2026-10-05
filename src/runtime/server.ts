@@ -10,6 +10,12 @@ import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
 import { cancelRun, executeRun, retryStep } from "./scheduler.js";
 import { fileDigest, workspaceFor } from "./scheduler.js";
+import {
+  applyNative,
+  nativeCandidates,
+  nativeFormats,
+  previewNative,
+} from "./native-translation.js";
 import { acceptEvidence, summarizeEvidence } from "../domain/acceptance.js";
 import { prepareStepRetry } from "../domain/scheduler.js";
 import { guidanceInputSchema, sendGuidance } from "./guidance.js";
@@ -164,6 +170,25 @@ export const startLocalServer = async (options: {
       }
       if (pathname === "/api/loops" && request.method === "GET")
         return json(response, 200, { loops: await listLoops(projectDirectory) });
+      if (pathname === "/api/native/formats" && request.method === "GET")
+        return json(response, 200, { formats: nativeFormats() });
+      if (pathname === "/api/native/candidates" && request.method === "GET") {
+        const format =
+          new URL(request.url ?? "/", `http://${hosts[0]}`).searchParams.get("format") ?? "";
+        return json(response, 200, { names: await nativeCandidates(projectDirectory, format) });
+      }
+      const nativePath = /^\/api\/native\/(import|export)\/(preview|apply)$/.exec(pathname);
+      if (nativePath && request.method === "POST") {
+        const input = await readBody(request);
+        const direction = nativePath[1] as "import" | "export";
+        return json(
+          response,
+          200,
+          nativePath[2] === "preview"
+            ? await previewNative(projectDirectory, input, direction)
+            : await applyNative(projectDirectory, input, direction),
+        );
+      }
       const loopPath =
         /^\/api\/loops\/([a-z][a-z0-9-]{0,63})(?:\/(draft|publish|versions\/([1-9][0-9]*)))?$/.exec(
           pathname,

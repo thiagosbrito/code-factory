@@ -52,15 +52,3 @@ export interface AgentAdapter {
   attach(session: StepSession, signal: AbortSignal): AsyncIterable<AdapterEvent>;
   steer(session: StepSession, guidance: string): Promise<CapabilitySupport>;
 }
-
-/** Configuration translation is separate from process execution and may be lossy. */
-export interface ConfigurationTranslator {
-  readonly provider: ProviderId;
-  exportInstructions(
-    instruction: string,
-  ): { relativePath: string; content: string; warnings: string[] }[];
-  importInstructions(files: { relativePath: string; content: string }[]): {
-    instruction: string;
-    warnings: string[];
-  };
-}
