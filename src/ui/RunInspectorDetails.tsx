@@ -1,5 +1,7 @@
 import type { RunRecord } from "../domain/run.js";
+import type { EvidenceSummary } from "../domain/acceptance.js";
 import {
+  acceptanceFreshness,
   definitionForScope,
   evidenceFreshness,
   scopeEvidence,
@@ -7,7 +9,15 @@ import {
   type RunScope,
 } from "./run-view-model";
 
-export const RunInspectorDetails = ({ run, scope }: { run: RunRecord; scope: RunScope }) => {
+export const RunInspectorDetails = ({
+  run,
+  scope,
+  summary,
+}: {
+  run: RunRecord;
+  scope: RunScope;
+  summary: EvidenceSummary | null;
+}) => {
   const definition = definitionForScope(run, scope);
   const step = stepForScope(run, scope);
   const attempt = step?.attempts.find(
@@ -91,7 +101,9 @@ export const RunInspectorDetails = ({ run, scope }: { run: RunRecord; scope: Run
             {receipts.map((item) => (
               <li key={item.id} className="rounded-md border p-2 text-xs">
                 <strong>{item.kind}</strong> · {item.provenance.source} ·{" "}
-                {evidenceFreshness(run, item)}
+                {item.kind === "acceptance"
+                  ? acceptanceFreshness(item, summary)
+                  : evidenceFreshness(run, item)}
                 <div className="mt-1 break-all text-muted-foreground">
                   Candidate {item.provenance.candidateId} · inputs{" "}
                   {item.provenance.inputReceiptIds.join(", ") || "none"}

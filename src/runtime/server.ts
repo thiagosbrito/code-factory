@@ -9,11 +9,13 @@ import { listLoops, readDraft, readPublishedVersion, saveDraft, publishDraft } f
 import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
 import { cancelRun, executeRun, retryStep } from "./scheduler.js";
+import { fileDigest, workspaceFor } from "./scheduler.js";
+import { acceptEvidence, summarizeEvidence } from "../domain/acceptance.js";
 import { prepareStepRetry } from "../domain/scheduler.js";
 import { guidanceInputSchema, sendGuidance } from "./guidance.js";
 import { eventsAfter, parseEventCursor, streamRunEvents } from "./events.js";
 import { inspectArtifact, inspectDiff, inspectFiles } from "./inspection.js";
-import { listPublishedLoops, listRuns, readRun } from "./storage.js";
+import { listPublishedLoops, listRuns, mutateRun, readRun } from "./storage.js";
 import { linearTracker, ticketIdSchema, type TicketTracker } from "./tracker.js";
 import {
   ProjectError,
@@ -308,6 +310,32 @@ export const startLocalServer = async (options: {
           provider ? connections.adapter(provider) : null,
         );
         return json(response, 200, { run: updated });
+      }
+      const evidencePath = /^\/api\/runs\/([0-9a-f-]{36})\/evidence$/i.exec(pathname);
+      if (evidencePath?.[1] && (request.method === "GET" || request.method === "POST")) {
+        const run = await readRun(projectDirectory, evidencePath[1]);
+        if (!run) return json(response, 404, { error: "Run not found." });
+        const candidateId = await fileDigest(await workspaceFor(projectDirectory, run));
+        if (request.method === "GET")
+          return json(response, 200, { summary: summarizeEvidence(run, candidateId) });
+        try {
+          let acceptedCandidate = candidateId;
+          const accepted = await mutateRun(projectDirectory, evidencePath[1], async (current) => {
+            acceptedCandidate = await fileDigest(await workspaceFor(projectDirectory, current));
+            return acceptEvidence(current, acceptedCandidate);
+          });
+          return json(response, 200, {
+            run: accepted,
+            summary: summarizeEvidence(accepted, acceptedCandidate),
+          });
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === "Current validation evidence is incomplete."
+          )
+            return json(response, 409, { error: error.message });
+          throw error;
+        }
       }
       if (request.method !== "GET")
         return json(response, 405, { error: "Unsupported request method" });

@@ -366,7 +366,7 @@ const mutations = new Map<string, Promise<unknown>>();
 export const mutateRun = async (
   project: string,
   runId: string,
-  change: (current: RunRecord) => RunRecord,
+  change: (current: RunRecord) => RunRecord | Promise<RunRecord>,
 ): Promise<RunRecord> => {
   const key = `${project}:${runId}`;
   const prior = mutations.get(key) ?? Promise.resolve();
@@ -375,7 +375,7 @@ export const mutateRun = async (
     .then(async () => {
       const current = await readRun(project, runId);
       if (!current) throw new Error("Run not found.");
-      const next = change(current);
+      const next = await change(current);
       return next === current ? current : updateRun(project, next);
     });
   mutations.set(key, work);

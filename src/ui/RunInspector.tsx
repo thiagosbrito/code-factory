@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
+import type { EvidenceSummary } from "../domain/acceptance.js";
 import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +22,7 @@ const tabs: Tab[] = ["Activity", "Files", "Artifacts", "Details"];
 
 export const RunInspector = ({
   run,
+  summary = null,
   scope: requestedScope,
   onScopeChange,
   onClose,
@@ -32,6 +34,7 @@ export const RunInspector = ({
   executing = false,
 }: {
   run: RunRecord;
+  summary?: EvidenceSummary | null;
   scope: RunScope;
   onScopeChange: (scope: RunScope) => void;
   onClose: () => void;
@@ -268,7 +271,7 @@ export const RunInspector = ({
         {tab === "Activity" ? (
           <RunInspectorActivity run={run} scope={scope} connected={connected} />
         ) : tab === "Details" ? (
-          <RunInspectorDetails run={run} scope={scope} />
+          <RunInspectorDetails run={run} scope={scope} summary={summary} />
         ) : tab === "Files" ? (
           <RunInspectorFiles run={run} scope={scope} />
         ) : (

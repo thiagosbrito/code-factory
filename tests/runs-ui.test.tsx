@@ -12,6 +12,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
+import { claimStep, completeStep } from "../src/domain/scheduler.js";
 import {
   createRunRecord,
   createRunSnapshot,
@@ -30,6 +31,8 @@ import type { AgentConnection } from "../src/adapters/contract.js";
 import type { RunScope } from "../src/ui/run-view-model.js";
 import { useFactoryRuns } from "../src/ui/useFactoryRuns.js";
 import { RunsList } from "../src/ui/RunsList.js";
+import type { EvidenceSummary } from "../src/domain/acceptance.js";
+import { acceptEvidence, summarizeEvidence } from "../src/domain/acceptance.js";
 
 it("preserves a scoped guidance draft through disconnect and gates it on verified steering", async () => {
   const run = makeRun();
@@ -180,6 +183,148 @@ afterEach(() => {
   window.history.replaceState(null, "", "#");
 });
 
+it("shows validation separately from human acceptance and records an explicit click", async () => {
+  const onAccept = vi.fn<() => void>();
+  const summary: EvidenceSummary = {
+    validation: "passed",
+    acceptance: "pending",
+    requirements: [
+      {
+        stepId: "review",
+        name: "Review",
+        state: "met",
+        reason: "Current receipt",
+        receiptId: "r1",
+      },
+    ],
+    findings: ["Checked edge case"],
+    gaps: [],
+    files: [],
+    artifacts: [],
+    signature: "current",
+  };
+  const view = render(
+    <RunDetail
+      run={makeRun()}
+      summary={summary}
+      accepting={false}
+      onAccept={onAccept}
+      connected
+      executing={false}
+      onExecute={vi.fn<() => void>()}
+      onCancel={vi.fn<() => void>()}
+      onBack={vi.fn<() => void>()}
+    />,
+  );
+  expect(screen.getByText(/Local validation:/).textContent).toContain("Human acceptance: pending");
+  expect(screen.getByText("Checked edge case")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Accept evidence" }));
+  expect(onAccept).toHaveBeenCalledOnce();
+  view.rerender(
+    <RunDetail
+      run={makeRun()}
+      summary={{ ...summary, acceptance: "invalidated", validation: "incomplete" }}
+      accepting={false}
+      onAccept={onAccept}
+      connected
+      executing={false}
+      onExecute={vi.fn<() => void>()}
+      onCancel={vi.fn<() => void>()}
+      onBack={vi.fn<() => void>()}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "Accept evidence" })).toBeNull();
+  expect(screen.getByText(/Earlier acceptance remains/)).toBeTruthy();
+});
+
+it("keeps a prior acceptance receipt visible but marks it invalidated after source changes", async () => {
+  const oldCandidate = "candidate-before-source-change";
+  const loop = parseLoop({
+    schemaVersion: 2,
+    id: "validation",
+    name: "Validation",
+    version: 1,
+    status: "published",
+    steps: [
+      {
+        id: "check",
+        name: "Build check",
+        kind: "check",
+        stage: "review",
+        role: "reviewer",
+        instruction: "Run check",
+      },
+    ],
+    dependencies: [],
+    groups: [],
+    joins: [],
+    decisions: [],
+    policy: {},
+  });
+  let run = claimStep(
+    createRunRecord(
+      createRunSnapshot(loop, { description: "Current task" }, { provider: "mock", model: "m" }),
+    ),
+    "check",
+    oldCandidate,
+    "task-input",
+  );
+  run = completeStep(run, "check", { status: "succeeded", outcome: "passed" });
+  const attempt = run.steps[0]?.attempts[0];
+  if (!attempt) throw new Error("Missing check attempt");
+  run = runRecordSchema.parse({
+    ...run,
+    status: "succeeded",
+    evidence: [
+      {
+        id: crypto.randomUUID(),
+        runId: run.snapshot.id,
+        stepId: "check",
+        attemptId: attempt.id,
+        createdAt: new Date().toISOString(),
+        kind: "check",
+        command: "pnpm check",
+        outcome: "passed",
+        exitCode: 0,
+        summary: "Passed",
+        inputHash: "task-input",
+        provenance: {
+          source: "check",
+          baselineId: run.snapshot.baseline.id,
+          candidateId: oldCandidate,
+          inputReceiptIds: [],
+        },
+        freshness: { state: "current", checkedAgainstCandidateId: oldCandidate },
+      },
+    ],
+  });
+  run = acceptEvidence(run, oldCandidate);
+  expect(summarizeEvidence(run, oldCandidate).acceptance).toBe("accepted");
+  const summary = summarizeEvidence(run, "candidate-after-source-change");
+  expect(summary.acceptance).toBe("invalidated");
+  render(
+    <RunDetail
+      run={run}
+      summary={summary}
+      accepting={false}
+      onAccept={vi.fn<() => void>()}
+      connected
+      executing={false}
+      onExecute={vi.fn<() => void>()}
+      onCancel={vi.fn<() => void>()}
+      onBack={vi.fn<() => void>()}
+    />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Inspect run evidence" }));
+  await userEvent.click(screen.getByRole("tab", { name: "Details" }));
+  const provenanceSection = screen.getByText("Evidence provenance").parentElement;
+  expect(provenanceSection?.textContent).toContain(
+    "acceptance · human · invalidated · current validation inputs changed",
+  );
+  expect(provenanceSection?.textContent).toContain(oldCandidate);
+  expect(provenanceSection?.textContent).not.toContain("acceptance · human · current");
+});
+
 it("renders dependency connectors with the graph arrow marker", () => {
   const { container } = render(
     <RunGraph run={makeRun()} selectedStepId={null} onSelect={vi.fn<(id: string) => void>()} />,
@@ -223,6 +368,9 @@ it("shows simultaneous active nodes and isolates the drawer to selected attempt"
       onExecute={vi.fn<() => void>()}
       onCancel={vi.fn<() => void>()}
       onBack={vi.fn<() => void>()}
+      summary={null}
+      accepting={false}
+      onAccept={vi.fn<() => void>()}
     />,
   );
   expect(screen.getByText("2 active steps")).toBeTruthy();
@@ -249,6 +397,9 @@ it("restores focus and supports keyboard tabs, resize, and explicit follow live"
       onExecute={vi.fn<() => void>()}
       onCancel={vi.fn<() => void>()}
       onBack={vi.fn<() => void>()}
+      summary={null}
+      accepting={false}
+      onAccept={vi.fn<() => void>()}
     />,
   );
   const node = screen.getByRole("button", { name: /Build, running/ });
@@ -546,6 +697,9 @@ it("keeps files and artifacts on their exact step attempt with recorded provenan
       onExecute={vi.fn<() => void>()}
       onCancel={vi.fn<() => void>()}
       onBack={vi.fn<() => void>()}
+      summary={null}
+      accepting={false}
+      onAccept={vi.fn<() => void>()}
     />,
   );
   await userEvent.setup().click(screen.getByRole("button", { name: /Build, running/ }));

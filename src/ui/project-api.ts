@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { providerIdSchema, loopSchema } from "../domain/loop.js";
 import { runRecordSchema } from "../domain/run.js";
+import { evidenceSummarySchema } from "../domain/acceptance.js";
 import { eventSchema } from "../domain/evidence.js";
 import { projectConfigSchema } from "../domain/project.js";
 import { retrievedTicketSchema } from "../domain/ticket.js";
@@ -55,6 +56,11 @@ export const loopEntriesResponseSchema = z.object({
 });
 export const runsResponseSchema = z.object({ runs: z.array(runRecordSchema) });
 export const runResponseSchema = z.object({ run: runRecordSchema });
+export const evidenceResponseSchema = z.object({ summary: evidenceSummarySchema });
+export const acceptedEvidenceResponseSchema = z.object({
+  run: runRecordSchema,
+  summary: evidenceSummarySchema,
+});
 export const executionEventSchema = eventSchema;
 export const startedRunResponseSchema = z.object({
   runId: z.string(),

@@ -84,7 +84,7 @@ const active = new Map<
   { work: Promise<RunRecord>; controller: AbortController; retry?: string }
 >();
 
-const workspaceFor = async (project: string, record: RunRecord): Promise<string> => {
+export const workspaceFor = async (project: string, record: RunRecord): Promise<string> => {
   const relative = record.snapshot.baseline.workspace;
   if (!relative || !relative.startsWith(".code-factory/workspaces/"))
     throw new Error("Run has no isolated execution workspace.");
@@ -95,7 +95,7 @@ const workspaceFor = async (project: string, record: RunRecord): Promise<string>
   return workspace;
 };
 
-const fileDigest = async (directory: string): Promise<string> => {
+export const fileDigest = async (directory: string): Promise<string> => {
   const hash = createHash("sha256");
   const visit = async (folder: string, prefix: string): Promise<void> => {
     for (const entry of (await readdir(folder, { withFileTypes: true })).sort((a, b) =>
@@ -868,6 +868,7 @@ const appendReceipt = (
           outcome: result.status === "succeeded" ? "passed" : "failed",
           exitCode: result.exitCode ?? null,
           summary: result.summary ?? "",
+          inputHash: step.inputHash,
         }
       : {
           ...common,

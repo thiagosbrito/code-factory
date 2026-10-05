@@ -49,6 +49,9 @@ export const Factory = ({
     cancel,
     retry,
     sendGuidance,
+    accept,
+    accepting,
+    evidenceSummary,
     executingRunId,
     connected,
     streamConnected,
@@ -180,6 +183,9 @@ export const Factory = ({
           <RunDetail
             key={selectedRun.snapshot.id}
             run={selectedRun}
+            summary={evidenceSummary}
+            accepting={accepting}
+            onAccept={() => void accept(selectedRun.snapshot.id)}
             connected={connected}
             streamConnected={streamConnected}
             executing={executingRunId === selectedRun.snapshot.id}
