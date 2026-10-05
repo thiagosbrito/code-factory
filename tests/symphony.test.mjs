@@ -290,13 +290,14 @@ function reviewHarness(f, workspace, mode = "success") {
       return run(bin, args, options);
     };
     let state = "In Progress";
+    let trackerUpdatedAt = "2020-01-01T00:00:00.000Z";
     let staleReads = 0;
     let attachmentCalls = 0;
     let reviewUpdates = 0;
     const linear = async (query, variables) => {
       if (query.includes("issue(id:")) {
         const observed = mode === "stale" && state === "In Review" && staleReads++ < 2 ? "In Progress" : state;
-        return {issue: {id: "ticket-id",identifier:"THI-REVIEW",project:{id:"bd22686b-05ec-4184-9bea-4dc9a8ef23af"},state:{name:observed},labels:{nodes:[{name:"symphony-ready"}]},team:{states:{nodes:[{id:"review",name:"In Review"},{id:"backlog",name:"Backlog"}]}}}};
+        return {issue: {id: "ticket-id",identifier:"THI-REVIEW",updatedAt:trackerUpdatedAt,project:{id:"bd22686b-05ec-4184-9bea-4dc9a8ef23af"},state:{name:observed},labels:{nodes:[{name:"symphony-ready"}]},team:{states:{nodes:[{id:"review",name:"In Review"},{id:"backlog",name:"Backlog"}]}}}};
       }
       if (query.includes("attachmentLinkGitHubPR")) { events.push("linear:link"); if (mode === "graphql" && attachmentCalls++ === 0) throw new Error("Linear GraphQL unavailable"); return {attachmentLinkGitHubPR:{success:mode !== "link"}}; }
       if (query.includes("issueUpdate")) {
@@ -318,6 +319,15 @@ function reviewHarness(f, workspace, mode = "success") {
     }
     if (mode === "reset") state = "In Progress";
     if (mode === "reset-backlog") state = "Backlog";
+    if (mode === "returned-todo" || mode === "stale-todo") {
+      state = "Todo";
+      if (mode === "returned-todo") trackerUpdatedAt = new Date(Date.now() + 60_000).toISOString();
+      const identity = workspaceIdentity(workspace);
+      await beforeRun(identity, {reconcile: (path) => import(${JSON.stringify(join(project, "scripts/symphony/review.mjs"))}).then(({reconcileReview}) => reconcileReview(path, {command,linear})),prepare: () => events.push("prepare")});
+      events.push("before-record:" + readRecord(identity).state);
+      afterRun(identity);
+      events.push("after-record:" + readRecord(identity).state);
+    }
     const pendingBlocked = ["stale", "graphql", "reset", "reset-backlog", "reset-confirm", "reset-confirm-backlog"].includes(mode) ? await directStateTransitionBlocked(workspace, {command,linear}) : null;
     const second = ["success", "stale", "graphql", "reset", "reset-backlog", "reset-confirm", "reset-confirm-backlog"].includes(mode) ? await publishReview(workspace, request, {command,linear}) : null;
     if (second?.success) {
@@ -433,6 +443,29 @@ for (const mode of ["reset", "reset-backlog"])
     assert.equal(outcome.events.filter((event) => event === "linear:Backlog").length, 0);
     assert.ok(!outcome.events.includes("prepare"));
     assert.ok(outcome.events.includes("record:review-ready"));
+  });
+
+for (const mode of ["returned-todo", "stale-todo"])
+  test(`a ${mode} observation ${mode === "returned-todo" ? "resumes review fixes" : "keeps the published review"}`, (t) => {
+    const f = fixture(t);
+    const workspace = f.create("THI-REVIEW");
+    writeFileSync(join(workspace, "README.md"), "reviewed ticket work\n");
+    const outcome = reviewHarness(f, workspace, mode);
+    assert.equal(outcome.result.success, true);
+    assert.equal(outcome.state, "Todo");
+    assert.equal(outcome.events.includes("prepare"), mode === "returned-todo");
+    assert.ok(
+      outcome.events.includes(
+        `before-record:${mode === "returned-todo" ? "running" : "review-ready"}`,
+      ),
+    );
+    assert.ok(
+      outcome.events.includes(
+        `after-record:${mode === "returned-todo" ? "attempt-ended" : "review-ready"}`,
+      ),
+    );
+    assert.equal(outcome.events.filter((event) => event === "gh:create").length, 1);
+    assert.equal(outcome.events.filter((event) => event === "linear:In Review").length, 1);
   });
 
 for (const mode of ["reset-confirm", "reset-confirm-backlog"])
