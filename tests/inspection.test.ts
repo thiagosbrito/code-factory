@@ -10,6 +10,8 @@ import { captureGitBaseline } from "../src/runtime/baseline.js";
 import { inspectArtifact, inspectDiff, inspectFiles } from "../src/runtime/inspection.js";
 import { startLocalServer } from "../src/runtime/server.js";
 import { createRun } from "../src/runtime/storage.js";
+import { executeRun } from "../src/runtime/scheduler.js";
+import { mockAdapter } from "../src/adapters/mock.js";
 
 const roots: string[] = [];
 afterEach(async () =>
@@ -73,6 +75,75 @@ it("separates captured pre-existing changes from task changes and reports uncert
   );
   expect((await inspectDiff(root, run, "existing.txt")).diff).toContain("+task edit");
   await expect(inspectDiff(root, run, "../existing.txt")).rejects.toThrow("not a task change");
+});
+
+it("attributes executed writer attempts only while their recorded diff matches the current file", async () => {
+  const { root, workspace, run } = await fixture();
+  const loop = parseLoop({
+    ...run.snapshot.loop,
+    steps: [
+      {
+        id: "first",
+        name: "First",
+        kind: "agent",
+        stage: "implementation",
+        role: "writer",
+        instruction: "First",
+      },
+      {
+        id: "second",
+        name: "Second",
+        kind: "agent",
+        stage: "implementation",
+        role: "writer",
+        instruction: "Second",
+      },
+    ],
+    dependencies: [{ from: "first", to: "second" }],
+  });
+  const record = createRunRecord(
+    createRunSnapshot(
+      loop,
+      { description: "Task" },
+      { provider: "mock", model: "default" },
+      run.snapshot.baseline,
+    ),
+  );
+  await createRun(root, record);
+  const adapter = {
+    ...mockAdapter,
+    async *execute(input: Parameters<typeof mockAdapter.execute>[0], signal: AbortSignal) {
+      await writeFile(join(input.projectDirectory, "existing.txt"), `${input.stepId} edit\n`);
+      if (input.stepId === "first")
+        await writeFile(join(input.projectDirectory, "added.txt"), "new task file\n");
+      yield* mockAdapter.execute(input, signal);
+    },
+  };
+  const completed = await executeRun(root, record.snapshot.id, () => adapter);
+  expect(completed.status).toBe("succeeded");
+  const receipts = completed.evidence.filter((item) => item.kind === "file");
+  expect(receipts).toHaveLength(3);
+  expect(receipts.map((item) => item.stepId)).toEqual(["first", "first", "second"]);
+  const inspected = await inspectFiles(root, completed);
+  expect(inspected.preExisting).toMatchObject([{ path: "existing.txt", change: "modified" }]);
+  expect(inspected.files).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ path: "added.txt", attribution: "recorded", stepId: "first" }),
+      expect.objectContaining({
+        path: "existing.txt",
+        attribution: "recorded",
+        stepId: "second",
+        receiptId: receipts[2]?.id,
+      }),
+    ]),
+  );
+  expect((await inspectDiff(root, completed, "existing.txt")).diff).toContain("+second edit");
+  await writeFile(join(workspace, "existing.txt"), "later unrecorded edit\n");
+  expect((await inspectFiles(root, completed)).files).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ path: "existing.txt", attribution: "uncertain" }),
+    ]),
+  );
 });
 
 it("reads only declared owned artifact bytes and detects missing, changed and linked outputs", async () => {

@@ -62,6 +62,8 @@ export type InspectedChange = {
   freshness?: string;
 };
 
+const digestDiff = (diff: string) => createHash("sha256").update(diff).digest("hex");
+
 const changesBetween = async (
   workspace: string,
   from: string,
@@ -109,34 +111,42 @@ export const inspectFiles = async (project: string, run: RunRecord) => {
   const workspace = await workspaceFor(project, run);
   const baseline = run.snapshot.baseline;
   if (!baseline.revision) throw new ProjectError("This run has no Git baseline.", 404);
-  const changes = await changesBetween(workspace, baseline.revision);
+  const baselineRevision = baseline.revision;
+  const changes = await changesBetween(workspace, baselineRevision);
   const untracked = (await git(workspace, "ls-files", "--others", "--exclude-standard", "-z"))
     .split("\0")
     .filter(Boolean)
     .filter((path) => path !== ".code-factory" && !path.startsWith(".code-factory/"));
   for (const path of untracked) changes.push({ path, change: "added", attribution: "uncertain" });
-  const files = changes.map((change) => {
-    const receipt = [...run.evidence]
-      .reverse()
-      .find((item) => item.kind === "file" && item.path === change.path);
-    return receipt?.kind === "file" && receipt.change === change.change
-      ? {
-          ...change,
-          attribution: "recorded" as const,
-          receiptId: receipt.id,
-          stepId: receipt.stepId,
-          attemptId: receipt.attemptId,
-          createdAt: receipt.createdAt,
-          candidateId: receipt.provenance.candidateId,
-          freshness: receipt.freshness.state,
-        }
-      : change;
-  });
+  const files = await Promise.all(
+    changes.map(async (change) => {
+      const receipt = [...run.evidence]
+        .reverse()
+        .find((item) => item.kind === "file" && item.path === change.path);
+      if (receipt?.kind !== "file" || receipt.change !== change.change) return change;
+      const diff = await (async () => {
+        if (change.change !== "deleted") await safeFile(workspace, change.path);
+        return diffForChange(workspace, baselineRevision, change);
+      })().catch(() => null);
+      return diff && receipt.diffDigest === digestDiff(diff)
+        ? {
+            ...change,
+            attribution: "recorded" as const,
+            receiptId: receipt.id,
+            stepId: receipt.stepId,
+            attemptId: receipt.attemptId,
+            createdAt: receipt.createdAt,
+            candidateId: receipt.provenance.candidateId,
+            freshness: receipt.freshness.state,
+          }
+        : change;
+    }),
+  );
   const preExisting =
     baseline.sourceRevision && baseline.sourceRevision !== baseline.revision
       ? await changesBetween(workspace, baseline.sourceRevision, baseline.revision)
       : [];
-  return { baselineRevision: baseline.revision, files, preExisting };
+  return { baselineRevision, files, preExisting };
 };
 
 export const inspectDiff = async (project: string, run: RunRecord, path: string) => {
@@ -145,46 +155,69 @@ export const inspectDiff = async (project: string, run: RunRecord, path: string)
   const change = inspected.files.find((item) => item.path === path);
   if (!change) throw new ProjectError("This path is not a task change.", 404);
   if (change.change !== "deleted") await safeFile(workspace, path);
-  const diff =
-    change.change === "added" && !(await git(workspace, "ls-files", "--", path)).trim()
-      ? await exec(
-          "git",
-          [
-            "-C",
-            workspace,
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-index",
-            "--",
-            "/dev/null",
-            path,
-          ],
-          {
-            encoding: "utf8",
-            maxBuffer: 8_000_000,
-          },
-        ).then(
-          (result) => result.stdout,
-          (error: unknown) =>
-            error &&
-            typeof error === "object" &&
-            "stdout" in error &&
-            typeof error.stdout === "string"
-              ? error.stdout
-              : Promise.reject(error),
-        )
-      : await git(
+  const diff = await diffForChange(workspace, inspected.baselineRevision, change);
+  return { path, diff, change };
+};
+
+const diffForChange = async (
+  workspace: string,
+  baselineRevision: string,
+  change: InspectedChange,
+) =>
+  change.change === "added" && !(await git(workspace, "ls-files", "--", change.path)).trim()
+    ? await exec(
+        "git",
+        [
+          "-C",
           workspace,
           "diff",
           "--no-ext-diff",
           "--no-textconv",
-          inspected.baselineRevision,
+          "--no-index",
           "--",
-          ...(change.previousPath ? [change.previousPath] : []),
-          path,
-        );
-  return { path, diff, change };
+          "/dev/null",
+          change.path,
+        ],
+        {
+          encoding: "utf8",
+          maxBuffer: 8_000_000,
+        },
+      ).then(
+        (result) => result.stdout,
+        (error: unknown) =>
+          error &&
+          typeof error === "object" &&
+          "stdout" in error &&
+          typeof error.stdout === "string"
+            ? error.stdout
+            : Promise.reject(error),
+      )
+    : await git(
+        workspace,
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        baselineRevision,
+        "--",
+        ...(change.previousPath ? [change.previousPath] : []),
+        change.path,
+      );
+
+export const snapshotFileDiffs = async (project: string, run: RunRecord) => {
+  const workspace = await workspaceFor(project, run);
+  const { baselineRevision, files } = await inspectFiles(project, run);
+  const snapshots = await Promise.all(
+    files.map(async (change) => {
+      try {
+        if (change.change !== "deleted") await safeFile(workspace, change.path);
+        const diff = await diffForChange(workspace, baselineRevision, change);
+        return { change, diff, digest: digestDiff(diff) };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return snapshots.filter((item): item is NonNullable<typeof item> => item !== null);
 };
 
 export const inspectArtifact = async (project: string, run: RunRecord, id: string) => {
