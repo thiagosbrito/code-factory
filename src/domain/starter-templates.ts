@@ -146,6 +146,16 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         ["Check receipts and candidate identity"],
         "implementation-round",
       ),
+      {
+        id: "diff-check",
+        name: "Verify candidate diff",
+        kind: "check",
+        stage: "validation",
+        role: "Diff validator",
+        instruction: "git diff --check HEAD",
+        expectedOutputs: ["Check receipt for the staged candidate"],
+        groupId: "implementation-round",
+      },
       step(
         "quality-review",
         "Code quality review",
@@ -226,6 +236,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
       edge("plan", "implement"),
       edge("implement", "candidate"),
       edge("candidate", "checks"),
+      edge("checks", "diff-check"),
       ...[
         "quality-review",
         "react-review",
@@ -233,7 +244,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "security-review",
         "acceptance-review",
         "test-review",
-      ].map((id) => edge("checks", id)),
+      ].map((id) => edge("diff-check", id)),
       ...[
         "quality-review",
         "react-review",
@@ -259,6 +270,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
           "implement",
           "candidate",
           "checks",
+          "diff-check",
           "quality-review",
           "react-review",
           "performance-review",
