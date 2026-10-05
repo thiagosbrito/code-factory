@@ -49,6 +49,8 @@ export const guidanceSchema = z.strictObject({
   message: z.string().trim().min(1),
   state: z.enum(["queued", "delivered", "acknowledged", "rejected"]),
   acknowledgedAt: z.iso.datetime().optional(),
+  reason: z.string().min(1).optional(),
+  replyEventId: z.uuid().optional(),
 });
 export const checkReceiptSchema = z.strictObject({
   ...identity,

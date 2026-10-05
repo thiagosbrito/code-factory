@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
+import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import { RunGraph } from "./RunGraph";
 import { RunInspector } from "./RunInspector";
@@ -13,6 +14,8 @@ export const RunDetail = ({
   onExecute,
   onCancel,
   onBack,
+  agents = [],
+  onSendGuidance = async () => undefined,
 }: {
   run: RunRecord;
   connected: boolean;
@@ -21,6 +24,8 @@ export const RunDetail = ({
   onExecute: () => void;
   onCancel: () => void;
   onBack: () => void;
+  agents?: AgentConnection[];
+  onSendGuidance?: (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
 }) => {
   const [scope, setScope] = useState<RunScope | null>(null);
   const [initialTab, setInitialTab] = useState<"Activity" | "Files" | "Artifacts">("Activity");
@@ -135,6 +140,8 @@ export const RunDetail = ({
           onScopeChange={setScope}
           onClose={close}
           connected={connected}
+          agents={agents}
+          onSendGuidance={onSendGuidance}
           initialTab={initialTab}
         />
       )}

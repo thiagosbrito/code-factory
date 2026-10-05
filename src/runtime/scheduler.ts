@@ -15,7 +15,8 @@ import {
   skipInactive,
   type StepResult,
 } from "../domain/scheduler.js";
-import { readRun, updateRun } from "./storage.js";
+import { mutateRun, readRun } from "./storage.js";
+import { acknowledgeGuidance, deliverQueuedGuidance, expireQueuedGuidance } from "./guidance.js";
 
 type Resolver = (provider: string) => AgentAdapter | null;
 const active = new Map<string, { work: Promise<RunRecord>; controller: AbortController }>();
@@ -247,8 +248,7 @@ const executeOnce = async (
   let pendingCommit: Promise<void> = Promise.resolve();
   const commit = async (change: (current: RunRecord) => RunRecord): Promise<RunRecord> => {
     const work = pendingCommit.then(async () => {
-      const next = change(record);
-      if (next !== record) record = await updateRun(project, next);
+      record = await mutateRun(project, runId, change);
     });
     pendingCommit = work;
     await work;
@@ -429,6 +429,8 @@ const executeOnce = async (
                   summary: event.output,
                 };
               await commit((current) => appendEvent(current, stepId, attempt.id, event));
+              if (event.type === "started")
+                record = await deliverQueuedGuidance(project, record, stepId, attempt.id, adapter);
             }
             if (!completed) throw new Error("Adapter stream ended without a verified completion.");
           } catch (error) {
@@ -506,6 +508,11 @@ const executeOnce = async (
               }),
         );
     } finally {
+      const finalAttemptId = record.steps
+        .find((item) => item.stepId === stepId)
+        ?.attempts.at(-1)?.id;
+      if (finalAttemptId)
+        await commit((current) => expireQueuedGuidance(current, stepId, finalAttemptId));
       if (reviewRoot) await rm(reviewRoot, { recursive: true, force: true });
     }
   };
@@ -562,7 +569,7 @@ const appendEvent = (
       -1,
       ...record.evidence.filter((item) => item.kind === "event").map((item) => item.sequence),
     ) + 1;
-  return runRecordSchema.parse({
+  const next = runRecordSchema.parse({
     ...record,
     revision: record.revision + 1,
     evidence: [
@@ -594,6 +601,10 @@ const appendEvent = (
       },
     ],
   });
+  const last = next.evidence.at(-1);
+  return event.type === "message" && last?.kind === "event"
+    ? acknowledgeGuidance(next, stepId, attemptId, last.id)
+    : next;
 };
 
 const appendLocalEvent = (
