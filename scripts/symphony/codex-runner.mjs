@@ -19,12 +19,39 @@ const workspace = realpathSync(process.cwd());
 if (!workspace.startsWith(`${realpathSync(workspaces)}/`))
   throw new Error("Codex must run inside a ticket worktree.");
 const identity = workspaceIdentity(workspace);
+const servePublishedReview = async () => {
+  const input = createInterface({ input: process.stdin });
+  input.on("line", (line) => {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (message.method === "initialize") {
+      process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + "\n");
+    } else if (message.method === "thread/start") {
+      process.stdout.write(
+        JSON.stringify({
+          id: message.id,
+          result: { thread: { id: `review-${identity.identifier}` } },
+        }) + "\n",
+      );
+    } else if (message.method === "turn/start") {
+      const turn = { id: `review-skip-${identity.identifier}`, status: "completed" };
+      process.stdout.write(JSON.stringify({ id: message.id, result: { turn } }) + "\n");
+      process.stdout.write(JSON.stringify({ method: "turn/completed", params: { turn } }) + "\n");
+    }
+  });
+  await new Promise((resolve) => input.once("close", resolve));
+};
 if (existsSync(join(records, `${identity.identifier}.json`))) {
   const receipt = readRecord(identity);
   if (["review-ready", "review-pending"].includes(receipt.state)) {
     console.error(
       `Skipping Codex pickup: ${identity.identifier} has a ${receipt.state} review receipt.`,
     );
+    await servePublishedReview();
     process.exit(0);
   }
 }

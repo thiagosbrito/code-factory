@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -13,6 +14,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { isDirectReviewTransition, isDirectStateTransition } from "../scripts/symphony/review.mjs";
 import { project, releaseEnvironment, runtime } from "../scripts/symphony/common.mjs";
@@ -453,32 +455,59 @@ for (const mode of ["reset-confirm", "reset-confirm-backlog"])
     assert.equal(record.state, "review-ready");
   });
 
-test("a second invocation stops before launching Codex for a confirmed review", (t) => {
-  const f = fixture(t);
-  const workspace = f.create("THI-REVIEW");
-  writeFileSync(join(workspace, "README.md"), "reviewed ticket work\n");
-  const outcome = reviewHarness(f, workspace);
-  assert.equal(outcome.result.success, true);
-  const marker = join(f.root, "codex-started");
-  const fake = join(f.root, "fake-codex.mjs");
-  writeFileSync(
-    fake,
-    `#!/usr/bin/env node\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "started");\n`,
-  );
-  chmodSync(fake, 0o755);
-  const second = spawnSync(process.execPath, [join(project, "scripts/symphony/codex-runner.mjs")], {
-    cwd: workspace,
-    encoding: "utf8",
-    timeout: 10_000,
-    env: { ...process.env, SYMPHONY_ROOT: f.automation, SYMPHONY_CODEX_BIN: fake },
-    input: JSON.stringify({ id: 1, method: "thread/start", params: {} }) + "\n",
-  });
-  assert.equal(second.status, 0, second.stderr);
-  assert.match(second.stderr, /Skipping Codex pickup/);
-  assert.equal(second.stdout, "");
-  assert.equal(existsSync(marker), false);
-  assert.equal(outcome.events.filter((event) => event === "linear:Backlog").length, 0);
-});
+test(
+  "a second invocation completes Symphony's app-server exchange without launching Codex",
+  { timeout: 15_000 },
+  async (t) => {
+    const f = fixture(t);
+    const workspace = f.create("THI-REVIEW");
+    writeFileSync(join(workspace, "README.md"), "reviewed ticket work\n");
+    const outcome = reviewHarness(f, workspace);
+    assert.equal(outcome.result.success, true);
+    const marker = join(f.root, "codex-started");
+    const fake = join(f.root, "fake-codex.mjs");
+    writeFileSync(
+      fake,
+      `#!/usr/bin/env node\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "started");\n`,
+    );
+    chmodSync(fake, 0o755);
+    const second = spawn(process.execPath, [join(project, "scripts/symphony/codex-runner.mjs")], {
+      cwd: workspace,
+      env: { ...process.env, SYMPHONY_ROOT: f.automation, SYMPHONY_CODEX_BIN: fake },
+      stdio: "pipe",
+    });
+    t.after(() => second.kill());
+    const output = createInterface({ input: second.stdout })[Symbol.asyncIterator]();
+    const request = async (id, method, params = {}) => {
+      second.stdin.write(JSON.stringify({ id, method, params }) + "\n");
+      const response = await output.next();
+      assert.equal(response.done, false, `runner exited before ${method} response`);
+      return JSON.parse(response.value);
+    };
+    const initialized = await request(1, "initialize");
+    assert.deepEqual(initialized, { id: 1, result: {} });
+    second.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
+    const thread = await request(2, "thread/start", { cwd: workspace });
+    assert.equal(typeof thread.result?.thread?.id, "string");
+    const turn = await request(3, "turn/start", { threadId: thread.result.thread.id });
+    assert.equal(typeof turn.result?.turn?.id, "string");
+    const completed = await output.next();
+    assert.deepEqual(JSON.parse(completed.value), {
+      method: "turn/completed",
+      params: { turn: { id: turn.result.turn.id, status: "completed" } },
+    });
+    const exited = once(second, "exit");
+    second.stdin.end();
+    const [status] = await exited;
+    assert.equal(status, 0);
+    assert.equal(existsSync(marker), false);
+    assert.equal(outcome.events.filter((event) => event === "linear:Backlog").length, 0);
+    assert.equal(
+      JSON.parse(readFileSync(join(f.automation, "records/THI-REVIEW.json"), "utf8")).state,
+      "review-ready",
+    );
+  },
+);
 
 test("publishing tool calls are handled by the host and their replies return to Codex", async (t) => {
   const f = fixture(t);
