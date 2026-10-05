@@ -359,3 +359,29 @@ export const updateRun = async (project: string, input: RunRecord): Promise<RunR
     await rm(lock, { recursive: true, force: true });
   }
 };
+
+const mutations = new Map<string, Promise<unknown>>();
+
+/** Serialize local runtime writers before the revision and append-only checks. */
+export const mutateRun = async (
+  project: string,
+  runId: string,
+  change: (current: RunRecord) => RunRecord,
+): Promise<RunRecord> => {
+  const key = `${project}:${runId}`;
+  const prior = mutations.get(key) ?? Promise.resolve();
+  const work = prior
+    .catch(() => undefined)
+    .then(async () => {
+      const current = await readRun(project, runId);
+      if (!current) throw new Error("Run not found.");
+      const next = change(current);
+      return next === current ? current : updateRun(project, next);
+    });
+  mutations.set(key, work);
+  try {
+    return await work;
+  } finally {
+    if (mutations.get(key) === work) mutations.delete(key);
+  }
+};

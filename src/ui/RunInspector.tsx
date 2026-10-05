@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
+import type { AgentConnection } from "../adapters/contract.js";
 import type { Evidence } from "../domain/evidence.js";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +12,7 @@ import {
 } from "./run-view-model";
 import { RunInspectorActivity } from "./RunInspectorActivity";
 import { RunInspectorDetails } from "./RunInspectorDetails";
+import { RunGuidance } from "./RunGuidance";
 
 type Tab = "Activity" | "Files" | "Artifacts" | "Details";
 const tabs: Tab[] = ["Activity", "Files", "Artifacts", "Details"];
@@ -21,6 +23,8 @@ export const RunInspector = ({
   onScopeChange,
   onClose,
   connected,
+  agents = [],
+  onSendGuidance = async () => undefined,
   initialTab = "Activity",
 }: {
   run: RunRecord;
@@ -28,6 +32,8 @@ export const RunInspector = ({
   onScopeChange: (scope: RunScope) => void;
   onClose: () => void;
   connected: boolean;
+  agents?: AgentConnection[];
+  onSendGuidance?: (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
   initialTab?: Tab;
 }) => {
   const scope = validScope(run, requestedScope);
@@ -238,6 +244,15 @@ export const RunInspector = ({
             )}
           </ul>
         )}
+      </div>
+      <div hidden={tab !== "Activity"}>
+        <RunGuidance
+          run={run}
+          scope={scope}
+          connected={connected}
+          agents={agents}
+          onSend={onSendGuidance}
+        />
       </div>
     </aside>
   );

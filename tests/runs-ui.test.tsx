@@ -16,9 +16,63 @@ import { createRunRecord, createRunSnapshot, startAttempt } from "../src/domain/
 import { RunDetail } from "../src/ui/RunDetail.js";
 import { RunGraph } from "../src/ui/RunGraph.js";
 import { RunInspector } from "../src/ui/RunInspector.js";
+import { RunGuidance } from "../src/ui/RunGuidance.js";
+import type { AgentConnection } from "../src/adapters/contract.js";
 import type { RunScope } from "../src/ui/run-view-model.js";
 import { useFactoryRuns } from "../src/ui/useFactoryRuns.js";
 import { RunsList } from "../src/ui/RunsList.js";
+
+it("preserves a scoped guidance draft through disconnect and gates it on verified steering", async () => {
+  const run = makeRun();
+  const attemptId = run.steps.find((step) => step.stepId === "build")?.attempts[0]?.id;
+  if (!attemptId) throw new Error("Missing attempt");
+  const scope: RunScope = { kind: "step", stepId: "build", attemptId };
+  const connection: AgentConnection = {
+    provider: "mock",
+    executable: null,
+    installation: "built-in",
+    authentication: "not-required",
+    capabilities: { streaming: "supported", steering: "unknown", resume: "unsupported" },
+  };
+  const onSend = vi.fn<() => Promise<void>>(async () => undefined);
+  const view = render(
+    <RunGuidance run={run} scope={scope} connected={false} agents={[connection]} onSend={onSend} />,
+  );
+  await userEvent.type(
+    screen.getByLabelText("Message for selected attempt"),
+    "Check the edge case",
+  );
+  expect(
+    (screen.getByRole("button", { name: "Queue guidance" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(screen.getByText(/Runtime disconnected/)).toBeTruthy();
+  view.rerender(
+    <RunGuidance run={run} scope={scope} connected agents={[connection]} onSend={onSend} />,
+  );
+  expect((screen.getByLabelText("Message for selected attempt") as HTMLTextAreaElement).value).toBe(
+    "Check the edge case",
+  );
+  expect(
+    (screen.getByRole("button", { name: "Queue guidance" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  view.rerender(
+    <RunGuidance
+      run={run}
+      scope={scope}
+      connected
+      agents={[
+        { ...connection, capabilities: { ...connection.capabilities, steering: "supported" } },
+      ]}
+      onSend={onSend}
+    />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Queue guidance" }));
+  expect(onSend).toHaveBeenCalledWith({
+    stepId: "build",
+    attemptId,
+    message: "Check the edge case",
+  });
+});
 
 const makeRun = () => {
   const loop = parseLoop({

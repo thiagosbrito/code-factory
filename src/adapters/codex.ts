@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import type {
   AgentAdapter,
+  AgentCapabilities,
   AgentConnection,
   AdapterEvent,
   StepExecutionInput,
@@ -162,18 +163,20 @@ const textInput = (text: string) => {
 /** One assigned factory step is one Codex thread and turn. Retry creates a new thread. */
 export class CodexAdapter implements AgentAdapter {
   readonly provider = "codex" as const;
-  readonly capabilities = {
-    streaming: "unknown",
-    steering: "unknown",
-    resume: "unknown",
-  } as const;
+  readonly capabilities: AgentCapabilities;
   private initialized?: Promise<void>;
 
   constructor(
     private readonly rpc: CodexRpc,
     private readonly executable: string,
     private readonly version: string,
-  ) {}
+  ) {
+    this.capabilities = {
+      streaming: "unknown",
+      steering: version === "0.160.0" ? "supported" : "unknown",
+      resume: "unknown",
+    };
+  }
 
   close(): void {
     this.rpc.close?.();
