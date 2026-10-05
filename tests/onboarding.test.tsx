@@ -40,6 +40,12 @@ function runtime(initial: ProjectConfig | null = null) {
       body = { loops: 0, runs: 0 };
     } else if (path === "/api/loops" && method === "GET") {
       body = { loops: [] };
+    } else if (path === "/api/loops/published" && method === "GET") {
+      body = { loops: [] };
+    } else if (path === "/api/runs" && method === "GET") {
+      body = { runs: [] };
+    } else if (path === "/api/tracker" && method === "GET") {
+      body = { configured: false };
     } else if (path === "/api/agents" && method === "GET") {
       if (failAgents) {
         status = 503;
