@@ -10,6 +10,7 @@ import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
 import { cancelRun, executeRun, retryStep } from "./scheduler.js";
 import { prepareStepRetry } from "../domain/scheduler.js";
+import { guidanceInputSchema, sendGuidance } from "./guidance.js";
 import { eventsAfter, parseEventCursor, streamRunEvents } from "./events.js";
 import { listPublishedLoops, listRuns, readRun } from "./storage.js";
 import { linearTracker, ticketIdSchema, type TicketTracker } from "./tracker.js";
@@ -291,6 +292,21 @@ export const startLocalServer = async (options: {
           console.error(error instanceof Error ? error.message : "Step retry failed"),
         );
         return json(response, 202, { run });
+      }
+      const guidancePath = /^\/api\/runs\/([0-9a-f-]{36})\/guidance$/i.exec(pathname);
+      if (guidancePath?.[1] && request.method === "POST") {
+        const parsed = guidanceInputSchema.safeParse(await readBody(request));
+        if (!parsed.success) return json(response, 400, { error: parsed.error.issues[0]?.message });
+        const run = await readRun(projectDirectory, guidancePath[1]);
+        if (!run) return json(response, 404, { error: "Run not found." });
+        const provider = run.snapshot.bindings[parsed.data.stepId]?.provider;
+        const updated = await sendGuidance(
+          projectDirectory,
+          guidancePath[1],
+          parsed.data,
+          provider ? connections.adapter(provider) : null,
+        );
+        return json(response, 200, { run: updated });
       }
       if (request.method !== "GET")
         return json(response, 405, { error: "Unsupported request method" });

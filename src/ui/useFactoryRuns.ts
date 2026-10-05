@@ -217,6 +217,19 @@ export const useFactoryRuns = (demo: boolean) => {
       setExecutingRunId(null);
     }
   };
+  const sendGuidance = async (
+    id: string,
+    input: { stepId: string; attemptId: string; message: string },
+  ) => {
+    const { run } = await api(`/api/runs/${id}/guidance`, runResponseSchema.parse, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    setRuns((previous) =>
+      previous.map((item) => (item.snapshot.id === id ? mergeRunSnapshot(item, run) : item)),
+    );
+  };
   return {
     notice,
     setNotice,
@@ -231,6 +244,7 @@ export const useFactoryRuns = (demo: boolean) => {
     execute,
     cancel,
     retry,
+    sendGuidance,
     executingRunId,
     connected,
     streamConnected: stream?.runId === selectedRunId ? stream.connected : null,

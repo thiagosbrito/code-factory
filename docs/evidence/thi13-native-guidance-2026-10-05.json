@@ -1,0 +1,43 @@
+{
+  "version": "codex-cli 0.160.0",
+  "model": "gpt-6-luna",
+  "methods": [
+    {
+      "method": "initialize",
+      "ok": true
+    },
+    {
+      "method": "account/read",
+      "ok": true
+    },
+    {
+      "method": "model/list",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    },
+    {
+      "method": "turn/steer",
+      "ok": true
+    }
+  ],
+  "guidanceHttpStatus": 200,
+  "runStatus": "succeeded",
+  "attempts": 1,
+  "guidanceStates": ["queued", "delivered", "acknowledged"],
+  "acknowledgedReplyEventId": "0831b208-9b7b-4327-9422-defb90d4241d",
+  "completionText": "I’ll run the requested `sleep 8` in this project, then check only the current workspace for live guidance that applies to this proof.` sleep 8` was blocked by the sandbox (`Operation not permitted`), so it did not run.\n\nguidance-applied  \nGUIDANCE-ACK:d6720c53-f6f1-4144-b592-d5d2501df61b",
+  "eventCounts": {
+    "lifecycle": 2,
+    "message": 82
+  },
+  "noInterrupt": true,
+  "passed": true,
+  "finishedAt": "2026-10-05T09:07:35.069Z"
+}

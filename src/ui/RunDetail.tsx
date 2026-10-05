@@ -16,6 +16,7 @@ export const RunDetail = ({
   onRetry,
   agents = [],
   onBack,
+  onSendGuidance = async () => undefined,
 }: {
   run: RunRecord;
   connected: boolean;
@@ -26,6 +27,7 @@ export const RunDetail = ({
   onRetry?: (stepId: string, attemptId: string) => void;
   agents?: AgentConnection[];
   onBack: () => void;
+  onSendGuidance?: (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
 }) => {
   const [scope, setScope] = useState<RunScope | null>(null);
   const [initialTab, setInitialTab] = useState<"Activity" | "Files" | "Artifacts">("Activity");
@@ -140,9 +142,10 @@ export const RunDetail = ({
           onScopeChange={setScope}
           onClose={close}
           connected={connected}
+          agents={agents}
+          onSendGuidance={onSendGuidance}
           initialTab={initialTab}
           onRetry={onRetry}
-          agents={agents}
           executing={executing}
         />
       )}

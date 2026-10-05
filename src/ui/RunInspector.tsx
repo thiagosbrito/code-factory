@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
-import type { Evidence } from "../domain/evidence.js";
 import type { AgentConnection } from "../adapters/contract.js";
+import type { Evidence } from "../domain/evidence.js";
 import { Button } from "@/components/ui/button";
 import {
   definitionForScope,
@@ -14,6 +14,7 @@ import {
 import { RunInspectorActivity } from "./RunInspectorActivity";
 import { RunInspectorDetails } from "./RunInspectorDetails";
 import { RetryStepDialog } from "./RetryStepDialog";
+import { RunGuidance } from "./RunGuidance";
 
 type Tab = "Activity" | "Files" | "Artifacts" | "Details";
 const tabs: Tab[] = ["Activity", "Files", "Artifacts", "Details"];
@@ -24,9 +25,10 @@ export const RunInspector = ({
   onScopeChange,
   onClose,
   connected,
+  agents = [],
+  onSendGuidance = async () => undefined,
   initialTab = "Activity",
   onRetry,
-  agents = [],
   executing = false,
 }: {
   run: RunRecord;
@@ -34,9 +36,10 @@ export const RunInspector = ({
   onScopeChange: (scope: RunScope) => void;
   onClose: () => void;
   connected: boolean;
+  agents?: AgentConnection[];
+  onSendGuidance?: (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
   initialTab?: Tab;
   onRetry?: ((stepId: string, attemptId: string) => void) | undefined;
-  agents?: AgentConnection[];
   executing?: boolean;
 }) => {
   const scope = validScope(run, requestedScope);
@@ -300,6 +303,15 @@ export const RunInspector = ({
             )}
           </ul>
         )}
+      </div>
+      <div hidden={tab !== "Activity"}>
+        <RunGuidance
+          run={run}
+          scope={scope}
+          connected={connected}
+          agents={agents}
+          onSend={onSendGuidance}
+        />
       </div>
     </aside>
   );

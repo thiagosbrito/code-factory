@@ -36,6 +36,12 @@ Run `pnpm prove:codex` only with explicit native launch intent. It makes bounded
 
 ## Connection truthfulness
 
+### Cooperative guidance boundary
+
+`POST /api/runs/:runId/guidance` accepts a `stepId`, durable `attemptId`, and nonempty `message`. The runtime validates that the attempt belongs to the step, appends a queued guidance receipt to that exact run, and sends it only through the active attempt's native session and turn. A successful `turn/steer` response records delivery; it does not count as an agent acknowledgment. Acknowledgment requires an agent message containing the guidance message ID after the queue receipt, and records the reply event ID. Undelivered guidance retains a reason when its attempt ends. Connection loss or unknown/unsupported steering rejects a new send before queuing, allowing the UI to keep its draft.
+
+The first native steering proof is limited to Codex CLI 0.160.0. Other versions expose steering as unknown until verified. The current portable runtime has no pausing/paused state and no waiting-for-input prompt or answer method. An input answer must use a separate adapter-supported request/reply control, tied to the waiting prompt and attempt; it must never be sent through ordinary `turn/steer`. The UI does not offer a reply control without such a verified path.
+
 An executable candidate is not an authenticated or supported connection. Discovery performs no agent launch and reads no credentials. Identity/version verification, supported interfaces, authentication, advertised capabilities, and model catalogs must be proved by each runtime adapter. Generic executable names such as `agent` need particular care during verification. UI controls consume capabilities, rather than assuming parity from brand names. Custom connections will require explicit executable and protocol configuration.
 
 The connection registry now launches Codex only after an explicit local verification request. A custom path uses the same supported Codex app-server protocol and must pass executable, identity, and inspection checks; a saved path by itself never becomes a connection. The runtime keeps verified sessions in memory and stores only project defaults and optional custom executable configuration. Catalog choices are validated at save time. Previously saved unavailable selections remain visible in the UI and cannot silently become another model. Per-step binding selectors are exported for the loop editor; run snapshots continue to resolve bindings once at creation.
