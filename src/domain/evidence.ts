@@ -36,6 +36,8 @@ export const eventSchema = z.strictObject({
   title: z.string().min(1),
   detail: z.string().optional(),
   state: z.string().optional(),
+  sessionId: z.string().optional(),
+  turnId: z.string().optional(),
   sequence: z.number().int().nonnegative(),
 });
 export const guidanceSchema = z.strictObject({

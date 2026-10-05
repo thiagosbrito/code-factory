@@ -122,16 +122,50 @@ const checkCommand = async (
   command: string,
   cwd: string,
   signal: AbortSignal,
+  onOutput: (text: string) => Promise<void>,
 ): Promise<StepResult> =>
   new Promise((resolveCheck) => {
     if (signal.aborted) return resolveCheck({ status: "canceled" });
     const child = spawn(command, { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
+    let buffered = "";
+    let retained = 0;
+    let truncated = false;
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    let pending = Promise.resolve();
+    const queue = (text: string) => {
+      pending = pending.then(() => onOutput(text));
+    };
+    const flush = () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = undefined;
+      if (buffered) {
+        queue(buffered);
+        buffered = "";
+      }
+    };
+    const capture = (chunk: Buffer) => {
+      const text = chunk.toString();
+      output = (output + text).slice(-8192);
+      const remaining = Math.max(0, 8192 - retained);
+      const captured = text.slice(0, remaining);
+      retained += captured.length;
+      buffered += captured;
+      if (buffered.length >= 1024) flush();
+      else if (buffered && !flushTimer) flushTimer = setTimeout(flush, 100);
+      if (text.length > remaining && !truncated) {
+        flush();
+        queue(
+          "[Check output truncated after 8192 characters; final result retains the last 8192 characters.]",
+        );
+        truncated = true;
+      }
+    };
     child.stdout.on("data", (chunk: Buffer) => {
-      output = (output + chunk.toString()).slice(-8192);
+      capture(chunk);
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      output = (output + chunk.toString()).slice(-8192);
+      capture(chunk);
     });
     const timeout = setTimeout(() => child.kill("SIGTERM"), 300_000);
     const abort = () => child.kill("SIGTERM");
@@ -139,17 +173,38 @@ const checkCommand = async (
     child.on("error", (error) => {
       clearTimeout(timeout);
       signal.removeEventListener("abort", abort);
-      resolveCheck({ status: "failed", outcome: "failed", summary: error.message, exitCode: null });
+      flush();
+      void pending.then(
+        () =>
+          resolveCheck({
+            status: "failed",
+            outcome: "failed",
+            summary: error.message,
+            exitCode: null,
+          }),
+        () =>
+          resolveCheck({
+            status: "failed",
+            outcome: "failed",
+            summary: error.message,
+            exitCode: null,
+          }),
+      );
     });
     child.on("close", (code) => {
       clearTimeout(timeout);
       signal.removeEventListener("abort", abort);
-      resolveCheck({
-        status: signal.aborted ? "canceled" : code === 0 ? "succeeded" : "failed",
-        outcome: code === 0 ? "passed" : "failed",
-        summary: output,
-        exitCode: code,
-      });
+      flush();
+      void pending.then(
+        () =>
+          resolveCheck({
+            status: signal.aborted ? "canceled" : code === 0 ? "succeeded" : "failed",
+            outcome: code === 0 ? "passed" : "failed",
+            summary: output,
+            exitCode: code,
+          }),
+        () => resolveCheck({ status: "failed", summary: "Check output could not be persisted." }),
+      );
     });
   });
 
@@ -213,11 +268,53 @@ const executeOnce = async (
       const step = record.steps.find((item) => item.stepId === stepId);
       const attempt = step?.attempts.at(-1);
       if (!step || !attempt) throw new Error("Claimed attempt missing.");
+      const recovering = initial.steps.some(
+        (item) =>
+          item.stepId === stepId &&
+          item.attempts.at(-1)?.id === attempt.id &&
+          item.status === "running",
+      );
       const inputs = stepInputs(record, stepId);
       let result: StepResult;
       let staleCheck = false;
       if (definition.kind === "check") {
-        result = await checkCommand(definition.instruction, executionDirectory, signal);
+        if (recovering) {
+          const completed = record.evidence.find(
+            (item) =>
+              item.kind === "event" &&
+              item.attemptId === attempt.id &&
+              item.title === "Check completed",
+          );
+          if (completed?.kind !== "event")
+            throw new Error("A check process cannot be recovered after restart.");
+          result = {
+            status: completed.state === "succeeded" ? "succeeded" : "failed",
+            outcome: completed.state === "succeeded" ? "passed" : "failed",
+            ...(completed.detail ? { summary: completed.detail } : {}),
+          };
+        } else {
+          await commit((current) =>
+            appendLocalEvent(
+              current,
+              stepId,
+              attempt.id,
+              "check",
+              "Check started",
+              definition.instruction,
+              "running",
+            ),
+          );
+          result = await checkCommand(
+            definition.instruction,
+            executionDirectory,
+            signal,
+            async (text) => {
+              await commit((current) =>
+                appendLocalEvent(current, stepId, attempt.id, "check", "Check output", text),
+              );
+            },
+          );
+        }
         staleCheck = (await fileDigest(workspace)) !== step.candidateId;
         if (staleCheck)
           result = {
@@ -226,11 +323,42 @@ const executeOnce = async (
             summary: "Check changed the candidate; its result is stale.",
             exitCode: result.exitCode ?? null,
           };
+        if (!recovering)
+          await commit((current) =>
+            appendLocalEvent(
+              current,
+              stepId,
+              attempt.id,
+              "check",
+              "Check completed",
+              result.summary,
+              result.status,
+            ),
+          );
       } else {
+        const priorCompletion = recovering
+          ? record.evidence.find(
+              (item) =>
+                item.kind === "event" &&
+                item.attemptId === attempt.id &&
+                item.title === "completed",
+            )
+          : undefined;
         const binding = record.snapshot.bindings[stepId];
         const adapter = binding ? resolveAdapter(binding.provider) : null;
-        if (!adapter || !binding) {
+        if (priorCompletion?.kind === "event") {
+          result = {
+            status: priorCompletion.state === "succeeded" ? "succeeded" : "failed",
+            ...(priorCompletion.detail
+              ? definition.stage === "review"
+                ? reviewResult(priorCompletion.detail)
+                : { outcome: priorCompletion.detail.trim() }
+              : {}),
+            ...(priorCompletion.detail ? { summary: priorCompletion.detail } : {}),
+          };
+        } else if (!adapter || !binding) {
           result = { status: "unavailable" };
+          if (recovering) throw new Error("The selected adapter is not connected for recovery.");
         } else {
           result = { status: "failed" };
           const allowedOutcomes =
@@ -257,17 +385,41 @@ const executeOnce = async (
             projectDirectory: executionDirectory,
           };
           try {
-            for await (const event of adapter.execute(input, signal)) {
+            let completed = false;
+            if (
+              recovering &&
+              (adapter.capabilities.resume !== "supported" ||
+                !attempt.sessionId ||
+                !attempt.turnId ||
+                readonly)
+            )
+              throw new Error("Active recovery is unsupported or lacks a verified session handle.");
+            const stream = recovering
+              ? adapter.attach(
+                  {
+                    runId,
+                    stepId,
+                    attempt: attempt.number,
+                    sessionId: attempt.sessionId ?? "",
+                    turnId: attempt.turnId ?? "",
+                  },
+                  signal,
+                )
+              : adapter.execute(input, signal);
+            for await (const event of stream) {
               if (
                 event.runId !== runId ||
                 event.stepId !== stepId ||
-                event.attempt !== attempt.number
+                event.attempt !== attempt.number ||
+                (recovering &&
+                  (event.sessionId !== attempt.sessionId || event.turnId !== attempt.turnId))
               )
                 throw new Error("Adapter event identity mismatch.");
-              if (event.type === "started")
+              if (event.type === "started" && !recovering)
                 await commit((current) =>
                   attachAttemptSession(current, stepId, event.sessionId, event.turnId),
                 );
+              if (event.type === "completed") completed = true;
               if (event.type === "completed")
                 result = {
                   status: event.outcome,
@@ -278,8 +430,10 @@ const executeOnce = async (
                 };
               await commit((current) => appendEvent(current, stepId, attempt.id, event));
             }
-          } catch {
-            result = { status: signal.aborted ? "canceled" : "failed" };
+            if (!completed) throw new Error("Adapter stream ended without a verified completion.");
+          } catch (error) {
+            if (!signal.aborted) throw error;
+            result = { status: "canceled" };
           }
         }
       }
@@ -336,16 +490,31 @@ const executeOnce = async (
     } catch (error) {
       if (record.steps.find((step) => step.stepId === stepId)?.status === "running")
         await commit((current) =>
-          completeStep(current, stepId, {
-            status: signal.aborted ? "canceled" : "failed",
-            summary: error instanceof Error ? error.message : String(error),
-          }),
+          initial.steps.some((item) => item.stepId === stepId && item.status === "running") ||
+          (definition.kind !== "check" && !signal.aborted)
+            ? interruptStep(
+                current,
+                stepId,
+                error instanceof Error ? error.message : String(error),
+                initial.steps.some((item) => item.stepId === stepId && item.status === "running")
+                  ? "recovery-unavailable"
+                  : "execution-interrupted",
+              )
+            : completeStep(current, stepId, {
+                status: signal.aborted ? "canceled" : "failed",
+                summary: error instanceof Error ? error.message : String(error),
+              }),
         );
     } finally {
       if (reviewRoot) await rm(reviewRoot, { recursive: true, force: true });
     }
   };
 
+  const interrupted = record.steps.filter((step) => step.status === "running");
+  if (interrupted.length) {
+    await Promise.all(interrupted.map((step) => runStep(step.stepId)));
+    if (record.status === "unavailable") return record;
+  }
   for (;;) {
     if (signal.aborted)
       return commit((current) =>
@@ -405,15 +574,113 @@ const appendEvent = (
         attemptId,
         createdAt: new Date().toISOString(),
         kind: "event",
-        type: event.type === "message" ? "message" : "lifecycle",
-        title: event.type,
+        type: ["message", "tool", "check", "error"].includes(event.type) ? event.type : "lifecycle",
+        title: event.type === "tool" || event.type === "check" ? event.title : event.type,
         detail:
           event.type === "message"
             ? event.text
-            : event.type === "completed"
-              ? event.output
-              : undefined,
-        state: event.type === "completed" ? event.outcome : undefined,
+            : event.type === "error"
+              ? event.text
+              : event.type === "tool" || event.type === "check"
+                ? event.detail
+                : event.type === "completed"
+                  ? event.output
+                  : undefined,
+        state:
+          event.type === "completed" ? event.outcome : "state" in event ? event.state : undefined,
+        sessionId: event.sessionId,
+        turnId: event.turnId,
+        sequence,
+      },
+    ],
+  });
+};
+
+const appendLocalEvent = (
+  record: RunRecord,
+  stepId: string,
+  attemptId: string,
+  type: "check" | "lifecycle",
+  title: string,
+  detail?: string,
+  state?: string,
+): RunRecord => {
+  const sequence =
+    Math.max(
+      -1,
+      ...record.evidence.filter((item) => item.kind === "event").map((item) => item.sequence),
+    ) + 1;
+  return runRecordSchema.parse({
+    ...record,
+    revision: record.revision + 1,
+    evidence: [
+      ...record.evidence,
+      {
+        id: crypto.randomUUID(),
+        runId: record.snapshot.id,
+        stepId,
+        attemptId,
+        createdAt: new Date().toISOString(),
+        kind: "event",
+        type,
+        title,
+        ...(detail ? { detail } : {}),
+        ...(state ? { state } : {}),
+        sequence,
+      },
+    ],
+  });
+};
+
+const interruptStep = (
+  record: RunRecord,
+  stepId: string,
+  reason: string,
+  title: "recovery-unavailable" | "execution-interrupted",
+): RunRecord => {
+  const step = record.steps.find((item) => item.stepId === stepId);
+  const attempt = step?.attempts.at(-1);
+  if (!attempt || attempt.status !== "running") return record;
+  const interrupted = runRecordSchema.parse({
+    ...record,
+    revision: record.revision + 1,
+    status: "unavailable",
+    steps: record.steps.map((item) =>
+      item.stepId === stepId
+        ? {
+            ...item,
+            status: "waiting",
+            attempts: item.attempts.map((entry) =>
+              entry.id === attempt.id
+                ? { ...entry, status: "interrupted", endedAt: new Date().toISOString() }
+                : entry,
+            ),
+          }
+        : item,
+    ),
+  });
+  const sequence =
+    Math.max(
+      -1,
+      ...interrupted.evidence.filter((item) => item.kind === "event").map((item) => item.sequence),
+    ) + 1;
+  return runRecordSchema.parse({
+    ...interrupted,
+    revision: interrupted.revision,
+    evidence: [
+      ...interrupted.evidence,
+      {
+        id: crypto.randomUUID(),
+        runId: record.snapshot.id,
+        stepId,
+        attemptId: attempt.id,
+        createdAt: new Date().toISOString(),
+        kind: "event",
+        type: "lifecycle",
+        title,
+        detail: reason,
+        state: "unknown",
+        ...(attempt.sessionId ? { sessionId: attempt.sessionId, turnId: attempt.turnId } : {}),
         sequence,
       },
     ],

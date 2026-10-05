@@ -248,6 +248,36 @@ describe("portable adapter conformance", () => {
     expect(rpc.calls.filter((call) => call.method === "turn/start")).toHaveLength(1);
   });
 
+  it("emits public tool output while excluding private reasoning notifications", async () => {
+    class ToolRpc extends FixtureRpc {
+      override emit(method: string, params: Record<string, unknown>) {
+        if (method === "item/agentMessage/delta") {
+          super.emit("item/started", {
+            ...params,
+            item: { type: "commandExecution", command: "pnpm check", status: "inProgress" },
+          });
+          super.emit("item/agentReasoning/delta", { ...params, delta: "private analysis" });
+          super.emit("item/completed", {
+            ...params,
+            item: {
+              type: "commandExecution",
+              command: "pnpm check",
+              status: "completed",
+              aggregatedOutput: "tests passed",
+            },
+          });
+        }
+        super.emit(method, params);
+      }
+    }
+    const events = await collect(new CodexAdapter(new ToolRpc(), "/bin/codex", "0.160.0"), input);
+    expect(events.filter((event) => event.type === "tool")).toMatchObject([
+      { title: "pnpm check", state: "running" },
+      { title: "pnpm check", state: "completed", detail: "tests passed" },
+    ]);
+    expect(JSON.stringify(events)).not.toContain("private analysis");
+  });
+
   it("retries only the selected failed step as a distinct attempt and session", async () => {
     const rpc = new FixtureRpc(true);
     const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
@@ -297,7 +327,7 @@ describe("portable adapter conformance", () => {
     for await (const event of adapter.attach(session, new AbortController().signal))
       events.push(event);
     expect(events.map((event) => event.type)).toEqual(["message", "completed"]);
-    expect(events.at(-1)).toMatchObject({ output: "resumed", ...session });
+    expect(events.at(-1)).toMatchObject({ output: "savedresumed", ...session });
   });
 
   it("keeps the mock on the same event contract and reports unsupported controls", async () => {

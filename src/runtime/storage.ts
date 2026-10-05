@@ -337,7 +337,9 @@ export const updateRun = async (project: string, input: RunRecord): Promise<RunR
               JSON.stringify(oldIdentity) !== JSON.stringify(newIdentity) ||
               (Boolean(attempt.sessionId) && attempt.sessionId !== updated.sessionId) ||
               (Boolean(attempt.turnId) && attempt.turnId !== updated.turnId) ||
-              !["running", "succeeded", "failed", "canceled"].includes(updated.status)
+              !["running", "succeeded", "failed", "canceled", "interrupted"].includes(
+                updated.status,
+              )
             );
           }
           return JSON.stringify(updated) !== JSON.stringify(attempt);

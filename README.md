@@ -32,6 +32,8 @@ Versioned loop drafts and published definitions live under `.code-factory/loops`
 
 Task intake saves pending runs from a published loop and a verified agent binding. It snapshots a description, an optional retrieved Linear ticket, and an isolated Git baseline. Creating a run does not start an agent; the run detail has a separate **Execute run** action. The factory scheduler executes declared dependencies, joins, decisions, and bounded repeat groups, saving claims, attempts, candidate hashes, and evidence as it goes. Parallel reviewers receive separate copies of the same frozen candidate. A writer runs alone inside the run's private clone under `.code-factory/workspaces`. The original working tree is not modified. Concurrent runs use separate clones.
 
+Run activity is persisted with contiguous event sequence numbers and exposed at `/api/runs/:id/events` as cursor replay or a server sent event stream. The browser can reconnect without restarting execution. On service restart, completed persisted work is reconciled; active attempts resume only through an adapter that explicitly supports recovery. Otherwise the attempt is marked interrupted and the run remains unavailable for inspection, with no automatic retry.
+
 Optional Linear retrieval is configured by supplying `CODE_FACTORY_LINEAR_API_KEY` in the runtime process environment. The key is never written to the project or returned by the API. Without it, description-only intake remains available.
 
 ## Packaging
