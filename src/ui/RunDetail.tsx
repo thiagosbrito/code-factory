@@ -222,6 +222,7 @@ export const RunDetail = ({
       {scope && (
         <RunInspector
           run={run}
+          summary={summary}
           scope={scope}
           onScopeChange={setScope}
           onClose={close}

@@ -1,5 +1,6 @@
 import type { RunRecord } from "../domain/run.js";
 import type { Evidence } from "../domain/evidence.js";
+import type { EvidenceSummary } from "../domain/acceptance.js";
 
 export type RunStep = RunRecord["steps"][number];
 export type StepDefinition = RunRecord["snapshot"]["loop"]["steps"][number];
@@ -36,6 +37,16 @@ export const evidenceFreshness = (run: RunRecord, receipt: Evidence): string => 
         item.stepId === receipt.stepId,
     );
   return invalidated ? "superseded · needs revalidation" : receipt.freshness.state;
+};
+
+export const acceptanceFreshness = (
+  receipt: Extract<Evidence, { kind: "acceptance" }>,
+  summary: EvidenceSummary | null,
+): string => {
+  if (!summary) return "unverified · current validation unavailable";
+  return summary.acceptance === "accepted" && summary.signature === receipt.validationSignature
+    ? "current"
+    : "invalidated · current validation inputs changed";
 };
 
 export const stepForScope = (run: RunRecord, scope: RunScope): RunStep | undefined =>

@@ -12,6 +12,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
+import { claimStep, completeStep } from "../src/domain/scheduler.js";
 import {
   createRunRecord,
   createRunSnapshot,
@@ -31,6 +32,7 @@ import type { RunScope } from "../src/ui/run-view-model.js";
 import { useFactoryRuns } from "../src/ui/useFactoryRuns.js";
 import { RunsList } from "../src/ui/RunsList.js";
 import type { EvidenceSummary } from "../src/domain/acceptance.js";
+import { acceptEvidence, summarizeEvidence } from "../src/domain/acceptance.js";
 
 it("preserves a scoped guidance draft through disconnect and gates it on verified steering", async () => {
   const run = makeRun();
@@ -233,6 +235,94 @@ it("shows validation separately from human acceptance and records an explicit cl
   );
   expect(screen.queryByRole("button", { name: "Accept evidence" })).toBeNull();
   expect(screen.getByText(/Earlier acceptance remains/)).toBeTruthy();
+});
+
+it("keeps a prior acceptance receipt visible but marks it invalidated after source changes", async () => {
+  const oldCandidate = "candidate-before-source-change";
+  const loop = parseLoop({
+    schemaVersion: 2,
+    id: "validation",
+    name: "Validation",
+    version: 1,
+    status: "published",
+    steps: [
+      {
+        id: "check",
+        name: "Build check",
+        kind: "check",
+        stage: "review",
+        role: "reviewer",
+        instruction: "Run check",
+      },
+    ],
+    dependencies: [],
+    groups: [],
+    joins: [],
+    decisions: [],
+    policy: {},
+  });
+  let run = claimStep(
+    createRunRecord(
+      createRunSnapshot(loop, { description: "Current task" }, { provider: "mock", model: "m" }),
+    ),
+    "check",
+    oldCandidate,
+    "task-input",
+  );
+  run = completeStep(run, "check", { status: "succeeded", outcome: "passed" });
+  const attempt = run.steps[0]?.attempts[0];
+  if (!attempt) throw new Error("Missing check attempt");
+  run = runRecordSchema.parse({
+    ...run,
+    status: "succeeded",
+    evidence: [
+      {
+        id: crypto.randomUUID(),
+        runId: run.snapshot.id,
+        stepId: "check",
+        attemptId: attempt.id,
+        createdAt: new Date().toISOString(),
+        kind: "check",
+        command: "pnpm check",
+        outcome: "passed",
+        exitCode: 0,
+        summary: "Passed",
+        inputHash: "task-input",
+        provenance: {
+          source: "check",
+          baselineId: run.snapshot.baseline.id,
+          candidateId: oldCandidate,
+          inputReceiptIds: [],
+        },
+        freshness: { state: "current", checkedAgainstCandidateId: oldCandidate },
+      },
+    ],
+  });
+  run = acceptEvidence(run, oldCandidate);
+  expect(summarizeEvidence(run, oldCandidate).acceptance).toBe("accepted");
+  const summary = summarizeEvidence(run, "candidate-after-source-change");
+  expect(summary.acceptance).toBe("invalidated");
+  render(
+    <RunDetail
+      run={run}
+      summary={summary}
+      accepting={false}
+      onAccept={vi.fn<() => void>()}
+      connected
+      executing={false}
+      onExecute={vi.fn<() => void>()}
+      onCancel={vi.fn<() => void>()}
+      onBack={vi.fn<() => void>()}
+    />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Inspect run evidence" }));
+  await userEvent.click(screen.getByRole("tab", { name: "Details" }));
+  const provenanceSection = screen.getByText("Evidence provenance").parentElement;
+  expect(provenanceSection?.textContent).toContain(
+    "acceptance · human · invalidated · current validation inputs changed",
+  );
+  expect(provenanceSection?.textContent).toContain(oldCandidate);
+  expect(provenanceSection?.textContent).not.toContain("acceptance · human · current");
 });
 
 it("renders dependency connectors with the graph arrow marker", () => {
