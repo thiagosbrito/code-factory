@@ -344,7 +344,7 @@ export async function reconcileReview(
     writeRecord(identity, "review-ready", result);
     return result;
   }
-  if (receipt.state === "review-ready" && issue.state.name === "In Progress") {
+  if (receipt.state === "review-ready" && ["In Progress", "Backlog"].includes(issue.state.name)) {
     if (!allowTransition) return null;
     await moveIssue(linear, issue, "In Review");
     const confirmed = await retryIssue(linear, identity);
@@ -360,15 +360,21 @@ export async function reconcileReview(
     !["Todo", "In Progress"].includes(issue.state.name)
   )
     return null;
-  const attachment = await linear(
-    `mutation($issueId: String!, $url: String!, $title: String!) {
-      attachmentLinkGitHubPR(issueId: $issueId, url: $url, title: $title) { success }
-    }`,
-    { issueId: issue.id, url: pr.url, title: receipt.title },
-  );
-  if (!attachment.attachmentLinkGitHubPR?.success)
-    throw new LinearRequestError("Linear did not confirm the PR link.");
-  await moveIssue(linear, issue, "In Review");
+  if (receipt.stage !== "state-transitioned") {
+    if (receipt.stage !== "pr-linked") {
+      const attachment = await linear(
+        `mutation($issueId: String!, $url: String!, $title: String!) {
+          attachmentLinkGitHubPR(issueId: $issueId, url: $url, title: $title) { success }
+        }`,
+        { issueId: issue.id, url: pr.url, title: receipt.title },
+      );
+      if (!attachment.attachmentLinkGitHubPR?.success)
+        throw new LinearRequestError("Linear did not confirm the PR link.");
+      writeRecord(identity, "review-pending", { ...receipt, stage: "pr-linked" });
+    }
+    await moveIssue(linear, issue, "In Review");
+    writeRecord(identity, "review-pending", { ...receipt, stage: "state-transitioned" });
+  }
   const confirmed = await retryIssue(linear, identity);
   if (confirmed.state.name !== "In Review")
     throw new LinearRequestError("Linear did not retain In Review after publication.");
@@ -436,11 +442,11 @@ export async function publishReview(
     let pauseError;
     if (pr || ["review-ready", "review-pending"].includes(readRecord(identity).state)) {
       const receipt = readRecord(identity);
-      writeRecord(identity, "review-pending", {
+      writeRecord(identity, receipt.state === "review-ready" ? "review-ready" : "review-pending", {
         url: receipt.url ?? pr?.url,
         commit: receipt.commit ?? pr?.commit,
         title: receipt.title ?? request?.title,
-        stage: "reconciliation-failed",
+        stage: receipt.stage ?? "reconciliation-failed",
         error: error.message,
       });
       return {

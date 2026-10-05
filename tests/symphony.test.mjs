@@ -260,6 +260,8 @@ function reviewHarness(f, workspace, mode = "success") {
     import { readFileSync } from "node:fs";
     import { run } from ${JSON.stringify(join(project, "scripts/symphony/common.mjs"))};
     import { directStateTransitionBlocked, publishReview } from ${JSON.stringify(join(project, "scripts/symphony/review.mjs"))};
+    import { beforeRun, afterRun } from ${JSON.stringify(join(project, "scripts/symphony/workspace.mjs"))};
+    import { workspaceIdentity, readRecord } from ${JSON.stringify(join(project, "scripts/symphony/workspace-identity.mjs"))};
     const workspace = ${JSON.stringify(workspace)};
     const mode = ${JSON.stringify(mode)};
     const events = [];
@@ -290,7 +292,7 @@ function reviewHarness(f, workspace, mode = "success") {
     let attachmentCalls = 0;
     const linear = async (query, variables) => {
       if (query.includes("issue(id:")) {
-        const observed = mode === "stale" && state === "In Review" && staleReads++ === 0 ? "In Progress" : state;
+        const observed = mode === "stale" && state === "In Review" && staleReads++ < 2 ? "In Progress" : state;
         return {issue: {id: "ticket-id",identifier:"THI-REVIEW",project:{id:"bd22686b-05ec-4184-9bea-4dc9a8ef23af"},state:{name:observed},labels:{nodes:[{name:"symphony-ready"}]},team:{states:{nodes:[{id:"review",name:"In Review"},{id:"backlog",name:"Backlog"}]}}}};
       }
       if (query.includes("attachmentLinkGitHubPR")) { events.push("linear:link"); if (mode === "graphql" && attachmentCalls++ === 0) throw new Error("Linear GraphQL unavailable"); return {attachmentLinkGitHubPR:{success:mode !== "link"}}; }
@@ -300,16 +302,32 @@ function reviewHarness(f, workspace, mode = "success") {
     const request = {ready:true,blockers:[],files:["README.md"],commitMessage:"Ticket implementation",title:"THI-REVIEW: implement ticket",body:"Reviewed evidence\nValidation passed\n"};
     if (mode === "path") request.files = ["../outside"];
     const result = await publishReview(workspace, request, {command,linear});
+    if (mode === "stale") {
+      const identity = workspaceIdentity(workspace);
+      await beforeRun(identity, {reconcile: async () => { throw new Error("Linear GraphQL unavailable"); }, prepare: () => events.push("prepare")});
+      afterRun(identity);
+      events.push("pending-record:" + readRecord(identity).state);
+    }
     if (mode === "reset") state = "In Progress";
-    const pendingBlocked = ["stale", "graphql", "reset"].includes(mode) ? await directStateTransitionBlocked(workspace, {command,linear}) : null;
-    const second = ["success", "stale", "graphql", "reset"].includes(mode) ? await publishReview(workspace, request, {command,linear}) : null;
+    if (mode === "reset-backlog") state = "Backlog";
+    const pendingBlocked = ["stale", "graphql", "reset", "reset-backlog"].includes(mode) ? await directStateTransitionBlocked(workspace, {command,linear}) : null;
+    const second = ["success", "stale", "graphql", "reset", "reset-backlog"].includes(mode) ? await publishReview(workspace, request, {command,linear}) : null;
+    if (second?.success) {
+      const identity = workspaceIdentity(workspace);
+      await beforeRun(identity, {reconcile: (path) => import(${JSON.stringify(join(project, "scripts/symphony/review.mjs"))}).then(({reconcileReview}) => reconcileReview(path, {command,linear})),prepare: () => events.push("prepare")});
+      afterRun(identity);
+      events.push("record:" + readRecord(identity).state);
+    }
     console.log(JSON.stringify({result,second,pendingBlocked,events,state}));
   `,
   );
   return JSON.parse(
     command(process.execPath, [harness], {
       env: { ...process.env, SYMPHONY_ROOT: f.automation },
-    }),
+    })
+      .trim()
+      .split("\n")
+      .at(-1),
   );
 }
 
@@ -324,6 +342,10 @@ test("host publication commits/pushes the owned branch and confirms a PR before 
   assert.equal(outcome.events.filter((event) => event === "gh:create").length, 1);
   assert.equal(outcome.events.filter((event) => event === "gh:edit").length, 0);
   assert.equal(outcome.events.filter((event) => event === "check").length, 1);
+  assert.equal(outcome.events.filter((event) => event === "linear:link").length, 1);
+  assert.equal(outcome.events.filter((event) => event === "linear:In Review").length, 1);
+  assert.ok(!outcome.events.includes("prepare"));
+  assert.ok(outcome.events.includes("record:review-ready"));
   assert.ok(outcome.events.indexOf("gh:view") < outcome.events.indexOf("linear:link"));
   assert.ok(outcome.events.indexOf("linear:link") < outcome.events.indexOf("linear:In Review"));
   assert.equal(command("git", ["-C", workspace, "status", "--porcelain"]), "");
@@ -372,6 +394,14 @@ for (const mode of ["stale", "graphql"]) {
     assert.equal(outcome.state, "In Review");
     assert.equal(outcome.events.filter((event) => event === "check").length, 1);
     assert.equal(outcome.events.filter((event) => event === "gh:create").length, 1);
+    assert.equal(
+      outcome.events.filter((event) => event === "linear:link").length,
+      mode === "graphql" ? 2 : 1,
+    );
+    assert.equal(outcome.events.filter((event) => event === "linear:In Review").length, 1);
+    assert.ok(!outcome.events.includes("prepare"));
+    assert.ok(outcome.events.includes("record:review-ready"));
+    if (mode === "stale") assert.ok(outcome.events.includes("pending-record:review-pending"));
     assert.equal(outcome.events.filter((event) => event === "linear:Backlog").length, 0);
     const record = JSON.parse(readFileSync(join(f.automation, "records/THI-REVIEW.json"), "utf8"));
     assert.equal(record.state, "review-ready");
@@ -379,20 +409,23 @@ for (const mode of ["stale", "graphql"]) {
   });
 }
 
-test("a stale worker cannot reset a confirmed review and the next invocation restores it", (t) => {
-  const f = fixture(t);
-  const workspace = f.create("THI-REVIEW");
-  writeFileSync(join(workspace, "README.md"), "reviewed ticket work\n");
-  const outcome = reviewHarness(f, workspace, "reset");
-  assert.equal(outcome.result.success, true);
-  assert.equal(outcome.pendingBlocked, true);
-  assert.equal(outcome.second.success, true);
-  assert.equal(outcome.state, "In Review");
-  assert.equal(outcome.events.filter((event) => event === "check").length, 1);
-  assert.equal(outcome.events.filter((event) => event === "gh:create").length, 1);
-  assert.equal(outcome.events.filter((event) => event === "linear:In Review").length, 2);
-  assert.equal(outcome.events.filter((event) => event === "linear:Backlog").length, 0);
-});
+for (const mode of ["reset", "reset-backlog"])
+  test(`a stale worker cannot reset a confirmed review (${mode})`, (t) => {
+    const f = fixture(t);
+    const workspace = f.create("THI-REVIEW");
+    writeFileSync(join(workspace, "README.md"), "reviewed ticket work\n");
+    const outcome = reviewHarness(f, workspace, mode);
+    assert.equal(outcome.result.success, true);
+    assert.equal(outcome.pendingBlocked, true);
+    assert.equal(outcome.second.success, true);
+    assert.equal(outcome.state, "In Review");
+    assert.equal(outcome.events.filter((event) => event === "check").length, 1);
+    assert.equal(outcome.events.filter((event) => event === "gh:create").length, 1);
+    assert.equal(outcome.events.filter((event) => event === "linear:In Review").length, 2);
+    assert.equal(outcome.events.filter((event) => event === "linear:Backlog").length, 0);
+    assert.ok(!outcome.events.includes("prepare"));
+    assert.ok(outcome.events.includes("record:review-ready"));
+  });
 
 test("publishing tool calls are handled by the host and their replies return to Codex", async (t) => {
   const f = fixture(t);
