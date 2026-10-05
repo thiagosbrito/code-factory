@@ -1,8 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
 import type { Evidence } from "../domain/evidence.js";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   definitionForScope,
   scopeEvidence,
@@ -10,250 +9,11 @@ import {
   validScope,
   type RunScope,
 } from "./run-view-model";
+import { RunInspectorActivity } from "./RunInspectorActivity";
+import { RunInspectorDetails } from "./RunInspectorDetails";
 
 type Tab = "Activity" | "Files" | "Artifacts" | "Details";
 const tabs: Tab[] = ["Activity", "Files", "Artifacts", "Details"];
-type Filter = "All" | "Messages" | "Tools" | "Checks" | "Errors";
-const filters: Filter[] = ["All", "Messages", "Tools", "Checks", "Errors"];
-const matchesFilter = (item: Extract<Evidence, { kind: "event" }>, filter: Filter): boolean =>
-  filter === "All" ||
-  (filter === "Messages" && ["message", "lifecycle", "guidance"].includes(item.type)) ||
-  (filter === "Tools" && item.type === "tool") ||
-  (filter === "Checks" && item.type === "check") ||
-  (filter === "Errors" && item.type === "error");
-
-const Details = ({ run, scope }: { run: RunRecord; scope: RunScope }) => {
-  const definition = definitionForScope(run, scope);
-  const step = stepForScope(run, scope);
-  const attempt = step?.attempts.find(
-    (item) => item.id === (scope.kind === "step" ? scope.attemptId : ""),
-  );
-  const receipts = scopeEvidence(run, scope).filter((item) => "provenance" in item);
-  return (
-    <div className="space-y-4 p-4 text-sm">
-      {definition ? (
-        <>
-          <section className="rounded-lg border bg-muted/30 p-3">
-            <h4 className="font-semibold">Instructions · {definition.name}</h4>
-            <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
-              {definition.instruction}
-            </p>
-          </section>
-          <dl className="run-details-grid">
-            <dt>Role</dt>
-            <dd>{definition.role}</dd>
-            <dt>Kind</dt>
-            <dd>{definition.kind}</dd>
-            <dt>Agent / model</dt>
-            <dd>
-              {run.snapshot.bindings[definition.id]?.provider ?? "Unassigned"} ·{" "}
-              {run.snapshot.bindings[definition.id]?.model ?? "Unassigned"}
-              {run.snapshot.bindings[definition.id]?.effort
-                ? ` · ${run.snapshot.bindings[definition.id]?.effort}`
-                : ""}
-            </dd>
-            <dt>Attempt</dt>
-            <dd>{attempt ? `${attempt.number} · ${attempt.status}` : "No attempt selected"}</dd>
-            <dt>Step status</dt>
-            <dd>{step?.status ?? "Unknown"}</dd>
-            <dt>Dependencies</dt>
-            <dd>
-              {run.snapshot.loop.dependencies
-                .filter((edge) => edge.to === definition.id)
-                .map((edge) => edge.from)
-                .join(", ") || "None"}
-            </dd>
-            <dt>Expected outputs</dt>
-            <dd>{definition.expectedOutputs.join(", ") || "None declared"}</dd>
-            <dt>Candidate</dt>
-            <dd className="break-all">{step?.candidateId ?? "None yet"}</dd>
-            <dt>Input hash</dt>
-            <dd className="break-all">{step?.inputHash ?? "None yet"}</dd>
-          </dl>
-        </>
-      ) : (
-        <section className="rounded-lg border bg-muted/30 p-3">
-          <h4 className="font-semibold">Run snapshot</h4>
-          <p className="mt-2 whitespace-pre-wrap">{run.snapshot.task.description}</p>
-        </section>
-      )}
-      <dl className="run-details-grid">
-        <dt>Loop snapshot</dt>
-        <dd>
-          {run.snapshot.loop.name} v{run.snapshot.loop.version}
-        </dd>
-        <dt>Baseline</dt>
-        <dd className="break-all">{run.snapshot.baseline.revision ?? run.snapshot.baseline.id}</dd>
-        <dt>Source revision</dt>
-        <dd className="break-all">{run.snapshot.baseline.sourceRevision ?? "Not recorded"}</dd>
-        <dt>Workspace</dt>
-        <dd className="break-all">{run.snapshot.baseline.workspace ?? "Not recorded"}</dd>
-        <dt>Task source</dt>
-        <dd>
-          {run.snapshot.task.ticket
-            ? `${run.snapshot.task.ticket.id} · ${run.snapshot.task.ticket.title}`
-            : "Description only"}
-        </dd>
-        <dt>Captured</dt>
-        <dd>{new Date(run.snapshot.baseline.capturedAt).toLocaleString()}</dd>
-        <dt>Implementation round</dt>
-        <dd>{run.implementationRound}</dd>
-      </dl>
-      {receipts.length > 0 && (
-        <section>
-          <h4 className="font-semibold">Evidence provenance</h4>
-          <ul className="mt-2 space-y-2">
-            {receipts.map((item) => (
-              <li key={item.id} className="rounded-md border p-2 text-xs">
-                <strong>{item.kind}</strong> · {item.provenance.source} · {item.freshness.state}
-                <div className="mt-1 break-all text-muted-foreground">
-                  Candidate {item.provenance.candidateId} · inputs{" "}
-                  {item.provenance.inputReceiptIds.join(", ") || "none"}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
-  );
-};
-
-const Activity = ({
-  run,
-  scope,
-  connected,
-}: {
-  run: RunRecord;
-  scope: RunScope;
-  connected: boolean;
-}) => {
-  const [filter, setFilter] = useState<Filter>("All");
-  const [search, setSearch] = useState("");
-  const [followLive, setFollowLive] = useState(false);
-  const [newCount, setNewCount] = useState(0);
-  const scrollPositions = useRef(new Map<string, number>());
-  const scroller = useRef<HTMLOListElement>(null);
-  const key =
-    scope.kind === "run" ? `run:${run.snapshot.id}` : `${scope.stepId}:${scope.attemptId ?? "all"}`;
-  const events = scopeEvidence(run, scope)
-    .filter((item): item is Extract<Evidence, { kind: "event" }> => item.kind === "event")
-    .filter(
-      (item) =>
-        matchesFilter(item, filter) &&
-        `${item.title} ${item.detail ?? ""}`.toLowerCase().includes(search.toLowerCase()),
-    )
-    .sort((left, right) => left.sequence - right.sequence);
-  const lastSequence = events.at(-1)?.sequence ?? -1;
-  const previous = useRef({ key, lastSequence });
-  useLayoutEffect(() => {
-    const element = scroller.current;
-    if (!element) return;
-    element.scrollTop = scrollPositions.current.get(key) ?? 0;
-    setNewCount(0);
-  }, [key]);
-  useEffect(() => {
-    const prior = previous.current;
-    previous.current = { key, lastSequence };
-    if (prior.key !== key || lastSequence <= prior.lastSequence) return;
-    if (followLive) {
-      const element = scroller.current;
-      if (element) element.scrollTop = element.scrollHeight;
-    } else
-      setNewCount(
-        (value) => value + events.filter((event) => event.sequence > prior.lastSequence).length,
-      );
-  }, [key, lastSequence, followLive, events]);
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="space-y-2 border-b p-3">
-        <Input
-          aria-label="Search activity"
-          placeholder="Search activity"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <fieldset className="flex flex-wrap gap-1">
-          <legend className="sr-only">Activity filters</legend>
-          {filters.map((item) => (
-            <Button
-              key={item}
-              size="sm"
-              variant={filter === item ? "secondary" : "ghost"}
-              aria-pressed={filter === item}
-              onClick={() => setFilter(item)}
-            >
-              {item}
-            </Button>
-          ))}
-        </fieldset>
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={followLive}
-            onChange={(event) => {
-              setFollowLive(event.target.checked);
-              if (event.target.checked) {
-                setNewCount(0);
-                const element = scroller.current;
-                if (element) element.scrollTop = element.scrollHeight;
-              }
-            }}
-          />
-          Follow live
-        </label>
-        <p className="text-xs text-muted-foreground">
-          {connected ? "Runtime reachable" : "Disconnected · execution state unknown"}
-        </p>
-      </div>
-      <ol
-        ref={scroller}
-        className="min-h-0 flex-1 overflow-y-auto p-4"
-        aria-label="Activity events"
-        onScroll={(event) => scrollPositions.current.set(key, event.currentTarget.scrollTop)}
-      >
-        {events.map((item) => (
-          <li key={item.id} className="border-b py-3 text-sm last:border-b-0">
-            <div className="flex items-center justify-between gap-2">
-              <span className={`run-status run-status-${item.type}`}>{item.type}</span>
-              <time className="text-xs text-muted-foreground" dateTime={item.createdAt}>
-                {new Date(item.createdAt).toLocaleString()}
-              </time>
-            </div>
-            <strong className="mt-1 block">{item.title}</strong>
-            {item.detail && (
-              <p className="mt-1 whitespace-pre-wrap break-words text-xs text-muted-foreground">
-                {item.detail}
-              </p>
-            )}
-          </li>
-        ))}
-        {!events.length && (
-          <li className="p-6 text-center text-sm text-muted-foreground">
-            No matching activity. A quiet stream does not mean the step failed.
-          </li>
-        )}
-      </ol>
-      {newCount > 0 && !followLive && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="m-3"
-          onClick={() => {
-            const element = scroller.current;
-            if (element) {
-              element.scrollTop = element.scrollHeight;
-              scrollPositions.current.set(key, element.scrollTop);
-            }
-            setNewCount(0);
-          }}
-        >
-          {newCount} new events · Jump to latest
-        </Button>
-      )}
-    </div>
-  );
-};
 
 export const RunInspector = ({
   run,
@@ -441,9 +201,9 @@ export const RunInspector = ({
         className="flex min-h-0 flex-1 flex-col overflow-auto"
       >
         {tab === "Activity" ? (
-          <Activity run={run} scope={scope} connected={connected} />
+          <RunInspectorActivity run={run} scope={scope} connected={connected} />
         ) : tab === "Details" ? (
-          <Details run={run} scope={scope} />
+          <RunInspectorDetails run={run} scope={scope} />
         ) : (
           <ul className="space-y-2 p-4">
             {evidence

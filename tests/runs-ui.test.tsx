@@ -14,6 +14,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
 import { createRunRecord, createRunSnapshot, startAttempt } from "../src/domain/run.js";
 import { RunDetail } from "../src/ui/RunDetail.js";
+import { RunGraph } from "../src/ui/RunGraph.js";
 import { RunInspector } from "../src/ui/RunInspector.js";
 import type { RunScope } from "../src/ui/run-view-model.js";
 import { useFactoryRuns } from "../src/ui/useFactoryRuns.js";
@@ -114,6 +115,19 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   window.history.replaceState(null, "", "#");
+});
+
+it("renders dependency connectors with the graph arrow marker", () => {
+  const { container } = render(
+    <RunGraph run={makeRun()} selectedStepId={null} onSelect={vi.fn<(id: string) => void>()} />,
+  );
+  const marker = container.querySelector("marker#run-graph-arrow");
+  const connectors = container.querySelectorAll("path[marker-end]");
+  expect(marker).toBeTruthy();
+  expect(connectors).toHaveLength(2);
+  for (const connector of connectors) {
+    expect(connector.getAttribute("marker-end")).toBe("url(#run-graph-arrow)");
+  }
 });
 
 it("filters runtime history and opens the exact run", async () => {

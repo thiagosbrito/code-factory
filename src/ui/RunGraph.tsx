@@ -163,7 +163,7 @@ export const RunGraph = ({
                     fill="none"
                     stroke="#8b9690"
                     strokeWidth="1.5"
-                    markerEnd="url(#run-graph-arrow"
+                    markerEnd="url(#run-graph-arrow)"
                   />
                 );
               })}
