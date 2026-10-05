@@ -73,9 +73,7 @@ export const Factory = ({
   };
   const showTemplate = () => {
     setScreen("loops");
-    setNotice(
-      "Starter templates become available when the optional template library is installed.",
-    );
+    setNotice("Choose a starter in the loops library to create a draft.");
   };
   return (
     <div className="min-h-screen bg-canvas md:flex">
@@ -125,7 +123,6 @@ export const Factory = ({
           <Loops
             project={project}
             agents={agents}
-            onTemplate={showTemplate}
             onPublished={(loop) =>
               setPublishedLoops((previous) => [
                 loop,
