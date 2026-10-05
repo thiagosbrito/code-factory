@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { workspaces } from "./common.mjs";
+import { records, workspaces } from "./common.mjs";
 import { checkpointTool, checkpointContext, saveCheckpoint } from "./context.mjs";
 import { budgetArguments } from "./budgets.mjs";
+import { readRecord, workspaceIdentity } from "./workspace-identity.mjs";
 
 import {
   directStateTransitionBlocked,
@@ -16,6 +18,16 @@ import {
 const workspace = realpathSync(process.cwd());
 if (!workspace.startsWith(`${realpathSync(workspaces)}/`))
   throw new Error("Codex must run inside a ticket worktree.");
+const identity = workspaceIdentity(workspace);
+if (existsSync(join(records, `${identity.identifier}.json`))) {
+  const receipt = readRecord(identity);
+  if (["review-ready", "review-pending"].includes(receipt.state)) {
+    console.error(
+      `Skipping Codex pickup: ${identity.identifier} has a ${receipt.state} review receipt.`,
+    );
+    process.exit(0);
+  }
+}
 const environment = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => !/^(LINEAR_|GITHUB_TOKEN$|GH_TOKEN$)/.test(key)),
 );

@@ -357,7 +357,8 @@ export async function reconcileReview(
   if (
     receipt.state === "review-ready" ||
     !allowTransition ||
-    !["Todo", "In Progress"].includes(issue.state.name)
+    (!["Todo", "In Progress"].includes(issue.state.name) &&
+      !(receipt.stage === "state-transitioned" && issue.state.name === "Backlog"))
   )
     return null;
   if (receipt.stage !== "state-transitioned") {
@@ -375,7 +376,15 @@ export async function reconcileReview(
     await moveIssue(linear, issue, "In Review");
     writeRecord(identity, "review-pending", { ...receipt, stage: "state-transitioned" });
   }
-  const confirmed = await retryIssue(linear, identity);
+  let confirmed = await retryIssue(linear, identity);
+  if (
+    confirmed.state.name !== "In Review" &&
+    receipt.stage === "state-transitioned" &&
+    ["In Progress", "Backlog"].includes(confirmed.state.name)
+  ) {
+    await moveIssue(linear, confirmed, "In Review");
+    confirmed = await retryIssue(linear, identity);
+  }
   if (confirmed.state.name !== "In Review")
     throw new LinearRequestError("Linear did not retain In Review after publication.");
   const result = reviewResult(pr);
