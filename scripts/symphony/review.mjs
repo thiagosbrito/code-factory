@@ -107,7 +107,7 @@ function validateRequest(request) {
 async function fetchIssue(linear, identity) {
   const { issue } = await linear(
     `query($id: String!) {
-    issue(id: $id) { id identifier url project { id } state { name }
+    issue(id: $id) { id identifier url updatedAt project { id } state { name }
       labels { nodes { name } } team { states { nodes { id name } } } }
   }`,
     { id: identity.identifier },
@@ -343,6 +343,20 @@ export async function reconcileReview(
     const result = reviewResult(pr);
     writeRecord(identity, "review-ready", result);
     return result;
+  }
+  if (receipt.state === "review-ready" && issue.state.name === "Todo") {
+    // A fresh Todo transition after publication is the reviewer's request for fixes.
+    // A stale pre-publication Todo snapshot must keep the published receipt intact.
+    if (
+      Number.isFinite(Date.parse(issue.updatedAt)) &&
+      Date.parse(issue.updatedAt) > Date.parse(receipt.updatedAt)
+    )
+      writeRecord(identity, "review-returned", {
+        url: receipt.url,
+        commit: receipt.commit,
+        returnedAt: issue.updatedAt,
+      });
+    return null;
   }
   if (receipt.state === "review-ready" && ["In Progress", "Backlog"].includes(issue.state.name)) {
     if (!allowTransition) return null;
