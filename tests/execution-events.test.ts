@@ -26,7 +26,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-const fixture = async (): Promise<{ root: string; record: RunRecord }> => {
+const fixture = async (checkCommand?: string): Promise<{ root: string; record: RunRecord }> => {
   const root = await mkdtemp(join(tmpdir(), "factory-events-"));
   roots.push(root);
   const workspace = join(root, ".code-factory", "workspaces", "candidate");
@@ -42,10 +42,10 @@ const fixture = async (): Promise<{ root: string; record: RunRecord }> => {
       {
         id: "build",
         name: "Build",
-        kind: "agent",
-        stage: "implementation",
+        kind: checkCommand ? "check" : "agent",
+        stage: checkCommand ? "validation" : "implementation",
         role: "builder",
-        instruction: "Build",
+        instruction: checkCommand ?? "Build",
       },
     ],
     dependencies: [],
@@ -99,6 +99,24 @@ it("replays committed events after a cursor and deduplicates out-of-order delive
   expect(
     mergeRunSnapshot(client, finished).evidence.filter((item) => item.kind === "event"),
   ).toHaveLength(3);
+});
+
+it("bounds persisted output from a noisy check and records truncation", async () => {
+  const { root, record } = await fixture("node -e 'process.stdout.write(\"x\".repeat(100000))'");
+  const finished = await executeRun(root, record.snapshot.id, () => mockAdapter);
+  const output = eventsAfter(finished, -1).filter((event) => event.title === "Check output");
+  expect(finished.status).toBe("succeeded");
+  expect(output.length).toBeLessThanOrEqual(10);
+  expect(output.filter((event) => event.detail?.includes("truncated"))).toHaveLength(1);
+  expect(
+    output
+      .filter((event) => !event.detail?.includes("truncated"))
+      .map((event) => event.detail)
+      .join(""),
+  ).toHaveLength(8192);
+  expect(finished.evidence.find((item) => item.kind === "check")).toMatchObject({
+    summary: "x".repeat(8192),
+  });
 });
 
 it("reconnects to active work after a closed browser stream without canceling the attempt", async () => {
@@ -174,6 +192,64 @@ it("reconnects to active work after a closed browser stream without canceling th
     await resumedReader.cancel();
   } finally {
     release?.();
+    server.close();
+  }
+});
+
+it("streams a long active event feed without repeating the full run on each message", async () => {
+  const { root, record } = await fixture();
+  const adapter = {
+    ...mockAdapter,
+    async *execute(input: Parameters<typeof mockAdapter.execute>[0]) {
+      const identity = {
+        runId: input.runId,
+        stepId: input.stepId,
+        attempt: input.attempt,
+        sessionId: "session",
+        turnId: "turn",
+      };
+      yield { type: "started" as const, ...identity };
+      for (let index = 0; index < 8; index++) {
+        await new Promise((resolve) => setTimeout(resolve, 270));
+        yield { type: "message" as const, text: `message ${index}`, ...identity };
+      }
+      yield {
+        type: "completed" as const,
+        outcome: "succeeded" as const,
+        output: "done",
+        ...identity,
+      };
+    },
+  };
+  class TestConnections extends ConnectionRegistry {
+    override adapter(provider: string) {
+      return provider === "mock" ? adapter : null;
+    }
+  }
+  const { server, url } = await startLocalServer({
+    projectDirectory: root,
+    port: 0,
+    connections: new TestConnections(root),
+  });
+  const controller = new AbortController();
+  try {
+    const stream = await fetch(`${url}/api/runs/${record.snapshot.id}/events`, {
+      headers: { Accept: "text/event-stream" },
+      signal: controller.signal,
+    });
+    const reader = stream.body!.getReader();
+    const launch = await fetch(`${url}/api/runs/${record.snapshot.id}/execute`, { method: "POST" });
+    expect(launch.status).toBe(202);
+    let frames = "";
+    while (!frames.includes('"status":"succeeded"')) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error("Event stream closed before completion.");
+      frames += new TextDecoder().decode(chunk.value);
+    }
+    expect(frames.match(/event: execution-event/g)).toHaveLength(10);
+    expect(frames.match(/event: run-state/g)?.length).toBeLessThanOrEqual(3);
+  } finally {
+    controller.abort();
     server.close();
   }
 });

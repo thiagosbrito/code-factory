@@ -18,6 +18,19 @@ export const parseEventCursor = (value: string | undefined): number => {
   return cursor;
 };
 
+/** Event-only revisions do not change the execution state shown beside the feed. */
+const executionStateKey = (record: RunRecord): string =>
+  JSON.stringify({
+    status: record.status,
+    round: record.implementationRound,
+    steps: record.steps.map((step) => ({
+      status: step.status,
+      outcome: step.outcome,
+      candidateId: step.candidateId,
+      attempts: step.attempts.map((attempt) => attempt.status),
+    })),
+  });
+
 /** Re-read durable state for every batch, so a subscriber never owns execution. */
 export const streamRunEvents = async (
   project: string,
@@ -34,7 +47,7 @@ export const streamRunEvents = async (
     "X-Content-Type-Options": "nosniff",
   });
   let last = cursor;
-  let revision = -1;
+  let stateKey = "";
   let reading = false;
   const send = (name: string, data: unknown, id?: number) => {
     response.write(
@@ -51,9 +64,10 @@ export const streamRunEvents = async (
         send("execution-event", event, event.sequence);
         last = event.sequence;
       }
-      if (record.revision !== revision) {
+      const nextStateKey = executionStateKey(record);
+      if (nextStateKey !== stateKey) {
         send("run-state", record);
-        revision = record.revision;
+        stateKey = nextStateKey;
       }
       response.write(": keepalive\n\n");
     } catch {

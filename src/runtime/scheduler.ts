@@ -128,11 +128,38 @@ const checkCommand = async (
     if (signal.aborted) return resolveCheck({ status: "canceled" });
     const child = spawn(command, { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
+    let buffered = "";
+    let retained = 0;
+    let truncated = false;
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
     let pending = Promise.resolve();
+    const queue = (text: string) => {
+      pending = pending.then(() => onOutput(text));
+    };
+    const flush = () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = undefined;
+      if (buffered) {
+        queue(buffered);
+        buffered = "";
+      }
+    };
     const capture = (chunk: Buffer) => {
       const text = chunk.toString();
       output = (output + text).slice(-8192);
-      pending = pending.then(() => onOutput(text));
+      const remaining = Math.max(0, 8192 - retained);
+      const captured = text.slice(0, remaining);
+      retained += captured.length;
+      buffered += captured;
+      if (buffered.length >= 1024) flush();
+      else if (buffered && !flushTimer) flushTimer = setTimeout(flush, 100);
+      if (text.length > remaining && !truncated) {
+        flush();
+        queue(
+          "[Check output truncated after 8192 characters; final result retains the last 8192 characters.]",
+        );
+        truncated = true;
+      }
     };
     child.stdout.on("data", (chunk: Buffer) => {
       capture(chunk);
@@ -146,6 +173,7 @@ const checkCommand = async (
     child.on("error", (error) => {
       clearTimeout(timeout);
       signal.removeEventListener("abort", abort);
+      flush();
       void pending.then(
         () =>
           resolveCheck({
@@ -166,6 +194,7 @@ const checkCommand = async (
     child.on("close", (code) => {
       clearTimeout(timeout);
       signal.removeEventListener("abort", abort);
+      flush();
       void pending.then(
         () =>
           resolveCheck({
