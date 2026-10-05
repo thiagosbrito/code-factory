@@ -344,7 +344,7 @@ export async function reconcileReview(
     writeRecord(identity, "review-ready", result);
     return result;
   }
-  if (receipt.state === "review-ready" && issue.state.name === "Todo") {
+  if (issue.state.name === "Todo") {
     // A fresh Todo transition after publication is the reviewer's request for fixes.
     // A stale pre-publication Todo snapshot must keep the published receipt intact.
     if (

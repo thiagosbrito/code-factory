@@ -299,7 +299,7 @@ function reviewHarness(f, workspace, mode = "success") {
         const observed = mode === "stale" && state === "In Review" && staleReads++ < 2 ? "In Progress" : state;
         return {issue: {id: "ticket-id",identifier:"THI-REVIEW",updatedAt:trackerUpdatedAt,project:{id:"bd22686b-05ec-4184-9bea-4dc9a8ef23af"},state:{name:observed},labels:{nodes:[{name:"symphony-ready"}]},team:{states:{nodes:[{id:"review",name:"In Review"},{id:"backlog",name:"Backlog"}]}}}};
       }
-      if (query.includes("attachmentLinkGitHubPR")) { events.push("linear:link"); if (mode === "graphql" && attachmentCalls++ === 0) throw new Error("Linear GraphQL unavailable"); return {attachmentLinkGitHubPR:{success:mode !== "link"}}; }
+      if (query.includes("attachmentLinkGitHubPR")) { events.push("linear:link"); if (mode.startsWith("graphql") && attachmentCalls++ === 0) throw new Error("Linear GraphQL unavailable"); return {attachmentLinkGitHubPR:{success:mode !== "link"}}; }
       if (query.includes("issueUpdate")) {
         state = variables.stateId === "review" ? "In Review" : "Backlog";
         events.push("linear:"+state);
@@ -319,9 +319,9 @@ function reviewHarness(f, workspace, mode = "success") {
     }
     if (mode === "reset") state = "In Progress";
     if (mode === "reset-backlog") state = "Backlog";
-    if (mode === "returned-todo" || mode === "stale-todo") {
+    if (mode === "returned-todo" || mode === "stale-todo" || mode === "graphql-returned-todo") {
       state = "Todo";
-      if (mode === "returned-todo") trackerUpdatedAt = new Date(Date.now() + 60_000).toISOString();
+      if (mode !== "stale-todo") trackerUpdatedAt = new Date(Date.now() + 60_000).toISOString();
       const identity = workspaceIdentity(workspace);
       await beforeRun(identity, {reconcile: (path) => import(${JSON.stringify(join(project, "scripts/symphony/review.mjs"))}).then(({reconcileReview}) => reconcileReview(path, {command,linear})),prepare: () => events.push("prepare")});
       events.push("before-record:" + readRecord(identity).state);
@@ -468,6 +468,19 @@ for (const mode of ["returned-todo", "stale-todo"])
     assert.equal(outcome.events.filter((event) => event === "linear:In Review").length, 1);
   });
 
+test("a returned Todo resumes fixes after the initial PR handoff is interrupted", (t) => {
+  const f = fixture(t);
+  const workspace = f.create("THI-REVIEW");
+  writeFileSync(join(workspace, "README.md"), "reviewed ticket work\n");
+  const outcome = reviewHarness(f, workspace, "graphql-returned-todo");
+  assert.equal(outcome.result.success, false);
+  assert.equal(outcome.state, "Todo");
+  assert.ok(outcome.events.includes("before-record:running"));
+  assert.ok(outcome.events.includes("after-record:attempt-ended"));
+  assert.equal(outcome.events.filter((event) => event === "gh:create").length, 1);
+  assert.equal(outcome.events.filter((event) => event === "linear:In Review").length, 0);
+});
+
 for (const mode of ["reset-confirm", "reset-confirm-backlog"])
   test(`a tracker reset before publication confirmation is repaired (${mode})`, (t) => {
     const f = fixture(t);
@@ -506,7 +519,12 @@ test(
     chmodSync(fake, 0o755);
     const second = spawn(process.execPath, [join(project, "scripts/symphony/codex-runner.mjs")], {
       cwd: workspace,
-      env: { ...process.env, SYMPHONY_ROOT: f.automation, SYMPHONY_CODEX_BIN: fake },
+      env: {
+        ...process.env,
+        SYMPHONY_ROOT: f.automation,
+        SYMPHONY_CODEX_BIN: fake,
+        SYMPHONY_REVIEW_WAIT_MS: "50",
+      },
       stdio: "pipe",
     });
     t.after(() => second.kill());
@@ -522,6 +540,7 @@ test(
     second.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
     const thread = await request(2, "thread/start", { cwd: workspace });
     assert.equal(typeof thread.result?.thread?.id, "string");
+    const started = Date.now();
     const turn = await request(3, "turn/start", { threadId: thread.result.thread.id });
     assert.equal(typeof turn.result?.turn?.id, "string");
     const completed = await output.next();
@@ -529,6 +548,7 @@ test(
       method: "turn/completed",
       params: { turn: { id: turn.result.turn.id, status: "completed" } },
     });
+    assert.ok(Date.now() - started >= 30, "review receipt turns must be paced");
     const exited = once(second, "exit");
     second.stdin.end();
     const [status] = await exited;

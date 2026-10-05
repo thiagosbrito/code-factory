@@ -19,6 +19,7 @@ const workspace = realpathSync(process.cwd());
 if (!workspace.startsWith(`${realpathSync(workspaces)}/`))
   throw new Error("Codex must run inside a ticket worktree.");
 const identity = workspaceIdentity(workspace);
+const REVIEW_WAIT_MS = 30_000;
 const servePublishedReview = async () => {
   const input = createInterface({ input: process.stdin });
   input.on("line", (line) => {
@@ -40,7 +41,15 @@ const servePublishedReview = async () => {
     } else if (message.method === "turn/start") {
       const turn = { id: `review-skip-${identity.identifier}`, status: "completed" };
       process.stdout.write(JSON.stringify({ id: message.id, result: { turn } }) + "\n");
-      process.stdout.write(JSON.stringify({ method: "turn/completed", params: { turn } }) + "\n");
+      // A pending tracker handoff must not consume its entire hourly API budget
+      // through immediate empty turns while Linear is unavailable.
+      setTimeout(
+        () =>
+          process.stdout.write(
+            JSON.stringify({ method: "turn/completed", params: { turn } }) + "\n",
+          ),
+        Number(process.env.SYMPHONY_REVIEW_WAIT_MS ?? REVIEW_WAIT_MS),
+      );
     }
   });
   await new Promise((resolve) => input.once("close", resolve));
