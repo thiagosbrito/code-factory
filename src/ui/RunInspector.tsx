@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
 import type { AgentConnection } from "../adapters/contract.js";
-import type { Evidence } from "../domain/evidence.js";
 import { Button } from "@/components/ui/button";
 import {
   definitionForScope,
-  evidenceFreshness,
   scopeEvidence,
   stepForScope,
   validScope,
@@ -13,6 +11,8 @@ import {
 } from "./run-view-model";
 import { RunInspectorActivity } from "./RunInspectorActivity";
 import { RunInspectorDetails } from "./RunInspectorDetails";
+import { RunInspectorFiles } from "./RunInspectorFiles";
+import { RunInspectorArtifacts } from "./RunInspectorArtifacts";
 import { RetryStepDialog } from "./RetryStepDialog";
 import { RunGuidance } from "./RunGuidance";
 
@@ -269,39 +269,10 @@ export const RunInspector = ({
           <RunInspectorActivity run={run} scope={scope} connected={connected} />
         ) : tab === "Details" ? (
           <RunInspectorDetails run={run} scope={scope} />
+        ) : tab === "Files" ? (
+          <RunInspectorFiles run={run} scope={scope} />
         ) : (
-          <ul className="space-y-2 p-4">
-            {evidence
-              .filter(
-                (item): item is Extract<Evidence, { kind: "file" | "artifact" }> =>
-                  item.kind === (tab === "Files" ? "file" : "artifact"),
-              )
-              .map((item) => (
-                <li key={item.id} className="rounded-md border p-3 text-sm">
-                  <strong>
-                    {item.kind === "file" ? item.path : item.kind === "artifact" ? item.name : ""}
-                  </strong>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {item.kind === "file"
-                      ? `${item.change} · +${item.additions} −${item.deletions}`
-                      : item.kind === "artifact"
-                        ? item.mediaType
-                        : ""}{" "}
-                    · {evidenceFreshness(run, item)}
-                  </p>
-                  <p className="mt-1 break-all text-xs text-muted-foreground">
-                    {item.kind === "file" || item.kind === "artifact"
-                      ? `Candidate ${item.provenance.candidateId}`
-                      : ""}
-                  </p>
-                </li>
-              ))}
-            {!evidence.some((item) => item.kind === (tab === "Files" ? "file" : "artifact")) && (
-              <li className="p-6 text-center text-sm text-muted-foreground">
-                No {tab.toLowerCase()} recorded for this scope.
-              </li>
-            )}
-          </ul>
+          <RunInspectorArtifacts run={run} scope={scope} />
         )}
       </div>
       <div hidden={tab !== "Activity"}>

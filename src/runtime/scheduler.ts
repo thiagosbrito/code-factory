@@ -18,6 +18,65 @@ import {
 } from "../domain/scheduler.js";
 import { mutateRun, readRun } from "./storage.js";
 import { acknowledgeGuidance, deliverQueuedGuidance, expireQueuedGuidance } from "./guidance.js";
+import { snapshotFileDiffs } from "./inspection.js";
+
+type FileSnapshot = Awaited<ReturnType<typeof snapshotFileDiffs>>[number];
+
+const diffLineCounts = (diff: string) =>
+  diff.split("\n").reduce(
+    (counts, line) => ({
+      additions: counts.additions + (line.startsWith("+") && !line.startsWith("+++ ") ? 1 : 0),
+      deletions: counts.deletions + (line.startsWith("-") && !line.startsWith("--- ") ? 1 : 0),
+    }),
+    { additions: 0, deletions: 0 },
+  );
+
+const appendFileReceipts = (
+  record: RunRecord,
+  stepId: string,
+  attemptId: string,
+  before: FileSnapshot[],
+  after: FileSnapshot[],
+  inputReceiptIds: string[],
+  source: "agent" | "check",
+  stale: boolean,
+): RunRecord => {
+  const candidateId = record.steps.find((item) => item.stepId === stepId)?.candidateId;
+  if (!candidateId) return record;
+  const previous = new Map(before.map((item) => [item.change.path, item.digest]));
+  const produced = after.filter((item) => previous.get(item.change.path) !== item.digest);
+  if (!produced.length) return record;
+  return runRecordSchema.parse({
+    ...record,
+    revision: record.revision + 1,
+    evidence: [
+      ...record.evidence,
+      ...produced.map(({ change, diff, digest }) => ({
+        id: crypto.randomUUID(),
+        runId: record.snapshot.id,
+        stepId,
+        attemptId,
+        createdAt: new Date().toISOString(),
+        kind: "file" as const,
+        path: change.path,
+        change: change.change,
+        ...(change.previousPath ? { previousPath: change.previousPath } : {}),
+        ...diffLineCounts(diff),
+        diffDigest: digest,
+        provenance: {
+          source,
+          baselineId: record.snapshot.baseline.id,
+          candidateId,
+          inputReceiptIds,
+        },
+        freshness: {
+          state: stale ? ("superseded" as const) : ("current" as const),
+          checkedAgainstCandidateId: candidateId,
+        },
+      })),
+    ],
+  });
+};
 
 type Resolver = (provider: string) => AgentAdapter | null;
 const active = new Map<
@@ -311,6 +370,13 @@ const executeOnce = async (
           item.status === "running",
       );
       const inputs = stepInputs(record, stepId);
+      const inspectable = /^\.code-factory\/workspaces\/[0-9a-f-]{36}$/i.test(
+        record.snapshot.baseline.workspace ?? "",
+      );
+      const beforeFiles =
+        !readonly && !recovering && inspectable
+          ? await snapshotFileDiffs(project, record).catch(() => null)
+          : null;
       let result: StepResult;
       let staleCheck = false;
       if (definition.kind === "check") {
@@ -510,6 +576,22 @@ const executeOnce = async (
           ? step.candidateId
           : await fileDigest(workspace);
       await commit((current) => completeStep(current, stepId, { ...result, candidateId }));
+      if (beforeFiles) {
+        const afterFiles = await snapshotFileDiffs(project, record).catch(() => null);
+        if (afterFiles)
+          await commit((current) =>
+            appendFileReceipts(
+              current,
+              stepId,
+              attempt.id,
+              beforeFiles,
+              afterFiles,
+              inputs.receiptIds,
+              definition.kind === "check" ? "check" : "agent",
+              staleCheck,
+            ),
+          );
+      }
       if (
         definition.kind === "check" ||
         (definition.stage === "review" && result.status === "succeeded")

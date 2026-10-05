@@ -22,6 +22,9 @@ import {
 import { RunDetail } from "../src/ui/RunDetail.js";
 import { RunGraph } from "../src/ui/RunGraph.js";
 import { RunInspector } from "../src/ui/RunInspector.js";
+import { RunInspectorFiles } from "../src/ui/RunInspectorFiles.js";
+import { RunInspectorArtifacts } from "../src/ui/RunInspectorArtifacts.js";
+import { downloadBytes } from "../src/ui/inspection-api.js";
 import { RunGuidance } from "../src/ui/RunGuidance.js";
 import type { AgentConnection } from "../src/adapters/contract.js";
 import type { RunScope } from "../src/ui/run-view-model.js";
@@ -505,6 +508,36 @@ it("keeps files and artifacts on their exact step attempt with recorded provenan
       },
     ],
   };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async (path: string) =>
+        new Response(
+          JSON.stringify(
+            path.includes("/diff?")
+              ? {
+                  path: "src/build.ts",
+                  diff: "diff --git a/src/build.ts b/src/build.ts\n",
+                  change: { path: "src/build.ts", change: "modified", attribution: "recorded" },
+                }
+              : {
+                  baselineRevision: "baseline",
+                  files: [
+                    {
+                      path: "src/build.ts",
+                      change: "modified",
+                      attribution: "recorded",
+                      stepId: "build",
+                      attemptId: buildAttempt,
+                    },
+                  ],
+                  preExisting: [],
+                },
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ),
+  );
   render(
     <RunDetail
       run={withEvidence}
@@ -517,12 +550,192 @@ it("keeps files and artifacts on their exact step attempt with recorded provenan
   );
   await userEvent.setup().click(screen.getByRole("button", { name: /Build, running/ }));
   await userEvent.setup().click(screen.getByRole("tab", { name: /^Files/ }));
-  expect(screen.getByText("src/build.ts")).toBeTruthy();
+  expect(await screen.findAllByText("src/build.ts")).toHaveLength(2);
   await userEvent.setup().click(screen.getByRole("tab", { name: /^Artifacts/ }));
   expect(screen.queryByText("review.md")).toBeNull();
   await userEvent.setup().click(screen.getByRole("tab", { name: "Details" }));
   expect(screen.getByText(/Candidate candidate-1/)).toBeTruthy();
   expect(screen.getByText("plan")).toBeTruthy();
+});
+
+it("filters baseline changes by path and type, with keyboard operable file selection", async () => {
+  const run = makeRun();
+  const attemptId = run.steps.find((step) => step.stepId === "build")?.attempts[0]?.id;
+  if (!attemptId) throw new Error("Missing attempt");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async (path: string) =>
+        new Response(
+          JSON.stringify(
+            path.includes("/diff?")
+              ? {
+                  path: "src/task.ts",
+                  diff: "+task",
+                  change: { path: "src/task.ts", change: "modified", attribution: "recorded" },
+                }
+              : {
+                  baselineRevision: "baseline",
+                  files: [
+                    {
+                      path: "src/task.ts",
+                      change: "modified",
+                      attribution: "recorded",
+                      stepId: "build",
+                      attemptId,
+                    },
+                    { path: "notes.txt", change: "added", attribution: "uncertain" },
+                  ],
+                  preExisting: [
+                    { path: "prior.txt", change: "modified", attribution: "uncertain" },
+                  ],
+                },
+          ),
+          { status: 200 },
+        ),
+    ),
+  );
+  const view = render(<RunInspectorFiles run={run} scope={{ kind: "run" }} />);
+  expect(await screen.findByText("prior.txt")).toBeTruthy();
+  expect(screen.getByText("notes.txt")).toBeTruthy();
+  await userEvent.selectOptions(screen.getByLabelText("Change type"), "modified");
+  expect(screen.queryByText("notes.txt")).toBeNull();
+  await userEvent.type(screen.getByLabelText("Search paths"), "missing");
+  expect(screen.getByText("No paths match these filters.")).toBeTruthy();
+  await userEvent.clear(screen.getByLabelText("Search paths"));
+  const file = screen.getByRole("button", { name: /src\/task.ts/ });
+  file.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(file.getAttribute("aria-current")).toBe("true");
+  view.rerender(
+    <RunInspectorFiles run={run} scope={{ kind: "step", stepId: "review", attemptId: null }} />,
+  );
+  expect(screen.getByText(/No task changes are available for this scope/)).toBeTruthy();
+});
+
+it("shows artifact provenance and safe unsupported preview while retaining download bytes and name", async () => {
+  const run = makeRun();
+  const attemptId = run.steps.find((step) => step.stepId === "build")?.attempts[0]?.id;
+  if (!attemptId) throw new Error("Missing attempt");
+  const receipt = {
+    kind: "artifact" as const,
+    id: crypto.randomUUID(),
+    runId: run.snapshot.id,
+    stepId: "build",
+    attemptId,
+    createdAt: new Date().toISOString(),
+    name: "report.bin",
+    mediaType: "application/octet-stream",
+    relativePath: "reports/report.bin",
+    digest: "digest",
+    provenance: {
+      source: "agent" as const,
+      baselineId: run.snapshot.baseline.id,
+      candidateId: "candidate",
+      inputReceiptIds: [],
+    },
+    freshness: { state: "superseded" as const, checkedAgainstCandidateId: "candidate" },
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ name: receipt.name, mediaType: receipt.mediaType, base64: "AAEC" }),
+          { status: 200 },
+        ),
+    ),
+  );
+  const blob = vi.fn<(value: Blob) => string>(() => "blob:artifact");
+  vi.stubGlobal("URL", {
+    ...URL,
+    createObjectURL: blob,
+    revokeObjectURL: vi.fn<(url: string) => void>(),
+  });
+  let downloaded = "";
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    downloaded = this.download;
+  });
+  render(
+    <RunInspectorArtifacts
+      run={{ ...run, evidence: [...run.evidence, receipt] }}
+      scope={{ kind: "step", stepId: "build", attemptId }}
+    />,
+  );
+  expect(await screen.findByText(/Preview unavailable for this file type/)).toBeTruthy();
+  expect(screen.getAllByText(/superseded/).length).toBeGreaterThan(0);
+  expect(screen.getByText(`${run.snapshot.baseline.id} / candidate`)).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Download" }));
+  expect(downloaded).toBe("report.bin");
+  expect(blob.mock.calls[0]?.[0].type).toBe("application/octet-stream");
+  downloadBytes("nested/other.json", new Uint8Array([123, 125]), "application/json");
+  expect(downloaded).toBe("other.json");
+});
+
+it("previews Markdown and JSON as safe content and selects receipts by keyboard", async () => {
+  const run = makeRun();
+  const attemptId = run.steps.find((step) => step.stepId === "build")?.attempts[0]?.id;
+  if (!attemptId) throw new Error("Missing attempt");
+  const common = {
+    kind: "artifact" as const,
+    runId: run.snapshot.id,
+    stepId: "build",
+    attemptId,
+    createdAt: new Date().toISOString(),
+    digest: "digest",
+    provenance: {
+      source: "agent" as const,
+      baselineId: run.snapshot.baseline.id,
+      candidateId: "candidate",
+      inputReceiptIds: [],
+    },
+    freshness: { state: "current" as const },
+  };
+  const markdown = {
+    ...common,
+    id: crypto.randomUUID(),
+    name: "notes.md",
+    relativePath: "notes.md",
+    mediaType: "text/markdown",
+  };
+  const json = {
+    ...common,
+    id: crypto.randomUUID(),
+    name: "data.json",
+    relativePath: "data.json",
+    mediaType: "application/json",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) => {
+      const isJson = path.includes(json.id);
+      const content = isJson ? '{"ok":true}' : "# Title\n<script>alert(1)</script>";
+      return new Response(
+        JSON.stringify({
+          name: isJson ? json.name : markdown.name,
+          mediaType: isJson ? json.mediaType : markdown.mediaType,
+          base64: btoa(content),
+        }),
+        { status: 200 },
+      );
+    }),
+  );
+  render(
+    <RunInspectorArtifacts
+      run={{ ...run, evidence: [...run.evidence, markdown, json] }}
+      scope={{ kind: "run" }}
+    />,
+  );
+  expect(await screen.findByRole("heading", { name: "Title" })).toBeTruthy();
+  expect(screen.getByText("<script>alert(1)</script>")).toBeTruthy();
+  expect(document.querySelector("script")).toBeNull();
+  const item = screen.getByRole("button", { name: /data.json/ });
+  item.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(item.getAttribute("aria-current")).toBe("true");
+  expect(await screen.findByText(/"ok": true/)).toBeTruthy();
 });
 
 it("shows invalidated receipt freshness in Details while an independent sibling stays current", () => {
