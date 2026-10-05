@@ -61,6 +61,14 @@ export const checkReceiptSchema = z.strictObject({
   outcome: z.enum(["passed", "failed", "skipped"]),
   exitCode: z.number().int().nullable(),
   summary: z.string(),
+  inputHash: z.string().min(1).optional(),
+  provenance: provenanceSchema,
+  freshness: freshnessSchema,
+});
+export const acceptanceReceiptSchema = z.strictObject({
+  ...identity,
+  kind: z.literal("acceptance"),
+  validationSignature: z.string().min(1),
   provenance: provenanceSchema,
   freshness: freshnessSchema,
 });
@@ -122,5 +130,6 @@ export const evidenceSchema = z.discriminatedUnion("kind", [
   outputSchema,
   fileChangeSchema,
   artifactSchema,
+  acceptanceReceiptSchema,
 ]);
 export type Evidence = z.infer<typeof evidenceSchema>;

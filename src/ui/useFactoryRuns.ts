@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { LoopDefinition } from "../domain/loop.js";
 import type { RunRecord } from "../domain/run.js";
+import type { EvidenceSummary } from "../domain/acceptance.js";
 import {
   api,
   ApiError,
@@ -9,6 +10,8 @@ import {
   trackerStatusResponseSchema,
   runResponseSchema,
   executionEventSchema,
+  evidenceResponseSchema,
+  acceptedEvidenceResponseSchema,
 } from "./project-api";
 import { mergeRunEvent, mergeRunSnapshot } from "./run-events";
 
@@ -23,11 +26,26 @@ export const useFactoryRuns = (demo: boolean) => {
   const [stream, setStream] = useState<{ runId: string; connected: boolean } | null>(null);
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">("loading");
   const [historyError, setHistoryError] = useState("");
+  const [evidence, setEvidence] = useState<{ runId: string; summary: EvidenceSummary } | null>(
+    null,
+  );
+  const [accepting, setAccepting] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState(
     () => location.hash.match(/^#runs\/([0-9a-f-]{36})$/i)?.[1] ?? "",
   );
   const selectedRun = runs.find((run) => run.snapshot.id === selectedRunId);
   const pollingRunId = selectedRunId || executingRunId;
+  useEffect(() => {
+    if (demo || !selectedRunId) return;
+    const refresh = () => {
+      void api(`/api/runs/${selectedRunId}/evidence`, evidenceResponseSchema.parse)
+        .then(({ summary }) => setEvidence({ runId: selectedRunId, summary }))
+        .catch(() => setEvidence(null));
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 2000);
+    return () => window.clearInterval(timer);
+  }, [demo, selectedRunId]);
   useEffect(() => {
     if (demo) return;
     void Promise.all([
@@ -230,6 +248,25 @@ export const useFactoryRuns = (demo: boolean) => {
       previous.map((item) => (item.snapshot.id === id ? mergeRunSnapshot(item, run) : item)),
     );
   };
+  const accept = async (id: string) => {
+    setAccepting(true);
+    setNotice("");
+    try {
+      const { run, summary } = await api(
+        `/api/runs/${id}/evidence`,
+        acceptedEvidenceResponseSchema.parse,
+        { method: "POST" },
+      );
+      setRuns((previous) =>
+        previous.map((item) => (item.snapshot.id === id ? mergeRunSnapshot(item, run) : item)),
+      );
+      setEvidence({ runId: id, summary });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not accept evidence.");
+    } finally {
+      setAccepting(false);
+    }
+  };
   return {
     notice,
     setNotice,
@@ -245,6 +282,9 @@ export const useFactoryRuns = (demo: boolean) => {
     cancel,
     retry,
     sendGuidance,
+    accept,
+    accepting,
+    evidenceSummary: evidence?.runId === selectedRunId ? evidence.summary : null,
     executingRunId,
     connected,
     streamConnected: stream?.runId === selectedRunId ? stream.connected : null,
