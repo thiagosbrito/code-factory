@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -159,5 +159,28 @@ describe("native configuration translation", () => {
       applyNative(root, { ...request(loop), expectedRevision: preview.revision }, "export"),
     ).rejects.toThrow("changed since preview");
     expect(await readFile(rulePath(root), "utf8")).toBe("new user content");
+  });
+
+  it("rejects parent-directory swaps and preserves external rules", async () => {
+    const root = await project();
+    const external = await project();
+    const loop = parseLoop({
+      ...draft(),
+      steps: [{ id: "one", name: "One", kind: "agent", role: "", instruction: "Do one" }],
+    });
+    await mkdir(join(root, ".cursor", "rules"), { recursive: true });
+    const exportPreview = await previewNative(root, request(loop), "export");
+    await rename(join(root, ".cursor", "rules"), join(root, ".cursor", "old-rules"));
+    await symlink(external, join(root, ".cursor", "rules"));
+    await expect(
+      applyNative(root, { ...request(loop), expectedRevision: exportPreview.revision }, "export"),
+    ).rejects.toThrow("link");
+    await expect(readFile(join(external, "sample.mdc"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    await writeFile(join(external, "sample.mdc"), "user-owned content");
+    await expect(previewNative(root, request(draft()), "import")).rejects.toThrow("link");
+    expect(await readFile(join(external, "sample.mdc"), "utf8")).toBe("user-owned content");
   });
 });
