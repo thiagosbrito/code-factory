@@ -8,7 +8,8 @@ import { FactorySidebar, screenLabels, type Screen } from "./FactorySidebar";
 import { bindingError, connectionViewModel } from "./connection";
 import { Loops } from "./Loops";
 import { NewRunDialog } from "./NewRunDialog";
-import { RunExecution } from "./RunExecution";
+import { RunDetail } from "./RunDetail";
+import { RunsList } from "./RunsList";
 import { useFactoryRuns } from "./useFactoryRuns";
 
 export const Factory = ({
@@ -48,6 +49,11 @@ export const Factory = ({
     cancel,
     executingRunId,
     connected,
+    streamConnected,
+    historyState,
+    historyError,
+    reload,
+    selectedRunId,
   } = useFactoryRuns(demo);
   const canStart = Boolean(
     project.project?.defaultBinding && !bindingError(project.project.defaultBinding, agents),
@@ -169,95 +175,68 @@ export const Factory = ({
             </p>
           </Card>
         ) : screen === "runs" && selectedRun ? (
-          <Card className="mt-7 p-6">
+          <RunDetail
+            key={selectedRun.snapshot.id}
+            run={selectedRun}
+            connected={connected}
+            streamConnected={streamConnected}
+            executing={executingRunId === selectedRun.snapshot.id}
+            onExecute={() => void execute(selectedRun.snapshot.id)}
+            onCancel={() => void cancel(selectedRun.snapshot.id)}
+            onBack={() => {
+              setSelectedRunId("");
+              window.history.pushState(null, "", "#runs");
+            }}
+          />
+        ) : screen === "runs" && historyState === "loading" ? (
+          <output className="mt-7 block text-sm">Loading run history…</output>
+        ) : screen === "runs" && historyState === "error" ? (
+          <Card className="mt-7 p-6" role="alert">
+            <h2 className="font-semibold">Could not load run history</h2>
+            <p className="mt-2 text-sm">{historyError}</p>
+            <Button className="mt-4" onClick={reload}>
+              Retry
+            </Button>
+          </Card>
+        ) : screen === "runs" && selectedRunId && connected ? (
+          <output className="mt-7 block text-sm">Loading selected run…</output>
+        ) : screen === "runs" && selectedRunId ? (
+          <Card className="mt-7 p-6" role="alert">
+            <h2 className="font-semibold">Run unavailable</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              The selected run could not be loaded from the local runtime.
+            </p>
+            <Button className="mt-4 mr-2" onClick={reload}>
+              Reconnect
+            </Button>
             <Button
+              className="mt-4"
               variant="outline"
-              size="sm"
               onClick={() => {
                 setSelectedRunId("");
                 window.history.pushState(null, "", "#runs");
               }}
             >
-              ← All runs
+              All runs
             </Button>
-            <h2 className="mt-5 text-xl font-semibold">
-              {selectedRun.snapshot.task.ticket?.title ??
-                selectedRun.snapshot.task.description.slice(0, 80)}
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Run {selectedRun.snapshot.id} · {selectedRun.status}
-            </p>
-            <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="font-medium">Project</dt>
-                <dd>{project.project?.name}</dd>
-              </div>
-              <div>
-                <dt className="font-medium">Loop</dt>
-                <dd>
-                  {selectedRun.snapshot.loop.name} · v{selectedRun.snapshot.loop.version}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-medium">Git baseline</dt>
-                <dd className="break-all font-mono text-xs">
-                  {selectedRun.snapshot.baseline.revision}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-medium">Isolated workspace</dt>
-                <dd className="break-all text-xs">{selectedRun.snapshot.baseline.workspace}</dd>
-              </div>
-            </dl>
-            {selectedRun.snapshot.task.description && (
-              <section className="mt-6">
-                <h3 className="font-medium">Description</h3>
-                <p className="mt-1 whitespace-pre-wrap text-sm">
-                  {selectedRun.snapshot.task.description}
-                </p>
-              </section>
-            )}
-            {selectedRun.snapshot.task.ticket && (
-              <section className="mt-6">
-                <h3 className="font-medium">
-                  Retrieved ticket · {selectedRun.snapshot.task.ticket.id}
-                </h3>
-                <p className="mt-1 whitespace-pre-wrap text-sm">
-                  {selectedRun.snapshot.task.ticket.summary}
-                </p>
-                <ul className="mt-2 list-inside list-disc text-sm">
-                  {selectedRun.snapshot.task.ticket.attachments.map((attachment) => (
-                    <li key={attachment.url}>{attachment.title}</li>
-                  ))}
-                </ul>
-              </section>
-            )}
-            <RunExecution
-              run={selectedRun}
-              executing={executingRunId === selectedRun.snapshot.id}
-              connected={connected}
-              onExecute={() => void execute(selectedRun.snapshot.id)}
-              onCancel={() => void cancel(selectedRun.snapshot.id)}
-            />
           </Card>
         ) : screen === "runs" && runs.length > 0 ? (
-          <div className="mt-7 space-y-2">
-            {runs.map((run) => (
-              <button
-                key={run.snapshot.id}
-                onClick={() => openRun(run.snapshot.id)}
-                className="block w-full rounded-lg border bg-white p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <strong>
-                  {run.snapshot.task.ticket?.title ?? run.snapshot.task.description.slice(0, 80)}
-                </strong>
-                <span className="ml-3 text-xs text-muted-foreground">{run.status}</span>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {run.snapshot.loop.name} v{run.snapshot.loop.version} · {run.snapshot.id}
-                </p>
-              </button>
-            ))}
-          </div>
+          <>
+            <p className="mt-5 text-xs text-muted-foreground">
+              {connected ? "Local runtime connected" : "Disconnected · saved history may be stale"}
+            </p>
+            <RunsList runs={runs} onOpen={openRun} />
+          </>
+        ) : screen === "runs" && !connected ? (
+          <Card className="mt-7 p-6" role="alert">
+            <h2 className="font-semibold">Runtime disconnected</h2>
+            <p className="mt-2 text-sm">
+              Run history is unavailable until the local runtime reconnects.
+            </p>
+            <Button className="mt-4" onClick={reload}>
+              Reconnect
+            </Button>
+          </Card>
         ) : counts[screen] === 0 ? (
           <FactoryEmptyState kind={screen} onCreate={showCreate} onTemplate={showTemplate} />
         ) : (

@@ -20,6 +20,9 @@ export const useFactoryRuns = (demo: boolean) => {
   const [trackerConfigured, setTrackerConfigured] = useState(false);
   const [executingRunId, setExecutingRunId] = useState<string | null>(null);
   const [connected, setConnected] = useState(true);
+  const [stream, setStream] = useState<{ runId: string; connected: boolean } | null>(null);
+  const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">("loading");
+  const [historyError, setHistoryError] = useState("");
   const [selectedRunId, setSelectedRunId] = useState(
     () => location.hash.match(/^#runs\/([0-9a-f-]{36})$/i)?.[1] ?? "",
   );
@@ -28,40 +31,77 @@ export const useFactoryRuns = (demo: boolean) => {
   useEffect(() => {
     if (demo) return;
     void Promise.all([
-      api("/api/loops/published", publishedLoopsResponseSchema.parse),
+      api("/api/loops/published", publishedLoopsResponseSchema.parse).catch(() => ({ loops: [] })),
       api("/api/runs", runsResponseSchema.parse),
-      api("/api/tracker", trackerStatusResponseSchema.parse),
+      api("/api/tracker", trackerStatusResponseSchema.parse).catch(() => ({ configured: false })),
     ])
       .then(([loops, history, tracker]) => {
         setPublishedLoops(loops.loops);
         setRuns(history.runs);
         setTrackerConfigured(tracker.configured);
+        setHistoryState("ready");
+        setHistoryError("");
+        setConnected(true);
       })
-      .catch((error: unknown) =>
-        setNotice(error instanceof Error ? error.message : "Could not load run history."),
-      );
+      .catch((error: unknown) => {
+        setHistoryState("error");
+        setHistoryError(error instanceof Error ? error.message : "Could not load run history.");
+        setConnected(false);
+      });
   }, [demo]);
   useEffect(() => {
-    if (!pollingRunId || demo) return;
+    if (demo || selectedRunId || historyState !== "ready") return;
     const timer = window.setInterval(() => {
+      void api("/api/runs", runsResponseSchema.parse)
+        .then(({ runs: history }) => {
+          setRuns((previous) =>
+            history.map((run) => {
+              const existing = previous.find((item) => item.snapshot.id === run.snapshot.id);
+              return existing ? mergeRunSnapshot(existing, run) : run;
+            }),
+          );
+          setConnected(true);
+        })
+        .catch(() => setConnected(false));
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [demo, selectedRunId, historyState]);
+  useEffect(() => {
+    const navigate = () =>
+      setSelectedRunId(location.hash.match(/^#runs\/([0-9a-f-]{36})$/i)?.[1] ?? "");
+    window.addEventListener("popstate", navigate);
+    window.addEventListener("hashchange", navigate);
+    return () => {
+      window.removeEventListener("popstate", navigate);
+      window.removeEventListener("hashchange", navigate);
+    };
+  }, []);
+  useEffect(() => {
+    if (!pollingRunId || demo) return;
+    const refresh = () => {
       void api(`/api/runs/${pollingRunId}`, runResponseSchema.parse)
         .then(({ run }) =>
-          setRuns((previous) =>
-            previous.map((item) =>
-              item.snapshot.id === pollingRunId ? mergeRunSnapshot(item, run) : item,
-            ),
-          ),
+          setRuns((previous) => {
+            const existing = previous.find((item) => item.snapshot.id === pollingRunId);
+            return existing
+              ? previous.map((item) =>
+                  item.snapshot.id === pollingRunId ? mergeRunSnapshot(item, run) : item,
+                )
+              : [run, ...previous];
+          }),
         )
         .then(() => setConnected(true))
         .catch(() => setConnected(false));
-    }, 1000);
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 1000);
     return () => window.clearInterval(timer);
   }, [demo, pollingRunId]);
   useEffect(() => {
     if (demo || !selectedRunId || typeof EventSource === "undefined") return;
     const source = new EventSource(`/api/runs/${selectedRunId}/events`);
-    source.onopen = () => setConnected(true);
-    source.onerror = () => setConnected(false);
+    source.onopen = () => setStream({ runId: selectedRunId, connected: true });
+    source.onerror = () => setStream({ runId: selectedRunId, connected: false });
     source.addEventListener("execution-event", (message) => {
       try {
         const event = executionEventSchema.parse(JSON.parse((message as MessageEvent).data));
@@ -71,7 +111,7 @@ export const useFactoryRuns = (demo: boolean) => {
           ),
         );
       } catch {
-        setConnected(false);
+        setStream({ runId: selectedRunId, connected: false });
       }
     });
     source.addEventListener("run-state", (message) => {
@@ -83,7 +123,7 @@ export const useFactoryRuns = (demo: boolean) => {
           ),
         );
       } catch {
-        setConnected(false);
+        setStream({ runId: selectedRunId, connected: false });
       }
     });
     return () => source.close();
@@ -91,6 +131,21 @@ export const useFactoryRuns = (demo: boolean) => {
   const openRun = (id: string) => {
     setSelectedRunId(id);
     window.history.pushState(null, "", `#runs/${id}`);
+  };
+  const reload = () => {
+    setHistoryState("loading");
+    void api("/api/runs", runsResponseSchema.parse)
+      .then(({ runs: history }) => {
+        setRuns(history);
+        setHistoryState("ready");
+        setHistoryError("");
+        setConnected(true);
+      })
+      .catch((error: unknown) => {
+        setHistoryState("error");
+        setHistoryError(error instanceof Error ? error.message : "Could not load run history.");
+        setConnected(false);
+      });
   };
   const onStarted = (id: string, run?: RunRecord) => {
     openRun(id);
@@ -155,5 +210,10 @@ export const useFactoryRuns = (demo: boolean) => {
     cancel,
     executingRunId,
     connected,
+    streamConnected: stream?.runId === selectedRunId ? stream.connected : null,
+    historyState,
+    historyError,
+    reload,
+    selectedRunId,
   };
 };

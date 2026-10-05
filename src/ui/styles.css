@@ -53,3 +53,69 @@
     font-family: system-ui, sans-serif;
   }
 }
+
+.run-status {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  background: #edf0ec;
+  color: #47534c;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+.run-status-running,
+.run-status-message,
+.run-status-tool {
+  background: #e1f3f0;
+  color: #116b64;
+}
+.run-status-succeeded,
+.run-status-check {
+  background: #e5f3e7;
+  color: #27613a;
+}
+.run-status-waiting,
+.run-status-pending {
+  background: #fff2d9;
+  color: #855c16;
+}
+.run-status-failed,
+.run-status-rejected,
+.run-status-unavailable,
+.run-status-blocked,
+.run-status-error,
+.run-status-canceled {
+  background: #fce9e6;
+  color: #9a3935;
+}
+.run-graph-canvas {
+  min-height: 340px;
+  background-color: #f4f5f1;
+  background-image: radial-gradient(#c9d0c9 0.8px, transparent 0.8px);
+  background-size: 18px 18px;
+}
+.run-graph-node-running {
+  border-color: #2b9c8e;
+  box-shadow: 0 0 0 2px #2b9c8e22;
+}
+.run-graph-node-failed {
+  border-color: #d27870;
+}
+.run-graph-node-succeeded {
+  border-color: #87b996;
+}
+.run-details-grid {
+  display: grid;
+  grid-template-columns: minmax(100px, 35%) minmax(0, 1fr);
+  gap: 0.5rem;
+}
+.run-details-grid dt {
+  color: #657169;
+}
+.run-details-grid dd {
+  margin: 0;
+  min-width: 0;
+}
