@@ -3,7 +3,11 @@ import { cp, lstat, mkdtemp, readFile, readdir, readlink, realpath, rm } from "n
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
-import type { AgentAdapter, AdapterEvent } from "../adapters/contract.js";
+import {
+  CancellationUnconfirmedError,
+  type AgentAdapter,
+  type AdapterEvent,
+} from "../adapters/contract.js";
 import {
   attachAttemptSession,
   runRecordSchema,
@@ -493,6 +497,7 @@ const executeOnce = async (
             binding,
             projectDirectory: executionDirectory,
           };
+          let cancellationUnconfirmed = false;
           try {
             let completed = false;
             if (
@@ -545,12 +550,17 @@ const executeOnce = async (
             }
             if (!completed) throw new Error("Adapter stream ended without a verified completion.");
           } catch (error) {
-            if (!signal.aborted) throw error;
-            result = { status: "canceled" };
+            if (error instanceof CancellationUnconfirmedError) {
+              cancellationUnconfirmed = true;
+              result = { status: "unavailable", summary: error.message };
+            } else {
+              if (!signal.aborted) throw error;
+              result = { status: "canceled" };
+            }
           }
+          if (signal.aborted && !cancellationUnconfirmed) result = { status: "canceled" };
         }
       }
-      if (signal.aborted) result = { status: "canceled" };
       if (
         readonly &&
         result.status === "succeeded" &&

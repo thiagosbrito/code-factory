@@ -60,6 +60,10 @@ export interface InputQuestion {
   options: { label: string; description: string }[];
 }
 
+export class CancellationUnconfirmedError extends Error {
+  override readonly name = "CancellationUnconfirmedError";
+}
+
 /** The factory owns loop scheduling. An adapter executes one assigned step. */
 export interface AgentAdapter {
   readonly provider: ProviderId;
