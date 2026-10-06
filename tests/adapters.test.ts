@@ -247,6 +247,7 @@ describe("portable adapter conformance", () => {
       authentication: "authenticated",
       authenticationMechanism: "Codex-owned ChatGPT login",
       protocol: "Codex app-server JSON-RPC over stdio",
+      capabilities: { waitingInput: "unsupported", pause: "unsupported" },
       models: [{ id: "model-a", displayName: "Model A", efforts: ["low", "high"] }],
     });
     expect(rpc.calls.map((call) => call.method)).toEqual([
@@ -274,6 +275,9 @@ describe("portable adapter conformance", () => {
     });
     expect(rpc.calls.find((call) => call.method === "thread/start")?.params.model).toBeNull();
     expect(rpc.calls.find((call) => call.method === "turn/start")?.params.effort).toBe("high");
+    expect(rpc.calls.find((call) => call.method === "turn/start")?.params).not.toHaveProperty(
+      "collaborationMode",
+    );
   });
 
   it("streams one assigned step with stable factory and native identities", async () => {

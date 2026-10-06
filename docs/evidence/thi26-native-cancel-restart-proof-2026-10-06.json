@@ -2,6 +2,7 @@
   "date": "2026-10-06",
   "provider": "codex app-server 0.160.0",
   "environment": "unrestricted disposable Git repositories",
+  "collaborationMode": "plan",
   "cancellation": {
     "threadId": "01a110c4-4348-7e71-8258-ad71304bfd07",
     "turnId": "01a110c4-4413-7fa2-8282-6ce3061d40c0",

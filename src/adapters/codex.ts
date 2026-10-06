@@ -216,7 +216,7 @@ export class CodexAdapter implements AgentAdapter {
       steering: version === "0.160.0" ? "supported" : "unknown",
       resume: "unknown",
       pause: "unsupported",
-      waitingInput: version === "0.160.0" ? "supported" : "unknown",
+      waitingInput: version === "0.160.0" ? "unsupported" : "unknown",
     };
   }
 
@@ -228,7 +228,7 @@ export class CodexAdapter implements AgentAdapter {
     this.initialized ??= (async () => {
       await this.rpc.request("initialize", {
         clientInfo: { name: "code_factory", title: "Code Factory", version: "0.1.0" },
-        capabilities: { experimentalApi: true },
+        capabilities: null,
       });
       this.rpc.notify("initialized");
     })();
