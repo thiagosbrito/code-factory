@@ -672,6 +672,7 @@ const executeOnce = async (
     if (record.status === "unavailable") return record;
   }
   for (;;) {
+    if (record.status === "unavailable") return record;
     if (signal.aborted)
       return commit((current) =>
         runRecordSchema.parse({ ...current, revision: current.revision + 1, status: "canceled" }),

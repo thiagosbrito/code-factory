@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mockAdapter } from "../src/adapters/mock.js";
-import type { AdapterEvent } from "../src/adapters/contract.js";
+import { CancellationUnconfirmedError, type AdapterEvent } from "../src/adapters/contract.js";
 import { cancelRun, executeRun, retryStep } from "../src/runtime/scheduler.js";
 import { createRun, readRun, updateRun } from "../src/runtime/storage.js";
 import { startLocalServer } from "../src/runtime/server.js";
@@ -709,6 +709,68 @@ describe("portable scheduler", () => {
       const canceled = await cancelRun(root, record.snapshot.id);
       expect(canceled.status).toBe("canceled");
       expect((await work).steps[0]?.attempts[0]?.status).toBe("canceled");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not confirm a canceled run when native interruption fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "factory-cancel-unconfirmed-"));
+    try {
+      await mkdir(join(root, ".code-factory", "workspaces", "candidate"), { recursive: true });
+      const seed = run({
+        steps: [step("build", "implementation")],
+        dependencies: [],
+        groups: [],
+        joins: [],
+      });
+      const record = createRunRecord(
+        createRunSnapshot(
+          seed.snapshot.loop,
+          { description: "Task" },
+          { provider: "mock", model: "default" },
+          {
+            id: "baseline",
+            kind: "git",
+            revision: "abc",
+            workspace: ".code-factory/workspaces/candidate",
+            capturedAt: new Date().toISOString(),
+          },
+        ),
+      );
+      await createRun(root, record);
+      let started: () => void = () => {};
+      const launched = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const adapter = {
+        ...mockAdapter,
+        async *execute(
+          input: Parameters<typeof mockAdapter.execute>[0],
+          signal: AbortSignal,
+        ): AsyncIterable<AdapterEvent> {
+          yield {
+            type: "started",
+            runId: input.runId,
+            stepId: input.stepId,
+            attempt: input.attempt,
+            sessionId: crypto.randomUUID(),
+            turnId: crypto.randomUUID(),
+          };
+          started();
+          await new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve(), { once: true }),
+          );
+          throw new CancellationUnconfirmedError("Native interruption failed.");
+        },
+      };
+      const work = executeRun(root, record.snapshot.id, () => adapter);
+      await launched;
+      const result = await cancelRun(root, record.snapshot.id);
+      expect(await work).toEqual(result);
+      expect(result.status).toBe("unavailable");
+      expect(result.status).not.toBe("canceled");
+      expect(result.steps[0]?.attempts[0]?.status).toBe("failed");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
