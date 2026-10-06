@@ -20,6 +20,7 @@ const rpcMessageSchema = z.object({
   error: z.object({ message: z.string().optional() }).optional(),
 });
 type RpcMessage = z.infer<typeof rpcMessageSchema>;
+type RpcListener = (message: RpcMessage) => boolean | void;
 const inputRequestSchema = z.object({
   threadId: z.string().min(1),
   turnId: z.string().min(1),
@@ -39,6 +40,15 @@ const inputRequestSchema = z.object({
 });
 export const parseCodexMessage = (line: string): RpcMessage =>
   rpcMessageSchema.parse(JSON.parse(line));
+
+export const claimCodexInputRequest = (
+  listeners: Iterable<RpcListener>,
+  request: RpcMessage,
+): boolean => {
+  let claimed = false;
+  for (const listener of listeners) claimed = listener(request) === true || claimed;
+  return claimed;
+};
 
 type RpcDispatch = {
   response(message: RpcMessage): void;
@@ -86,7 +96,7 @@ export const dispatchCodexMessage = (message: RpcMessage, handlers: RpcDispatch)
 export interface CodexRpc {
   request(method: string, params: Record<string, unknown>): Promise<unknown>;
   notify(method: string, params?: Record<string, unknown>): void;
-  subscribe(listener: (message: RpcMessage) => void): () => void;
+  subscribe(listener: RpcListener): () => void;
   replyToInput?(id: string | number, answers: Record<string, { answers: string[] }>): void;
   close?(): void;
 }
@@ -98,7 +108,7 @@ export class CodexStdioRpc implements CodexRpc {
     number,
     { resolve(value: unknown): void; reject(error: Error): void }
   >();
-  private readonly listeners = new Set<(message: RpcMessage) => void>();
+  private readonly listeners = new Set<RpcListener>();
   private nextId = 1;
 
   constructor(
@@ -125,11 +135,7 @@ export class CodexStdioRpc implements CodexRpc {
         notification: (notification) => {
           for (const listener of this.listeners) listener(notification);
         },
-        userInputRequest: (request) => {
-          if (this.listeners.size === 0) return false;
-          for (const listener of this.listeners) listener(request);
-          return true;
-        },
+        userInputRequest: (request) => claimCodexInputRequest(this.listeners, request),
         send: (reply) => this.child.stdin.write(`${JSON.stringify(reply)}\n`),
         ...(options.approveFileChange ? { approveFileChange: options.approveFileChange } : {}),
       });
@@ -162,7 +168,7 @@ export class CodexStdioRpc implements CodexRpc {
     this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: { answers } })}\n`);
   }
 
-  subscribe(listener: (message: RpcMessage) => void): () => void {
+  subscribe(listener: RpcListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -397,9 +403,10 @@ export class CodexAdapter implements AgentAdapter {
     let wake: (() => void) | undefined;
     const unsubscribe = this.rpc.subscribe((message) => {
       if (message.method !== "transport/closed" && message.params?.threadId !== seed.sessionId)
-        return;
+        return false;
       queue.push(message);
       wake?.();
+      return message.method === "item/tool/requestUserInput";
     });
     // An async generator needs function syntax; arrows cannot yield.
     const stream = async function* (

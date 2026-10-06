@@ -4,8 +4,11 @@ import type { RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
 
 type InputRequest = Extract<RunRecord["evidence"][number], { kind: "input-request" }>;
+type InputReplyEvidence = Extract<RunRecord["evidence"][number], { kind: "input-reply" }>;
 
-const currentRequest = (run: RunRecord): InputRequest | null => {
+const currentRequest = (
+  run: RunRecord,
+): { request: InputRequest; reply: InputReplyEvidence | undefined } | null => {
   for (const step of run.steps) {
     const attempt = step.attempts.at(-1);
     if (attempt?.status !== "waiting-input") continue;
@@ -15,15 +18,16 @@ const currentRequest = (run: RunRecord): InputRequest | null => {
         (item): item is InputRequest =>
           item.kind === "input-request" && item.attemptId === attempt.id,
       );
-    if (
-      request &&
-      request.sessionId === attempt.sessionId &&
-      request.turnId === attempt.turnId &&
-      !run.evidence.some(
-        (item) => item.kind === "input-reply" && item.requestEvidenceId === request.id,
-      )
-    )
-      return request;
+    if (request && request.sessionId === attempt.sessionId && request.turnId === attempt.turnId)
+      return {
+        request,
+        reply: [...run.evidence]
+          .reverse()
+          .find(
+            (item): item is InputReplyEvidence =>
+              item.kind === "input-reply" && item.requestEvidenceId === request.id,
+          ),
+      };
   }
   return null;
 };
@@ -47,8 +51,20 @@ export const RunInputPrompt = ({
   const [values, setValues] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const request = currentRequest(run);
-  if (!request) return null;
+  const current = currentRequest(run);
+  if (!current) return null;
+  const { request, reply } = current;
+  if (reply?.state === "sent") return null;
+  if (reply)
+    return (
+      <output className="block rounded-lg border border-amber-300 bg-amber-50 p-5">
+        <h3 className="font-semibold">Reply delivery is unconfirmed</h3>
+        <p className="mt-1 text-sm">
+          The answer was recorded before sending, but its delivery could not be confirmed. Cancel
+          this run and retry the step to receive a new native request.
+        </p>
+      </output>
+    );
   const provider = run.snapshot.bindings[request.stepId]?.provider;
   const supported = agents.some(
     (agent) => agent.provider === provider && agent.capabilities.waitingInput === "supported",

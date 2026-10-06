@@ -17,6 +17,33 @@ export const inputReplySchema = z.strictObject({
 export type InputReply = z.infer<typeof inputReplySchema>;
 
 type Request = Extract<RunRecord["evidence"][number], { kind: "input-request" }>;
+type ReplyState = "sending" | "sent" | "uncertain";
+
+const withReplyEvidence = (
+  run: RunRecord,
+  input: InputReply,
+  state: ReplyState,
+  reason?: string,
+): RunRecord =>
+  runRecordSchema.parse({
+    ...run,
+    revision: run.revision + 1,
+    evidence: [
+      ...run.evidence,
+      {
+        id: crypto.randomUUID(),
+        runId: run.snapshot.id,
+        stepId: input.stepId,
+        attemptId: input.attemptId,
+        createdAt: new Date().toISOString(),
+        kind: "input-reply",
+        requestEvidenceId: input.requestEvidenceId,
+        answers: input.answers,
+        state,
+        ...(reason ? { reason } : {}),
+      },
+    ],
+  });
 
 const pendingRequest = (run: RunRecord, input: InputReply): Request => {
   const step = run.steps.find((item) => item.stepId === input.stepId);
@@ -57,22 +84,45 @@ export const replyToInput = async (
 ): Promise<RunRecord> => {
   if (adapter?.capabilities.waitingInput !== "supported" || !adapter.replyToInput)
     throw new ProjectError("Native input replies are unavailable for this provider.", 422);
-  const run = await readRun(project, runId);
-  if (!run) throw new ProjectError("Run not found.", 404);
-  const request = pendingRequest(run, input);
-  const attempt = run.steps.find((item) => item.stepId === input.stepId)?.attempts.at(-1);
-  if (!attempt) throw new ProjectError("Attempt not found.", 409);
-  await adapter.replyToInput(
-    {
-      runId,
-      stepId: input.stepId,
-      attempt: attempt.number,
-      sessionId: request.sessionId,
-      turnId: request.turnId,
-    },
-    request.requestId,
-    input.answers,
+  if (!(await readRun(project, runId))) throw new ProjectError("Run not found.", 404);
+  // Persist intent before the native process can consume the answer. A crash
+  // after this point leaves a visible, uncertain delivery instead of no trace.
+  const prepared = await mutateRun(project, runId, (current) => {
+    pendingRequest(current, input);
+    return withReplyEvidence(current, input, "sending");
+  });
+  const request = prepared.evidence.find(
+    (item): item is Request => item.id === input.requestEvidenceId && item.kind === "input-request",
   );
+  const attempt = prepared.steps.find((item) => item.stepId === input.stepId)?.attempts.at(-1);
+  if (!request || !attempt)
+    throw new ProjectError("This native input request is no longer pending.", 409);
+  try {
+    await adapter.replyToInput(
+      {
+        runId,
+        stepId: input.stepId,
+        attempt: attempt.number,
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+      },
+      request.requestId,
+      input.answers,
+    );
+  } catch (error) {
+    await mutateRun(project, runId, (current) =>
+      withReplyEvidence(
+        current,
+        input,
+        "uncertain",
+        error instanceof Error ? error.message : "Native reply failed.",
+      ),
+    );
+    throw new ProjectError(
+      "Native reply delivery could not be confirmed. Cancel and retry the attempt.",
+      409,
+    );
+  }
   const replied = await mutateRun(project, runId, (current) => {
     const stillWaiting =
       current.steps.find((item) => item.stepId === input.stepId)?.attempts.at(-1)?.status ===
@@ -80,24 +130,8 @@ export const replyToInput = async (
     const next = stillWaiting
       ? setAttemptControlState(current, input.stepId, input.attemptId, "running")
       : current;
-    return runRecordSchema.parse({
-      ...next,
-      revision: stillWaiting ? next.revision : current.revision + 1,
-      evidence: [
-        ...next.evidence,
-        {
-          id: crypto.randomUUID(),
-          runId,
-          stepId: input.stepId,
-          attemptId: input.attemptId,
-          createdAt: new Date().toISOString(),
-          kind: "input-reply",
-          requestEvidenceId: request.id,
-          answers: input.answers,
-          state: "sent",
-        },
-      ],
-    });
+    const sent = withReplyEvidence(next, input, "sent");
+    return stillWaiting ? runRecordSchema.parse({ ...sent, revision: next.revision }) : sent;
   });
   return deliverQueuedGuidance(project, replied, input.stepId, input.attemptId, adapter);
 };

@@ -246,6 +246,26 @@ it("submits answers only for a connected provider with native input support", as
     requestEvidenceId,
     answers: { choice: { answers: ["yes"] } },
   });
+  const sending = runRecordSchema.parse({
+    ...run,
+    evidence: [
+      ...run.evidence,
+      {
+        kind: "input-reply",
+        id: crypto.randomUUID(),
+        runId: run.snapshot.id,
+        stepId: "build",
+        attemptId,
+        createdAt: new Date().toISOString(),
+        requestEvidenceId,
+        answers: { choice: { answers: ["yes"] } },
+        state: "sending",
+      },
+    ],
+  });
+  view.rerender(<RunInputPrompt run={sending} agents={agents} connected onReply={onReply} />);
+  expect(screen.getByRole("status").textContent).toContain("Reply delivery is unconfirmed");
+  expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
 });
 
 afterEach(() => {

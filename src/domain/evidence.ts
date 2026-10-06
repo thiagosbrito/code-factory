@@ -81,7 +81,7 @@ export const inputReplyEvidenceSchema = z.strictObject({
   attemptId: z.uuid(),
   requestEvidenceId: z.uuid(),
   answers: z.record(z.string(), z.strictObject({ answers: z.array(z.string().min(1)).min(1) })),
-  state: z.enum(["sent", "rejected"]),
+  state: z.enum(["sending", "sent", "uncertain", "rejected"]),
   reason: z.string().optional(),
 });
 export const checkReceiptSchema = z.strictObject({

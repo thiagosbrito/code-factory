@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CodexAdapter,
+  claimCodexInputRequest,
   createCodexAdapter,
   dispatchCodexMessage,
   type CodexRpc,
@@ -143,6 +144,28 @@ async function collect(adapter: AgentAdapter, step: StepExecutionInput): Promise
 }
 
 describe("portable adapter conformance", () => {
+  it("rejects a native input request when only another thread is listening", () => {
+    const request = {
+      id: 0,
+      method: "item/tool/requestUserInput",
+      params: { threadId: "ended-thread" },
+    };
+    const otherThread = (message: Parameters<typeof claimCodexInputRequest>[1]) =>
+      message.params?.threadId === "active-thread";
+    const replies: Record<string, unknown>[] = [];
+    dispatchCodexMessage(request, {
+      response: () => {},
+      notification: () => {},
+      userInputRequest: (message) => claimCodexInputRequest([otherThread], message),
+      send: (reply) => replies.push(reply),
+    });
+    expect(replies).toMatchObject([
+      { id: 0, error: { code: -32601, message: expect.stringContaining("requestUserInput") } },
+    ]);
+    expect(
+      claimCodexInputRequest([otherThread], { ...request, params: { threadId: "active-thread" } }),
+    ).toBe(true);
+  });
   it("declines approval requests and rejects unsupported server requests without consuming response IDs", () => {
     const replies: Record<string, unknown>[] = [];
     const responses: Record<string, unknown>[] = [];

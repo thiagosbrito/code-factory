@@ -90,7 +90,13 @@ const fixture = async () => {
 it("correlates a native reply, persists it, rejects reuse and holds ordinary guidance", async () => {
   const { root, run, input } = await fixture();
   const steer = vi.fn<() => Promise<"supported">>(async () => "supported" as const);
-  const nativeReply = vi.fn<() => Promise<void>>(async () => undefined);
+  const nativeReply = vi.fn<() => Promise<void>>(async () => {
+    expect(
+      (await readRun(root, run.snapshot.id))?.evidence.some(
+        (item) => item.kind === "input-reply" && item.state === "sending",
+      ),
+    ).toBe(true);
+  });
   const adapter = {
     ...mockAdapter,
     capabilities: {
@@ -119,12 +125,36 @@ it("correlates a native reply, persists it, rejects reuse and holds ordinary gui
   );
   expect(steer).toHaveBeenCalledOnce();
   expect(replied.evidence.filter((item) => item.kind === "input-reply")).toMatchObject([
+    { requestEvidenceId: input.requestEvidenceId, state: "sending" },
     { requestEvidenceId: input.requestEvidenceId, state: "sent" },
   ]);
   await expect(replyToInput(root, run.snapshot.id, input, adapter)).rejects.toThrow(
     /no longer pending/,
   );
   expect((await readRun(root, run.snapshot.id))?.steps[0]?.attempts[0]?.status).toBe("running");
+});
+
+it("retains uncertain reply evidence when native delivery fails", async () => {
+  const { root, run, input } = await fixture();
+  const adapter = {
+    ...mockAdapter,
+    capabilities: { ...mockAdapter.capabilities, waitingInput: "supported" as const },
+    replyToInput: async () => {
+      throw new Error("Native connection closed");
+    },
+  };
+  await expect(replyToInput(root, run.snapshot.id, input, adapter)).rejects.toThrow(
+    /could not be confirmed/,
+  );
+  expect(
+    (await readRun(root, run.snapshot.id))?.evidence.filter((item) => item.kind === "input-reply"),
+  ).toMatchObject([
+    { requestEvidenceId: input.requestEvidenceId, state: "sending" },
+    { requestEvidenceId: input.requestEvidenceId, state: "uncertain" },
+  ]);
+  await expect(replyToInput(root, run.snapshot.id, input, adapter)).rejects.toThrow(
+    /no longer pending/,
+  );
 });
 
 it("rejects unsupported, missing, and stale native requests without replying", async () => {
