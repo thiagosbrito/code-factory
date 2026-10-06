@@ -404,6 +404,12 @@ export class CodexAdapter implements AgentAdapter {
     const unsubscribe = this.rpc.subscribe((message) => {
       if (message.method !== "transport/closed" && message.params?.threadId !== seed.sessionId)
         return false;
+      if (
+        message.method === "item/tool/requestUserInput" &&
+        seed.turnId &&
+        message.params?.turnId !== seed.turnId
+      )
+        return false;
       queue.push(message);
       wake?.();
       return message.method === "item/tool/requestUserInput";
