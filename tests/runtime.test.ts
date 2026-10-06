@@ -125,6 +125,18 @@ describe("project initialization", () => {
     );
     expect((await readProjectConfig(directory))?.name).toBe("After");
   });
+  it("accepts only one of two concurrent setup saves from the same revision", async () => {
+    const directory = await temporaryProject();
+    await initializeProject(directory);
+    const revision = await projectRevision(directory);
+    const results = await Promise.allSettled([
+      saveProjectSetup(directory, { name: "First", revision }),
+      saveProjectSetup(directory, { name: "Second", revision }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect((await readProjectConfig(directory))?.name).toBe("First");
+  });
 });
 
 describe("agent discovery", () => {

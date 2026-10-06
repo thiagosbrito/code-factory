@@ -135,12 +135,12 @@ export const initializeProject = async (directory: string): Promise<ProjectConfi
   return config;
 };
 
-/** Only the trusted CLI workspace is writable; setup may change its display name. */
-export const saveProjectSetup = async (
-  directory: string,
+const setupWrites = new Map<string, Promise<unknown>>();
+
+const saveProjectSetupAtRoot = async (
+  root: string,
   input: z.infer<typeof projectSetupSchema>,
 ): Promise<ProjectConfig> => {
-  const root = await validateProjectDirectory(directory);
   const path = await configPath(root);
   const current = await readProjectConfig(root);
   if (input.revision !== (await projectRevision(root)))
@@ -191,4 +191,20 @@ export const saveProjectSetup = async (
     throw error;
   }
   return config;
+};
+
+/** Serialize local setup saves so concurrent requests cannot overwrite one another. */
+export const saveProjectSetup = async (
+  directory: string,
+  input: z.infer<typeof projectSetupSchema>,
+): Promise<ProjectConfig> => {
+  const root = await validateProjectDirectory(directory);
+  const prior = setupWrites.get(root) ?? Promise.resolve();
+  const work = prior.catch(() => undefined).then(() => saveProjectSetupAtRoot(root, input));
+  setupWrites.set(root, work);
+  try {
+    return await work;
+  } finally {
+    if (setupWrites.get(root) === work) setupWrites.delete(root);
+  }
 };

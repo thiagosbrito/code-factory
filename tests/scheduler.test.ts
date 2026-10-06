@@ -235,10 +235,14 @@ describe("portable scheduler", () => {
           yield* mockAdapter.execute(input, signal);
         },
       };
+      // A terminal run can be visible on disk before its prior execution clears
+      // the process-local active entry. The selected retry must wait for cleanup.
+      const priorCompletion = executeRun(root, record.snapshot.id, () => adapter);
       const [first, duplicate] = await Promise.all([
         retryStep(root, record.snapshot.id, "quality", previous, () => adapter),
         retryStep(root, record.snapshot.id, "quality", previous, () => adapter),
       ]);
+      await priorCompletion;
       expect(first.status).toBe("succeeded");
       expect(duplicate.revision).toBe(first.revision);
       expect(launches).toEqual(["quality", "join"]);
