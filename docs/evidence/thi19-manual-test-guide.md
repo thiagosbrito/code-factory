@@ -1,10 +1,10 @@
 # THI-19 manual test guide
 
-Use this guide against the uncommitted `symphony/THI-19` candidate. It is a test plan, not an acceptance receipt. Record the candidate commit and any uncommitted changes before starting. Run tests in a disposable project; do not point the CLI at this repository. Stop after the first blocker and report it rather than repeating paid agent work.
+This guide has two parts. A technical helper runs the commands in section 1. Anyone testing the screens can start at section 2. The test project is separate from the code-factory source. Stop at the first problem and report it; do not repeat an agent run just to gather more information.
 
 ## 1. Prepare one disposable packaged installation
 
-Prerequisites: Node 22.12 or newer, pnpm 11.8.0, npm, Git, a browser, and authenticated Codex and Kiro CLIs for the native checks. In a terminal, change to the THI-19 code-factory checkout (`/Users/thiagosbrito/personal/code-factory-automation/workspaces/THI-19`) and run the entire command block there. The commands use absolute paths for the disposable consumer and project. Keep the same terminal open so `THI19_TEST` remains set.
+**For the technical helper.** You need Node 22.12 or newer, pnpm 11.8.0, npm, Git, and a browser. Codex and Kiro must be installed and signed in for their agent tests. Run this block in one terminal. It begins by changing to the THI-19 checkout. Do not close this terminal while testing.
 
 ```sh
 cd /Users/thiagosbrito/personal/code-factory-automation/workspaces/THI-19
@@ -25,30 +25,73 @@ cat "$THI19_TEST/project/.kiro/existing.txt"
 "$THI19_TEST/consumer/node_modules/.bin/code-factory" start --project "$THI19_TEST/project" --port 0
 ```
 
-Open the URL printed by `start`. Keep that terminal open. Expected: npm installs without any frontend build dependency in the consumer; `init` reports no agent, model, or loop selected; `existing.txt` still says `keep me`; the blank factory has no runs. A repeat `init` should reject the already initialized project. `npm pack` builds the current working files, including uncommitted source changes, once through its prepack script. It does not commit or reset them; its build script only replaces generated `dist`. Save the tarball SHA-256 with your report because the commit alone does not identify an uncommitted candidate. If source files change after packing, repack before continuing. Do not run `pnpm check` just to follow this guide; the latest candidate already passed it.
+After the last command, the terminal should show a line like `Code Factory: http://127.0.0.1:12345`. That address is the next step. The number will be different on your computer. The terminal must stay open because it runs the local service.
 
-## 2. Free browser and setup checks
+Before handing off to a screen tester, check these results:
 
-Check these before triggering any agent run. Record a screenshot only where the result differs from expected.
+1. `npm install` finished without an error. The consumer did not need a separate frontend build.
+2. `init` said it selected no agent, model, or loop.
+3. `cat` printed `keep me`. This shows an existing agent file was preserved.
+4. Save the SHA-256 printed by `shasum`. It identifies the exact package tested. The Git commit alone does not identify uncommitted work.
 
-- In first-use setup, enter a project display name. Check that agent discovery distinguishes **detected** from **verified**. Select Kiro and choose **Verify connection**; if the CLI is signed in, it should show Streaming available, Guidance unsupported, Recovery unsupported. Save the project with Agent default or a listed model. A model listed in the catalog may still fail at execution if the account lacks entitlement.
-- In Settings, check the saved default and available models. Codex should be independently verifiable. Cursor and Claude Code may be detected but are discovery-only. A custom executable supports only the verified Codex app-server protocol.
-- In Loops, create an empty loop draft. Rename it, add an agent step in Implementation, open its configuration drawer, change the title and instructions, close it, save the draft, then publish v1. Check the library shows an immutable published version. Also use **Export JSON**, then **Import JSON** and preview the exported file. Import should create a separate draft rather than replace the published version.
-- In the editor's **Native configuration translation** section, choose the offered Cursor project-rule format. Preview before applying import/export. The preview must name the affected path, conflicts, and unsupported or lossy fields. An unchanged native file should remain unchanged when an operation is rejected. Do not assume this enables Cursor execution.
-- Keyboard: Tab through setup, sidebar, Loops and editor controls. Open a step drawer with Enter; focus should move into it, Tab should stay in the drawer, and Escape should close it and return focus to the trigger. In **New run**, focus should begin at Ticket number; Escape should close the dialog and restore focus. On a run graph, Enter should open the inspector; Arrow keys should move between its tabs; Escape should close it and restore focus. Inspect Files and Artifacts by keyboard; they must remain read-only.
-- At a 390 × 844 browser viewport, inspect the sidebar, editor, graph, inspector, and final evidence panel for clipped controls or unreadable text. Enable the OS/browser **Reduce motion** setting and repeat navigation; button transitions should stop. Status must be understandable from text as well as color.
+The package contains the current uncommitted source changes. Packing does not commit or reset them. If source files change after packing, a technical helper must repack before testing the new version. There is no need to rerun `pnpm check` just to follow this guide.
 
-## 3. One small native run per provider
+## 2. Open the app and finish setup
 
-Use a harmless task such as `Create proof.txt containing exactly THI-19 test`. Native calls may consume provider quota. Create a published loop with one Implementation agent step; keep its instruction narrow and its expected output as `proof.txt`. Make a **description-only** run. Creating the run should leave it pending and should not call the agent. Record the run ID, then choose **Execute run** once. Expected: pending → running → succeeded; one attempt; `proof.txt` appears in the run's read-only Files diff and provenance. The original disposable project's working tree should not be modified by the run. The final evidence panel should say **Incomplete** because this loop has no validation step; **Accept evidence** should be unavailable.
+These steps do not start paid agent work.
 
-While the completed run is displayed, reload the browser. Record the attempt count. Stop the local service with Ctrl+C, restart it with the same `start --project ... --port 0` command, and open its newly printed URL. The completed run and attempt count should persist; no agent work should start automatically. Reverify the agent connection after service restart. For an active run interrupted by service restart, do not expect Kiro recovery: the UI should say it is interrupted/unavailable without silently starting paid work again. Codex recovery is supported only where the adapter reports it.
+1. Find the `Code Factory: http://127.0.0.1:...` line in the terminal. Copy the address into your browser's address bar and press Enter. Keep the terminal open.
+   **Expected:** A page titled **Connect your first project** opens. If the page does not load, send the exact terminal output and the address you used.
+2. In **Project name**, type `THI-19 Test`. Check that **Local project path** points to the disposable `project` folder, not the code-factory source folder.
+   **Expected:** The name is accepted and the path is shown as read-only.
+3. In **Coding agent**, select **Kiro** and press **Verify connection**.
+   **Expected:** If Kiro is installed and signed in, it becomes connected. Its capabilities say Streaming **Available**, Guidance **Unsupported**, and Recovery **Unsupported**. If verification fails, copy the message and stop the agent tests; you can still report on the other screens.
+4. In **Default model**, leave **Agent default** selected. Press **Finish setup**.
+   **Expected:** The main factory opens. **Runs** is empty. Nothing should start running by itself.
+5. Open **Settings** and check that the project name and Kiro default were saved. Return to **Runs**.
+   **Expected:** The saved values remain visible. Detected agents should not be described as connected until they are verified.
 
-Repeat the **same published loop and task text** with Codex as the verified project default, then with Kiro, using a new run each time. Leave the loop step without an explicit provider binding so each new run resolves the current project default; check the binding shown in each run snapshot before execution. Record provider, CLI version, selected model, run ID, attempt count, status, and whether lifecycle/tool/message events and the same file output appeared. Codex supports guidance and recovery; Kiro currently does not. Do not interpret these differences as a layout change or as proof that Cursor/Claude Code execute.
+If these five steps pass, continue below. If one fails, stop and use the report form in section 6. You do not need a screenshot for a pass.
 
-## 4. Remaining full-journey checks
+## 3. Check the screens without running an agent
 
-These require more native calls. Run them only after sections 1–3 pass. Use a disposable ticket and keep agent instructions short. Mark a path **blocked/not reproducible** if there is no safe deterministic way to trigger it; do not repeatedly spend quota.
+Do these before any paid agent run. Report any result that differs from **Expected**.
+
+1. Open **Loops**. Press **Create empty loop**. Type a loop title, such as `THI-19 Small Test`.
+   **Expected:** A draft editor opens. There is no agent work yet.
+2. In the **Implementation** column, press **+ Add step**. Select the new step, enter a short instruction such as `Create proof.txt containing THI-19 test`, then press **Done**. Press **Save draft**, then **Publish v1**.
+   **Expected:** The Loops library shows the published version. If publishing gives an error, copy its exact text and stop here.
+3. On the published loop, press **Export JSON**. Then press **Import JSON** and paste the exported file's contents into the import box. Preview it before importing.
+   **Expected:** The import shows a separate draft. The published version remains available.
+4. If you want to test native configuration, open a loop draft and find **Native configuration translation**. Choose the offered Cursor format, choose Import or Export, then press **Preview** before **Apply**.
+   **Expected:** The preview names the file it would use and explains any conflict or lost/unsupported fields. If it says there is a conflict, do not apply it. This feature does not connect Cursor for agent work.
+5. Use only the keyboard for a short pass: press Tab to move between buttons; press Enter on a loop step to open its side panel; press Escape to close it. Open **New run** and press Escape to close it.
+   **Expected:** You can see where keyboard focus is. The side panel and dialog close, and focus returns to the button or step you opened them from. Later, on a run graph, Enter should open a step inspector, left/right arrows should switch inspector tabs, and Escape should close it.
+6. Make the browser window narrow, about phone width. Look at the Loops editor and the other screens you have visited. Turn on your operating system's **Reduce motion** setting and navigate again.
+   **Expected:** Text and controls remain readable, nothing important is cut off, button transitions stop with Reduce motion, and statuses have words as well as colors.
+
+## 4. Run one small task per agent
+
+**This section can use agent quota.** Keep the task tiny and press **Execute run** only once per run. Use the one-step loop you published in section 3.
+
+1. Open **Runs** and press **New run**. Choose the loop from section 3. Leave **Ticket number** empty. In the description, enter `Create proof.txt containing exactly THI-19 test`. Create the run.
+   **Expected:** A new run opens in **Pending** state. No agent has started yet. Write down the run ID.
+2. Press **Execute run** once. Wait for it to finish.
+   **Expected:** The status goes from Pending to Running to Succeeded, with one attempt for the step. If it fails, do not press Retry yet; report the exact error.
+3. Open the step in the run graph. Check **Activity**, **Files**, and **Details**.
+   **Expected:** Activity shows the agent's progress. Files shows `proof.txt` and its read-only changes. Details shows the loop version and file/source identity. The original disposable project folder is not edited by the run.
+4. Look at **Final evidence summary**.
+   **Expected:** It says **Local validation: Incomplete** because this small loop has no check or review. **Accept evidence** is not available. This is expected, not a failure.
+5. Write down the number of attempts shown. Refresh the browser page.
+   **Expected:** The same finished run appears with the same attempt count. No new work starts.
+6. To check service restart, go to the terminal running Code Factory and press Ctrl+C. Run `"$THI19_TEST/consumer/node_modules/.bin/code-factory" start --project "$THI19_TEST/project" --port 0` again. Open the **new URL** printed in the terminal. Return to the run.
+   **Expected:** The finished run still has the same attempt count. No agent work starts. Verify the agent connection again in Settings if asked.
+
+For a second-provider comparison, a technical tester should verify **Codex** in Settings, save it as the project default, then create a **new** run with the same published loop and exact description. The loop step must have no fixed provider binding. Check the new run's provider before pressing Execute. Compare status, attempt count, Activity, and `proof.txt` with the Kiro run. Codex supports guidance and recovery; Kiro reports those as unsupported. Cursor and Claude Code do not yet execute through this app. If this provider setup is unclear, stop and report it rather than spending quota on the wrong provider.
+
+## 5. Advanced full-journey checks
+
+**For a technical tester after sections 1–4 pass.** These checks use more agent calls. Keep the task small. If you cannot trigger a case safely, mark it **blocked** or **not observed**; do not spend quota repeating it.
 
 1. **Configured ticket intake:** Set `CODE_FACTORY_LINEAR_API_KEY` in the service process environment using your own test token; never paste the token into a report. Restart the service, open **New run**, enter a test ticket ID and **Retrieve**. Check title/summary/attachments, create the run, and confirm the run snapshot keeps the retrieved ticket. Clear the ticket and confirm description-only intake still works. Without a token, record this path as blocked by tracker configuration.
 2. **Parallel review:** In a new loop draft add one Implementation step, two Review agent steps, and one Validate check step. Connect the implementation to both reviews, make a parallel group of the reviews, then join both into validation with **all** mode. Keep reviewer instructions to a verdict on the small `proof.txt` change. Publish and run once. Check two separate review attempts inspect the same candidate and their receipts identify that candidate. A failed publish with a clear graph validation message is preferable to guessing connections.
@@ -57,9 +100,9 @@ These require more native calls. Run them only after sections 1–3 pass. Use a 
 5. **Second round and abort:** Use a bounded repeat loop or the staged starter template only if quota permits; the staged template has six reviews and can be expensive. Observe one repair decision leading to round 2, then either a pass with fresh receipts or a terminal failure when the round limit is exhausted. Record which branch actually occurred. Do not claim both outcomes from a single run.
 6. **Explicit acceptance:** On a genuinely succeeded run with current passing validation/review receipts, check **Local validation: Passed** and **Human acceptance: Pending**. Choose **Accept evidence** once. It should become accepted with a timestamp. A later candidate change should invalidate current acceptance while retaining the earlier acceptance receipt in history.
 
-## 5. Report back
+## 6. Report back
 
-Send a short report even if you stop early. Include exact messages and screenshots for failures. Redact tokens and private project content.
+Send a short report even if you stop early. You do not need to understand the technical IDs; include any you can see. For a failure, copy the exact message and attach a screenshot if helpful. Never send tokens or passwords.
 
 ```text
 Candidate: git commit ..., git status --short ..., tarball SHA-256 ...

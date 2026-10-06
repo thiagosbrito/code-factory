@@ -41,6 +41,17 @@ const streamEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runError"), data: z.unknown() }),
 ]);
 
+const terminateChild = (child: ReturnType<typeof spawn>): void => {
+  if (!child.pid) return;
+  try {
+    if (process.platform === "win32") child.kill();
+    else process.kill(-child.pid, "SIGTERM");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return;
+    throw error;
+  }
+};
+
 /** A Kiro v2 stream-json invocation executes one assigned step. Its session cannot be reattached. */
 export class KiroAdapter implements AgentAdapter {
   private readonly children = new Set<ReturnType<typeof spawn>>();
@@ -49,6 +60,8 @@ export class KiroAdapter implements AgentAdapter {
     streaming: "supported",
     steering: "unsupported",
     resume: "unsupported",
+    pause: "unsupported",
+    waitingInput: "unsupported",
   } as const;
 
   constructor(
@@ -111,9 +124,11 @@ export class KiroAdapter implements AgentAdapter {
       {
         cwd: input.projectDirectory,
         stdio: ["ignore", "pipe", "pipe"],
+        // Kiro launches a second process; own its process group so cancellation reaches both.
+        detached: process.platform !== "win32",
       },
     );
-    const abort = () => child.kill();
+    const abort = () => terminateChild(child);
     this.children.add(child);
     signal.addEventListener("abort", abort, { once: true });
     let stderr = "";
@@ -196,7 +211,7 @@ export class KiroAdapter implements AgentAdapter {
       yield { type: "completed", ...session, ...completion };
     } finally {
       signal.removeEventListener("abort", abort);
-      if (!child.killed && child.exitCode === null) child.kill();
+      if (child.exitCode === null) terminateChild(child);
       await closed.catch(() => undefined);
       this.children.delete(child);
     }
@@ -211,7 +226,7 @@ export class KiroAdapter implements AgentAdapter {
   }
 
   close(): void {
-    for (const child of this.children) child.kill();
+    for (const child of this.children) terminateChild(child);
     this.children.clear();
   }
 }

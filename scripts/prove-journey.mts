@@ -8,6 +8,7 @@ import { saveDraft, publishDraft, readRun } from "../src/runtime/storage.js";
 import { startLocalServer } from "../src/runtime/server.js";
 
 // Explicit invocation uses three small native Kiro tasks and preserves a compact receipt.
+const settleDelayMs = process.argv.includes("--no-settle-delay") ? 0 : 250;
 const root = await mkdtemp(join(tmpdir(), "factory-native-journey-"));
 const receipt: Record<string, unknown> = {
   startedAt: new Date().toISOString(),
@@ -37,7 +38,7 @@ const settled = async (id: string, afterRetry = false) => {
         (run.steps.find((step) => step.stepId === "check")?.attempts.length ?? 0) >= 2)
     ) {
       // Persisted terminal status precedes execution cleanup; retain that race as a separate review finding.
-      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+      await new Promise((resolveWait) => setTimeout(resolveWait, settleDelayMs));
       return run;
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
@@ -208,6 +209,8 @@ try {
     await new Promise<void>((resolveClosed) => local?.server.close(() => resolveClosed()));
   }
   receipt.endedAt = new Date().toISOString();
+  receipt.settleDelayMs = settleDelayMs;
+  receipt.version = execFileSync("kiro-cli", ["--version"], { encoding: "utf8" }).trim();
   await writeFile(
     resolve("docs/evidence/thi19-native-journey-proof-2026-10-06.json"),
     `${JSON.stringify(receipt, null, 2)}\n`,

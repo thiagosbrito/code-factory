@@ -11,6 +11,14 @@ import type {
 } from "../src/adapters/contract.js";
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 
+const unknownCapabilities = {
+  streaming: "unknown",
+  steering: "unknown",
+  resume: "unknown",
+  pause: "unknown",
+  waitingInput: "unknown",
+} as const;
+
 const fixture = async (events: unknown[], exitCode = 0) => {
   const directory = await mkdtemp(join(tmpdir(), "code-factory-kiro-"));
   const executable = join(directory, "kiro-cli");
@@ -38,23 +46,57 @@ const input = (directory: string): StepExecutionInput => ({
 });
 
 describe("Kiro v2 stream adapter", () => {
+  it("falls back to terminating the child directly on Windows", async () => {
+    const { directory, executable } = await fixture([]);
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    try {
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node\nconsole.log(JSON.stringify({type:'metadata',data:{sessionId:'windows-fallback'}}));\nsetInterval(()=>{},1000);\n`,
+      );
+      const adapter = new KiroAdapter(executable, "2.28.0");
+      const events = adapter
+        .execute(input(directory), new AbortController().signal)
+        [Symbol.asyncIterator]();
+      expect((await events.next()).value?.type).toBe("started");
+      Object.defineProperty(process, "platform", { value: "win32" });
+      adapter.close();
+      if (platform) Object.defineProperty(process, "platform", platform);
+      await expect(events.next()).rejects.toThrow("without successful completion");
+    } finally {
+      if (platform) Object.defineProperty(process, "platform", platform);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("terminates active native children when the connection is closed", async () => {
     const { directory, executable } = await fixture([]);
     try {
       const pidFile = join(directory, "child.pid");
       await writeFile(
         executable,
-        `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nconsole.log(JSON.stringify({type:'metadata',data:{sessionId:'active'}}));\nsetInterval(()=>{},1000);\n`,
+        `#!/usr/bin/env node\nconst nested = require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'inherit'});\nrequire('fs').writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify([process.pid,nested.pid]));\nconsole.log(JSON.stringify({type:'metadata',data:{sessionId:'active'}}));\nsetInterval(()=>{},1000);\n`,
       );
       const adapter = new KiroAdapter(executable, "2.27.1");
       const events = adapter
         .execute(input(directory), new AbortController().signal)
         [Symbol.asyncIterator]();
       expect((await events.next()).value?.type).toBe("started");
-      const pid = Number(await readFile(pidFile, "utf8"));
+      const pids = JSON.parse(await readFile(pidFile, "utf8")) as number[];
       adapter.close();
       await expect(events.next()).rejects.toThrow("without successful completion");
-      expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
+      for (const pid of pids) {
+        await expect
+          .poll(() => {
+            try {
+              process.kill(pid, 0);
+              return true;
+            } catch {
+              return false;
+            }
+          })
+          .toBe(false);
+      }
       expect(adapter.capabilities.resume).toBe("unsupported");
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -81,7 +123,7 @@ describe("Kiro v2 stream adapter", () => {
         executable,
         installation: "detected",
         authentication: "unknown",
-        capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+        capabilities: unknownCapabilities,
       };
       const registry = new ConnectionRegistry(directory, async () => [candidate]);
       expect((await registry.list())[0]?.authentication).toBe("unknown");
