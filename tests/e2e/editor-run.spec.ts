@@ -171,8 +171,10 @@ const test = base.extend<{ harness: Harness }>({
         steered,
       });
     } finally {
+      releaseReviews();
       await ui?.close();
       registry.close();
+      runtime.server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
         runtime.server.close((error) => (error ? reject(error) : resolve())),
       );
@@ -336,7 +338,10 @@ test("select controls remain usable at mobile width and with reduced motion", as
   await model.scrollIntoViewIfNeeded();
   await expect(model).toBeInViewport();
   await model.focus();
+  await page.keyboard.press("Space");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: "Connect your first project" })).toBeVisible();
   await expect(model).toBeFocused();
 });

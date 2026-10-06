@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 const NativeSelect = React.forwardRef<
   HTMLSelectElement,
   React.SelectHTMLAttributes<HTMLSelectElement>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, onKeyDown, ...props }, ref) => (
   <span
     className={cn(
       "relative flex w-full items-center rounded-md border border-input bg-background shadow-sm transition-colors focus-within:ring-2 focus-within:ring-ring has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50",
@@ -14,6 +14,10 @@ const NativeSelect = React.forwardRef<
     <select
       ref={ref}
       className="h-10 w-full appearance-none rounded-md bg-transparent py-2 pl-3 pr-9 text-sm outline-none disabled:cursor-not-allowed"
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (event.key === "Enter" && !event.defaultPrevented) event.preventDefault();
+      }}
       {...props}
     >
       {children}
