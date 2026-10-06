@@ -3,6 +3,7 @@ import type { RunRecord } from "../domain/run.js";
 import type { EvidenceSummary } from "../domain/acceptance.js";
 import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
 import {
   definitionForScope,
   scopeEvidence,
@@ -189,8 +190,8 @@ export const RunInspector = ({
             Run scope
           </Button>
           {step && (
-            <select
-              className="rounded-md border bg-white px-2 py-1 text-xs"
+            <NativeSelect
+              className="w-auto min-w-36"
               aria-label="Selected attempt"
               value={scope.kind === "step" ? (scope.attemptId ?? "") : ""}
               onChange={(event) =>
@@ -207,7 +208,7 @@ export const RunInspector = ({
                   Attempt {item.number} · {item.status}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           )}
           {step && onRetry && (
             <Button

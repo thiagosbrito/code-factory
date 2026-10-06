@@ -4,6 +4,7 @@ import type { LoopDefinition } from "../domain/loop.js";
 import { loopSchema } from "../domain/loop.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { api } from "./project-api";
 
 const reportSchema = z.object({
@@ -119,11 +120,12 @@ export const NativeTranslation = ({
       aria-label="Native configuration translation"
     >
       <div className="flex flex-wrap items-end gap-3">
-        <label className="text-sm">
+        <label htmlFor="native-format" className="text-sm">
           Native format
-          <select
+          <NativeSelect
+            id="native-format"
             aria-label="Native format"
-            className="mt-1 block rounded-md border bg-white p-2"
+            className="mt-1"
             value={format}
             disabled={disabled || working}
             onChange={(event) => {
@@ -137,13 +139,14 @@ export const NativeTranslation = ({
                 {item.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
-        <label className="text-sm">
+        <label htmlFor="translation-direction" className="text-sm">
           Direction
-          <select
+          <NativeSelect
+            id="translation-direction"
             aria-label="Translation direction"
-            className="mt-1 block rounded-md border bg-white p-2"
+            className="mt-1"
             value={direction}
             disabled={disabled || working}
             onChange={(event) => {
@@ -153,7 +156,7 @@ export const NativeTranslation = ({
           >
             <option value="import">Import</option>
             <option value="export">Export</option>
-          </select>
+          </NativeSelect>
         </label>
         <label className="text-sm">
           Configuration name

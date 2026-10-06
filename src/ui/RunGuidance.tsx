@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
 import type { RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { scopeEvidence, type RunScope } from "./run-view-model";
 
 type Submit = (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
@@ -94,9 +95,9 @@ export const RunGuidance = ({
         <label htmlFor="step-guidance-draft" className="text-xs font-medium">
           Message for selected attempt
         </label>
-        <textarea
+        <Textarea
           id="step-guidance-draft"
-          className="min-h-20 w-full rounded-md border bg-white p-2 text-sm"
+          className="min-h-20"
           value={message}
           onChange={(event) => setDrafts((current) => ({ ...current, [key]: event.target.value }))}
           disabled={!target}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { LoopDefinition } from "../domain/loop.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import {
   removeDecision,
   removeJoin,
@@ -15,8 +16,6 @@ type SectionProps = {
   selected: EditorStep;
   apply: (action: (current: LoopDefinition) => LoopDefinition) => boolean;
 };
-
-const field = "mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm";
 
 export const LoopJoinSection = ({ loop, selected, apply }: SectionProps) => {
   const existingJoin = loop.joins.find((item) => item.stepId === selected.id);
@@ -63,9 +62,9 @@ export const LoopJoinSection = ({ loop, selected, apply }: SectionProps) => {
             {step.name}
           </label>
         ))}
-      <select
+      <NativeSelect
         aria-label="Join mode"
-        className={field}
+        className="mt-2"
         value={joinMode}
         onChange={(event) =>
           setJoinDraft({
@@ -77,7 +76,7 @@ export const LoopJoinSection = ({ loop, selected, apply }: SectionProps) => {
       >
         <option value="all">All</option>
         <option value="any">Any</option>
-      </select>
+      </NativeSelect>
       <Button
         className="mt-2"
         variant="outline"
@@ -144,9 +143,8 @@ export const LoopDecisionSection = ({ loop, selected, apply }: SectionProps) => 
           value={branchOne?.outcome ?? ""}
           onChange={(event) => updateBranch(0, { outcome: event.target.value })}
         />
-        <select
+        <NativeSelect
           aria-label="First target"
-          className={field}
           value={branchOne?.to ?? ""}
           onChange={(event) => updateBranch(0, { to: event.target.value })}
         >
@@ -158,15 +156,14 @@ export const LoopDecisionSection = ({ loop, selected, apply }: SectionProps) => 
                 {step.name}
               </option>
             ))}
-        </select>
+        </NativeSelect>
         <Input
           aria-label="Second outcome"
           value={branchTwo?.outcome ?? ""}
           onChange={(event) => updateBranch(1, { outcome: event.target.value })}
         />
-        <select
+        <NativeSelect
           aria-label="Second target"
-          className={field}
           value={branchTwo?.to ?? ""}
           onChange={(event) => updateBranch(1, { to: event.target.value })}
         >
@@ -178,7 +175,7 @@ export const LoopDecisionSection = ({ loop, selected, apply }: SectionProps) => 
                 {step.name}
               </option>
             ))}
-        </select>
+        </NativeSelect>
       </div>
       {extraBranches.map((branch, index) => (
         <div key={index} className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-2">
@@ -187,9 +184,8 @@ export const LoopDecisionSection = ({ loop, selected, apply }: SectionProps) => 
             value={branch.outcome}
             onChange={(event) => updateBranch(index + 2, { outcome: event.target.value })}
           />
-          <select
+          <NativeSelect
             aria-label={`Target ${index + 3}`}
-            className={field}
             value={branch.to}
             onChange={(event) => updateBranch(index + 2, { to: event.target.value })}
           >
@@ -201,7 +197,7 @@ export const LoopDecisionSection = ({ loop, selected, apply }: SectionProps) => 
                   {step.name}
                 </option>
               ))}
-          </select>
+          </NativeSelect>
           <Button
             variant="ghost"
             aria-label={`Remove branch ${index + 3}`}

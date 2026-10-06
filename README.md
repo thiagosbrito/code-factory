@@ -17,6 +17,7 @@ Open the URL printed by Vite (normally http://127.0.0.1:4311). Development runs 
 pnpm check         # format, lint, strict types, tests, production build
 pnpm format       # format source
 pnpm build
+pnpm test:e2e     # fixture-backed browser journey and responsive accessibility checks
 pnpm test:package # production npm installation and packaged CLI/UI smoke test
 node dist/node/cli.js --help
 node dist/node/cli.js doctor

@@ -1,4 +1,5 @@
 import type { ConnectionViewModel } from "./connection";
+import { NativeSelect } from "@/components/ui/native-select";
 import { SetupSection } from "./SetupSection";
 
 export const ModelSetupSection = ({
@@ -28,13 +29,13 @@ export const ModelSetupSection = ({
     >
       <label htmlFor="default-model" className="grid max-w-sm gap-2 text-sm font-medium">
         Project default model
-        <select
+        <NativeSelect
           id="default-model"
           aria-label="Project default model"
           value={model}
           onChange={(event) => onModelChange(event.target.value)}
           disabled={!active?.connected}
-          className="h-10 rounded-md border border-input bg-canvas px-3 text-sm font-normal text-muted-foreground"
+          className="font-normal text-muted-foreground"
         >
           <option value="agent-default">Agent default</option>
           {active?.models.map((item) => (
@@ -45,7 +46,7 @@ export const ModelSetupSection = ({
           {model !== "agent-default" && !active?.models.some((item) => item.id === model) && (
             <option value={model}>{model} (unavailable)</option>
           )}
-        </select>
+        </NativeSelect>
         <small className="font-normal text-muted-foreground">
           {active?.connected
             ? "Models come from this connection's catalog; listing does not guarantee entitlement."
@@ -57,11 +58,10 @@ export const ModelSetupSection = ({
       {availableEfforts.length > 0 && (
         <label htmlFor="default-effort" className="mt-4 grid max-w-sm gap-2 text-sm font-medium">
           Effort
-          <select
+          <NativeSelect
             id="default-effort"
             value={effort}
             onChange={(event) => onEffortChange(event.target.value)}
-            className="h-10 rounded-md border border-input bg-canvas px-3"
           >
             <option value="">Agent default</option>
             {availableEfforts.map((item) => (
@@ -69,7 +69,7 @@ export const ModelSetupSection = ({
                 {item}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
       )}
       {validation && (

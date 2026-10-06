@@ -1,5 +1,6 @@
 import type { AgentConnection } from "../adapters/contract.js";
 import { providerIdSchema, type ExecutionBinding, type ProviderId } from "../domain/loop.js";
+import { NativeSelect } from "@/components/ui/native-select";
 import { bindingError, connectionViewModel } from "./connection";
 
 /** A null draft inherits the project default. THI-17 can place this in the step drawer. */
@@ -27,7 +28,7 @@ export const StepBindingSelectors = ({
     <div className="grid gap-3">
       <label className="grid gap-1 text-sm font-medium">
         Coding agent
-        <select
+        <NativeSelect
           aria-label="Step coding agent"
           value={value?.provider ?? ""}
           onChange={(event) =>
@@ -37,7 +38,6 @@ export const StepBindingSelectors = ({
               ),
             )
           }
-          className="h-10 rounded-md border border-input bg-canvas px-3"
         >
           <option value="">
             Inherit project default
@@ -50,20 +50,19 @@ export const StepBindingSelectors = ({
                 {connectionViewModel(item).label}
               </option>
             ))}
-        </select>
+        </NativeSelect>
       </label>
       {value && (
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1 text-sm font-medium">
             Model
-            <select
+            <NativeSelect
               aria-label="Step model"
               value={value.model}
               disabled={!connected}
               onChange={(event) =>
                 onChange({ provider: value.provider, model: event.target.value })
               }
-              className="h-10 rounded-md border border-input bg-canvas px-3"
             >
               <option value="agent-default">Agent default</option>
               {connected &&
@@ -76,11 +75,11 @@ export const StepBindingSelectors = ({
                 !connection?.models?.some((item) => item.id === value.model) && (
                   <option value={value.model}>{value.model} (unavailable)</option>
                 )}
-            </select>
+            </NativeSelect>
           </label>
           <label className="grid gap-1 text-sm font-medium">
             Effort
-            <select
+            <NativeSelect
               aria-label="Step effort"
               value={value.effort ?? ""}
               disabled={!connected || !effortOptions.length}
@@ -90,7 +89,6 @@ export const StepBindingSelectors = ({
                   ...(event.target.value ? { effort: event.target.value } : { effort: undefined }),
                 })
               }
-              className="h-10 rounded-md border border-input bg-canvas px-3"
             >
               <option value="">Agent default</option>
               {effortOptions.map((item) => (
@@ -101,7 +99,7 @@ export const StepBindingSelectors = ({
               {value.effort && !effortOptions.includes(value.effort) && (
                 <option value={value.effort}>{value.effort} (unavailable)</option>
               )}
-            </select>
+            </NativeSelect>
           </label>
         </div>
       )}
