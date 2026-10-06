@@ -380,6 +380,7 @@ export class CodexAdapter implements AgentAdapter {
         try {
           await interrupt;
         } catch (error) {
+          if (error instanceof Error && /no active turn to interrupt/i.test(error.message)) return;
           throw new CancellationUnconfirmedError(
             `Codex did not confirm turn interruption: ${error instanceof Error ? error.message : String(error)}`,
           );

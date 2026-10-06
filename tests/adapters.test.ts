@@ -23,7 +23,7 @@ class FixtureRpc implements CodexRpc {
     private readonly failFirst = false,
     private readonly recoveryActive = false,
     private readonly requestInput = false,
-    private readonly interruptFails = false,
+    private readonly interruptFailure = "",
   ) {}
   calls: { method: string; params: Record<string, unknown> }[] = [];
   private listeners = new Set<(message: Notification) => void>();
@@ -67,7 +67,7 @@ class FixtureRpc implements CodexRpc {
       };
     if (method === "thread/start") return { thread: { id: `thread-${++this.nextThread}` } };
     if (method === "turn/interrupt") {
-      if (this.interruptFails) throw new Error("transport closed");
+      if (this.interruptFailure) throw new Error(this.interruptFailure);
       return {};
     }
     if (method === "turn/start") {
@@ -423,7 +423,7 @@ describe("portable adapter conformance", () => {
   });
 
   it("does not confirm cancellation when the native interrupt fails", async () => {
-    const rpc = new FixtureRpc(false, false, true, true);
+    const rpc = new FixtureRpc(false, false, true, "transport closed");
     const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
     const controller = new AbortController();
     const iterator = adapter.execute(input, controller.signal)[Symbol.asyncIterator]();
@@ -431,6 +431,17 @@ describe("portable adapter conformance", () => {
     await iterator.next();
     controller.abort();
     await expect(iterator.next()).rejects.toThrow(/did not confirm turn interruption/);
+  });
+
+  it("accepts an already-finished native turn as safely stopped", async () => {
+    const rpc = new FixtureRpc(false, false, true, "no active turn to interrupt");
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    const controller = new AbortController();
+    const iterator = adapter.execute(input, controller.signal)[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.next();
+    controller.abort();
+    await expect(iterator.next()).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("reattaches to an in-progress turn and streams its remaining native events", async () => {
