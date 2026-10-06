@@ -714,6 +714,77 @@ describe("portable scheduler", () => {
     }
   });
 
+  it("cancels an adapter while its active attempt is waiting for native input", async () => {
+    const root = await mkdtemp(join(tmpdir(), "factory-cancel-input-"));
+    try {
+      await mkdir(join(root, ".code-factory", "workspaces", "candidate"), { recursive: true });
+      const seed = run({
+        steps: [step("build", "implementation")],
+        dependencies: [],
+        groups: [],
+        joins: [],
+      });
+      const record = createRunRecord(
+        createRunSnapshot(
+          seed.snapshot.loop,
+          { description: "Task" },
+          { provider: "mock", model: "default" },
+          {
+            id: "baseline",
+            kind: "git",
+            revision: "abc",
+            workspace: ".code-factory/workspaces/candidate",
+            capturedAt: new Date().toISOString(),
+          },
+        ),
+      );
+      await createRun(root, record);
+      let requested: () => void = () => {};
+      const inputRequested = new Promise<void>((resolve) => {
+        requested = resolve;
+      });
+      const adapter = {
+        ...mockAdapter,
+        capabilities: { ...mockAdapter.capabilities, waitingInput: "supported" as const },
+        async *execute(
+          input: Parameters<typeof mockAdapter.execute>[0],
+          signal: AbortSignal,
+        ): AsyncIterable<AdapterEvent> {
+          const session = {
+            runId: input.runId,
+            stepId: input.stepId,
+            attempt: input.attempt,
+            sessionId: crypto.randomUUID(),
+            turnId: crypto.randomUUID(),
+          };
+          yield { type: "started", ...session };
+          yield {
+            type: "input-request",
+            ...session,
+            requestId: 0,
+            itemId: "item-1",
+            questions: [{ id: "choice", header: "Choice", question: "Choose", options: [] }],
+            isBlocking: true,
+            autoResolutionMs: null,
+          };
+          requested();
+          await new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve(), { once: true }),
+          );
+          signal.throwIfAborted();
+        },
+      };
+      const work = executeRun(root, record.snapshot.id, () => adapter);
+      await inputRequested;
+      expect((await readRun(root, record.snapshot.id))?.status).toBe("waiting-input");
+      const canceled = await cancelRun(root, record.snapshot.id);
+      expect(canceled.status).toBe("canceled");
+      expect((await work).steps[0]?.attempts[0]?.status).toBe("canceled");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("executes one repair and retains changed files after a second review rejection", async () => {
     const root = await mkdtemp(join(tmpdir(), "factory-repair-"));
     try {

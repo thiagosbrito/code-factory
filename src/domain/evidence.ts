@@ -52,6 +52,38 @@ export const guidanceSchema = z.strictObject({
   reason: z.string().min(1).optional(),
   replyEventId: z.uuid().optional(),
 });
+export const inputRequestEvidenceSchema = z.strictObject({
+  ...identity,
+  kind: z.literal("input-request"),
+  stepId: z.string().min(1),
+  attemptId: z.uuid(),
+  sessionId: z.string().min(1),
+  turnId: z.string().min(1),
+  itemId: z.string().min(1),
+  requestId: z.union([z.string(), z.number()]),
+  questions: z
+    .array(
+      z.strictObject({
+        id: z.string().min(1),
+        header: z.string(),
+        question: z.string().min(1),
+        options: z.array(z.strictObject({ label: z.string(), description: z.string() })),
+      }),
+    )
+    .min(1),
+  isBlocking: z.boolean(),
+  autoResolutionMs: z.number().int().nonnegative().nullable(),
+});
+export const inputReplyEvidenceSchema = z.strictObject({
+  ...identity,
+  kind: z.literal("input-reply"),
+  stepId: z.string().min(1),
+  attemptId: z.uuid(),
+  requestEvidenceId: z.uuid(),
+  answers: z.record(z.string(), z.strictObject({ answers: z.array(z.string().min(1)).min(1) })),
+  state: z.enum(["sending", "sent", "uncertain", "rejected"]),
+  reason: z.string().optional(),
+});
 export const checkReceiptSchema = z.strictObject({
   ...identity,
   kind: z.literal("check"),
@@ -125,6 +157,8 @@ export const artifactSchema = z.strictObject({
 export const evidenceSchema = z.discriminatedUnion("kind", [
   eventSchema,
   guidanceSchema,
+  inputRequestEvidenceSchema,
+  inputReplyEvidenceSchema,
   checkReceiptSchema,
   reviewReceiptSchema,
   outputSchema,

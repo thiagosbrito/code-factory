@@ -19,6 +19,7 @@ import {
 import { acceptEvidence, summarizeEvidence } from "../domain/acceptance.js";
 import { prepareStepRetry } from "../domain/scheduler.js";
 import { guidanceInputSchema, sendGuidance } from "./guidance.js";
+import { inputReplySchema, replyToInput } from "./input.js";
 import { eventsAfter, parseEventCursor, streamRunEvents } from "./events.js";
 import { inspectArtifact, inspectDiff, inspectFiles } from "./inspection.js";
 import { listPublishedLoops, listRuns, mutateRun, readRun } from "./storage.js";
@@ -128,7 +129,9 @@ export const startLocalServer = async (options: {
   tracker?: TicketTracker;
 }) => {
   const projectDirectory = await validateProjectDirectory(options.projectDirectory);
-  const recoveryRuns = (await listRuns(projectDirectory)).filter((run) => run.status === "running");
+  const recoveryRuns = (await listRuns(projectDirectory)).filter((run) =>
+    ["running", "waiting-input", "paused"].includes(run.status),
+  );
   const connections = options.connections ?? new ConnectionRegistry(projectDirectory);
   const tracker =
     options.tracker ??
@@ -331,6 +334,21 @@ export const startLocalServer = async (options: {
         const updated = await sendGuidance(
           projectDirectory,
           guidancePath[1],
+          parsed.data,
+          provider ? connections.adapter(provider) : null,
+        );
+        return json(response, 200, { run: updated });
+      }
+      const inputPath = /^\/api\/runs\/([0-9a-f-]{36})\/input$/i.exec(pathname);
+      if (inputPath?.[1] && request.method === "POST") {
+        const parsed = inputReplySchema.safeParse(await readBody(request));
+        if (!parsed.success) return json(response, 400, { error: parsed.error.issues[0]?.message });
+        const run = await readRun(projectDirectory, inputPath[1]);
+        if (!run) return json(response, 404, { error: "Run not found." });
+        const provider = run.snapshot.bindings[parsed.data.stepId]?.provider;
+        const updated = await replyToInput(
+          projectDirectory,
+          inputPath[1],
           parsed.data,
           provider ? connections.adapter(provider) : null,
         );

@@ -22,7 +22,13 @@ export const unavailableCandidates = (): AgentConnection[] => {
     executable: null,
     installation: "missing",
     authentication: "unknown",
-    capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+    capabilities: {
+      streaming: "unknown",
+      steering: "unknown",
+      resume: "unknown",
+      pause: "unknown",
+      waitingInput: "unknown",
+    },
     reason: "Discovery unavailable. Recheck to read local adapter results.",
   }));
 };

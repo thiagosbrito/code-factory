@@ -9,6 +9,8 @@ import { getDependentStepIds } from "./loop.js";
 
 type Step = RunRecord["steps"][number];
 type Definition = RunRecord["snapshot"]["loop"]["steps"][number];
+const isActiveStatus = (status: string): boolean =>
+  status === "running" || status === "waiting-input" || status === "paused";
 export type StepResult = {
   status: "succeeded" | "failed" | "canceled" | "unavailable";
   outcome?: string;
@@ -96,7 +98,7 @@ export const claimStep = (
   const definition = readySteps(record).find((step) => step.id === stepId);
   if (!definition) throw new Error(`Step ${stepId} is not ready.`);
   const writer = definition.stage !== "review";
-  const active = record.steps.filter((step) => step.status === "running");
+  const active = record.steps.filter((step) => isActiveStatus(step.status));
   if (writer && active.length) throw new Error("Conflicting workspace writer or reader is active.");
   if (
     active.some((step) => {
@@ -117,8 +119,8 @@ export const claimStep = (
 export const completeStep = (record: RunRecord, stepId: string, result: StepResult): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
   const attempt = step?.attempts.at(-1);
-  if (!step || !attempt || attempt.status !== "running")
-    throw new Error(`No running attempt for ${stepId}.`);
+  if (!step || !attempt || !isActiveStatus(attempt.status))
+    throw new Error(`No active attempt for ${stepId}.`);
   if (result.inputHash && result.inputHash !== step.inputHash)
     throw new Error("Step input changed during execution.");
   const decision = record.snapshot.loop.decisions.find((item) => item.stepId === stepId);
@@ -179,7 +181,7 @@ export const completeStep = (record: RunRecord, stepId: string, result: StepResu
 };
 
 export const settleRun = (record: RunRecord): RunRecord => {
-  if (record.steps.some((step) => step.status === "running") || readySteps(record).length)
+  if (record.steps.some((step) => isActiveStatus(step.status)) || readySteps(record).length)
     return record;
   if (record.status !== "running" && record.status !== "pending") return record;
   const status = record.steps.every((step) => ["succeeded", "skipped"].includes(step.status))
@@ -236,7 +238,7 @@ export const prepareStepRetry = (
     throw new Error("Unknown retry target.");
   if (record.status !== "failed" || step.status !== "failed")
     throw new Error("Only a failed step in a failed run can be retried.");
-  if (record.steps.some((item) => item.status === "running"))
+  if (record.steps.some((item) => isActiveStatus(item.status)))
     throw new Error("Active work must finish before retry.");
   if (step.attempts.at(-1)?.id !== expectedAttemptId)
     throw new Error("Retry target changed; reload the run.");

@@ -27,21 +27,39 @@ function detected(executable: string): AgentConnection[] {
       executable,
       installation: "detected",
       authentication: "unknown",
-      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+      capabilities: {
+        streaming: "unknown",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unsupported",
+        waitingInput: "unknown",
+      },
     },
     {
       provider: "cursor",
       executable: "/bin/cursor-agent",
       installation: "detected",
       authentication: "unknown",
-      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+      capabilities: {
+        streaming: "unknown",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unsupported",
+        waitingInput: "unknown",
+      },
     },
     {
       provider: "custom",
       executable: null,
       installation: "missing",
       authentication: "unknown",
-      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+      capabilities: {
+        streaming: "unknown",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unsupported",
+        waitingInput: "unknown",
+      },
     },
   ];
 }
@@ -59,7 +77,13 @@ function inspected(
     protocol: "Codex app-server JSON-RPC over stdio",
     authentication: authenticated ? "authenticated" : "unauthenticated",
     authenticationMechanism: "Codex-owned ChatGPT login",
-    capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+    capabilities: {
+      streaming: "unknown",
+      steering: "unknown",
+      resume: "unknown",
+      pause: "unsupported",
+      waitingInput: "unknown",
+    },
     models: models.map((id) => ({ id, displayName: id, efforts: ["low", "high"] })),
   };
 }

@@ -50,7 +50,15 @@ export const attemptSchema = z.strictObject({
   id: z.uuid(),
   number: z.number().int().positive(),
   implementationRound: z.number().int().positive(),
-  status: z.enum(["running", "succeeded", "failed", "canceled", "interrupted"]),
+  status: z.enum([
+    "running",
+    "waiting-input",
+    "paused",
+    "succeeded",
+    "failed",
+    "canceled",
+    "interrupted",
+  ]),
   startedAt: z.iso.datetime(),
   endedAt: z.iso.datetime().optional(),
   sessionId: z.string().optional(),
@@ -59,7 +67,16 @@ export const attemptSchema = z.strictObject({
 export const stepRunSchema = z.strictObject({
   id: z.uuid(),
   stepId: z.string(),
-  status: z.enum(["pending", "running", "waiting", "succeeded", "failed", "skipped"]),
+  status: z.enum([
+    "pending",
+    "running",
+    "waiting",
+    "waiting-input",
+    "paused",
+    "succeeded",
+    "failed",
+    "skipped",
+  ]),
   outcome: z.string().optional(),
   candidateId: z.string().optional(),
   inputHash: z.string().optional(),
@@ -78,6 +95,8 @@ const baseRunRecordSchema = z.strictObject({
     "pending",
     "running",
     "waiting",
+    "waiting-input",
+    "paused",
     "succeeded",
     "failed",
     "canceled",
@@ -126,7 +145,7 @@ const validateAttempt = (
     report(`Step ${stepId} attempt refers to a future round.`);
   if (previous && attempt.implementationRound < previous.implementationRound)
     report(`Step ${stepId} attempt rounds must be monotonic.`);
-  if ((attempt.status === "running") === Boolean(attempt.endedAt))
+  if (["running", "waiting-input", "paused"].includes(attempt.status) === Boolean(attempt.endedAt))
     report(`Step ${stepId} attempt ${attempt.number} has an invalid end time.`);
   if (Boolean(attempt.sessionId) !== Boolean(attempt.turnId))
     report(`Step ${stepId} attempt ${attempt.number} has incomplete resume identity.`);
@@ -141,10 +160,15 @@ const validateStepRun = (step: StepRun, record: RunRecordShape, report: Report):
     )
   )
     report(`Step ${step.stepId} exceeds attempt policy.`);
-  const active = step.attempts.filter(({ status }) => status === "running");
+  const active = step.attempts.filter(({ status }) =>
+    ["running", "waiting-input", "paused"].includes(status),
+  );
   if (active.length > 1 || (active.length === 1 && step.attempts.at(-1) !== active[0]))
     report(`Step ${step.stepId} has overlapping attempts.`);
-  if ((step.status === "running") !== (active.length === 1))
+  if (
+    ["running", "waiting-input", "paused"].includes(step.status) !== (active.length === 1) ||
+    (active[0] && step.status !== active[0].status)
+  )
     report(`Step ${step.stepId} status disagrees with its active attempt.`);
   step.attempts.forEach((attempt, index) =>
     validateAttempt(
@@ -236,6 +260,22 @@ const validateEvidence = (record: RunRecordShape, report: Report): void => {
           attemptsById.get(receipt.attemptId)?.turnId !== receipt.turnId)
       )
         report("Event native session does not match its attempt.");
+    }
+    if (receipt.kind === "input-request") {
+      const attempt = attemptsById.get(receipt.attemptId);
+      if (attempt?.sessionId !== receipt.sessionId || attempt.turnId !== receipt.turnId)
+        report("Input request native session does not match its attempt.");
+    }
+    if (receipt.kind === "input-reply") {
+      const request = record.evidence.find((item) => item.id === receipt.requestEvidenceId);
+      if (
+        !request ||
+        request.kind !== "input-request" ||
+        !evidenceIds.has(request.id) ||
+        request.attemptId !== receipt.attemptId ||
+        request.stepId !== receipt.stepId
+      )
+        report("Input reply references a missing or mismatched request.");
     }
     if (receipt.runId !== record.snapshot.id) report("Evidence references another run.");
     if (receipt.stepId && !stepIds.has(receipt.stepId))
@@ -353,7 +393,11 @@ export const finishAttempt = (
   status: "succeeded" | "failed" | "canceled",
 ): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
-  if (!step?.attempts.some((attempt) => attempt.status === "running"))
+  if (
+    !step?.attempts.some((attempt) =>
+      ["running", "waiting-input", "paused"].includes(attempt.status),
+    )
+  )
     throw new Error(`No running attempt for ${stepId}.`);
   return runRecordSchema.parse({
     ...record,
@@ -364,7 +408,7 @@ export const finishAttempt = (
             ...item,
             status: status === "canceled" ? "waiting" : status,
             attempts: item.attempts.map((attempt) =>
-              attempt.status === "running"
+              ["running", "waiting-input", "paused"].includes(attempt.status)
                 ? { ...attempt, status, endedAt: new Date().toISOString() }
                 : attempt,
             ),
@@ -394,6 +438,37 @@ export const attachAttemptSession = (
             ...item,
             attempts: item.attempts.map((entry) =>
               entry.id === attempt.id ? { ...entry, sessionId, turnId } : entry,
+            ),
+          }
+        : item,
+    ),
+  });
+};
+export const setAttemptControlState = (
+  record: RunRecord,
+  stepId: string,
+  attemptId: string,
+  status: "running" | "waiting-input" | "paused",
+): RunRecord => {
+  const step = record.steps.find((item) => item.stepId === stepId);
+  const attempt = step?.attempts.at(-1);
+  if (
+    !attempt ||
+    attempt.id !== attemptId ||
+    !["running", "waiting-input", "paused"].includes(attempt.status)
+  )
+    throw new Error(`No active attempt for ${stepId}.`);
+  return runRecordSchema.parse({
+    ...record,
+    revision: record.revision + 1,
+    status: status === "running" ? "running" : status,
+    steps: record.steps.map((item) =>
+      item.stepId === stepId
+        ? {
+            ...item,
+            status,
+            attempts: item.attempts.map((entry) =>
+              entry.id === attemptId ? { ...entry, status } : entry,
             ),
           }
         : item,

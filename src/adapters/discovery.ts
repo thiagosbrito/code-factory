@@ -45,7 +45,13 @@ export const discoverAgents = async (
         executable,
         installation: executable ? "detected" : "missing",
         authentication: "unknown",
-        capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+        capabilities: {
+          streaming: "unknown",
+          steering: "unknown",
+          resume: "unknown",
+          pause: "unknown",
+          waitingInput: "unknown",
+        },
       } satisfies AgentConnection;
     }),
   );
@@ -60,6 +66,8 @@ export const discoverAgents = async (
         streaming: "unknown" as const,
         steering: "unknown" as const,
         resume: "unknown" as const,
+        pause: "unknown" as const,
+        waitingInput: "unknown" as const,
       },
       reason: "Choose an executable and supported protocol, then verify the handshake.",
     },

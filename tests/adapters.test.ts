@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CodexAdapter,
+  claimCodexInputRequest,
   createCodexAdapter,
   dispatchCodexMessage,
   type CodexRpc,
@@ -16,11 +17,12 @@ import type {
   StepSession,
 } from "../src/adapters/contract.js";
 
-type Notification = { method?: string; params?: Record<string, unknown> };
+type Notification = { id?: string | number; method?: string; params?: Record<string, unknown> };
 class FixtureRpc implements CodexRpc {
   constructor(
     private readonly failFirst = false,
     private readonly recoveryActive = false,
+    private readonly requestInput = false,
   ) {}
   calls: { method: string; params: Record<string, unknown> }[] = [];
   private listeners = new Set<(message: Notification) => void>();
@@ -32,8 +34,18 @@ class FixtureRpc implements CodexRpc {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
-  emit(method: string, params: Record<string, unknown>) {
-    for (const listener of this.listeners) listener({ method, params });
+  emit(method: string, params: Record<string, unknown>, id?: string | number) {
+    for (const listener of this.listeners)
+      listener({ method, params, ...(id === undefined ? {} : { id }) });
+  }
+  replyToInput(id: string | number, answers: Record<string, { answers: string[] }>) {
+    this.calls.push({ method: "replyToInput", params: { id, answers } });
+    queueMicrotask(() =>
+      this.emit("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-thread-1", status: "completed" },
+      }),
+    );
   }
   async request(method: string, params: Record<string, unknown>): Promise<unknown> {
     this.calls.push({ method, params });
@@ -56,6 +68,23 @@ class FixtureRpc implements CodexRpc {
     if (method === "turn/start") {
       const threadId = String(params.threadId);
       const turnId = `turn-${threadId}`;
+      if (this.requestInput) {
+        queueMicrotask(() =>
+          this.emit(
+            "item/tool/requestUserInput",
+            {
+              threadId,
+              turnId,
+              itemId: "item-1",
+              questions: [{ id: "choice", header: "Choice", question: "Choose", options: [] }],
+              isBlocking: true,
+              autoResolutionMs: null,
+            },
+            0,
+          ),
+        );
+        return { turn: { id: turnId } };
+      }
       queueMicrotask(() => {
         this.emit("item/agentMessage/delta", { threadId, turnId, delta: "progress" });
         this.emit("turn/completed", {
@@ -115,6 +144,28 @@ async function collect(adapter: AgentAdapter, step: StepExecutionInput): Promise
 }
 
 describe("portable adapter conformance", () => {
+  it("rejects a native input request when only another thread is listening", () => {
+    const request = {
+      id: 0,
+      method: "item/tool/requestUserInput",
+      params: { threadId: "ended-thread" },
+    };
+    const otherThread = (message: Parameters<typeof claimCodexInputRequest>[1]) =>
+      message.params?.threadId === "active-thread";
+    const replies: Record<string, unknown>[] = [];
+    dispatchCodexMessage(request, {
+      response: () => {},
+      notification: () => {},
+      userInputRequest: (message) => claimCodexInputRequest([otherThread], message),
+      send: (reply) => replies.push(reply),
+    });
+    expect(replies).toMatchObject([
+      { id: 0, error: { code: -32601, message: expect.stringContaining("requestUserInput") } },
+    ]);
+    expect(
+      claimCodexInputRequest([otherThread], { ...request, params: { threadId: "active-thread" } }),
+    ).toBe(true);
+  });
   it("declines approval requests and rejects unsupported server requests without consuming response IDs", () => {
     const replies: Record<string, unknown>[] = [];
     const responses: Record<string, unknown>[] = [];
@@ -196,6 +247,7 @@ describe("portable adapter conformance", () => {
       authentication: "authenticated",
       authenticationMechanism: "Codex-owned ChatGPT login",
       protocol: "Codex app-server JSON-RPC over stdio",
+      capabilities: { waitingInput: "unsupported", pause: "unsupported" },
       models: [{ id: "model-a", displayName: "Model A", efforts: ["low", "high"] }],
     });
     expect(rpc.calls.map((call) => call.method)).toEqual([
@@ -206,7 +258,12 @@ describe("portable adapter conformance", () => {
     ]);
     expect(await mockAdapter.inspect(input.projectDirectory)).toMatchObject({
       authentication: "not-required",
-      capabilities: { steering: "unsupported", resume: "unsupported" },
+      capabilities: {
+        steering: "unsupported",
+        resume: "unsupported",
+        pause: "unsupported",
+        waitingInput: "unsupported",
+      },
     });
   });
 
@@ -218,6 +275,9 @@ describe("portable adapter conformance", () => {
     });
     expect(rpc.calls.find((call) => call.method === "thread/start")?.params.model).toBeNull();
     expect(rpc.calls.find((call) => call.method === "turn/start")?.params.effort).toBe("high");
+    expect(rpc.calls.find((call) => call.method === "turn/start")?.params).not.toHaveProperty(
+      "collaborationMode",
+    );
   });
 
   it("streams one assigned step with stable factory and native identities", async () => {
@@ -246,6 +306,33 @@ describe("portable adapter conformance", () => {
       model: "model-a",
     });
     expect(rpc.calls.filter((call) => call.method === "turn/start")).toHaveLength(1);
+  });
+
+  it("correlates a blocking native input request and reply on its active turn", async () => {
+    const rpc = new FixtureRpc(false, false, true);
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    const stream = adapter.execute(input, new AbortController().signal)[Symbol.asyncIterator]();
+    expect((await stream.next()).value).toMatchObject({ type: "started", turnId: "turn-thread-1" });
+    const request = (await stream.next()).value;
+    expect(request).toMatchObject({
+      type: "input-request",
+      requestId: 0,
+      itemId: "item-1",
+      sessionId: "thread-1",
+      turnId: "turn-thread-1",
+    });
+    if (!request || request.type !== "input-request") throw new Error("Missing input request");
+    const answers = { choice: { answers: ["yes"] } };
+    await adapter.replyToInput(request, request.requestId, answers);
+    expect(rpc.calls.find((call) => call.method === "replyToInput")?.params).toEqual({
+      id: 0,
+      answers,
+    });
+    await expect(adapter.replyToInput(request, request.requestId, answers)).rejects.toThrow(
+      /no longer pending/,
+    );
+    expect((await stream.next()).value).toMatchObject({ type: "completed", outcome: "succeeded" });
+    expect((await stream.next()).done).toBe(true);
   });
 
   it("emits public tool output while excluding private reasoning notifications", async () => {

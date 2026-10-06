@@ -20,7 +20,13 @@ const agent: AgentConnection = {
   protocol: "app-server",
   version: "test",
   identity: "codex",
-  capabilities: { streaming: "supported", steering: "unknown", resume: "unknown" },
+  capabilities: {
+    streaming: "supported",
+    steering: "unknown",
+    resume: "unknown",
+    pause: "unsupported",
+    waitingInput: "unknown",
+  },
   models: [{ id: "agent-default", displayName: "Default" }],
 };
 const binding = { provider: "codex" as const, model: "agent-default" };

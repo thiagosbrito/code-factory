@@ -318,7 +318,7 @@ export const updateRun = async (project: string, input: RunRecord): Promise<RunR
         oldStep.attempts.some((attempt, index) => {
           const updated = next.attempts[index];
           if (!updated || updated.id !== attempt.id) return true;
-          if (attempt.status === "running") {
+          if (["running", "waiting-input", "paused"].includes(attempt.status)) {
             const {
               status: _oldStatus,
               endedAt: _oldEnded,
@@ -337,9 +337,15 @@ export const updateRun = async (project: string, input: RunRecord): Promise<RunR
               JSON.stringify(oldIdentity) !== JSON.stringify(newIdentity) ||
               (Boolean(attempt.sessionId) && attempt.sessionId !== updated.sessionId) ||
               (Boolean(attempt.turnId) && attempt.turnId !== updated.turnId) ||
-              !["running", "succeeded", "failed", "canceled", "interrupted"].includes(
-                updated.status,
-              )
+              ![
+                "running",
+                "waiting-input",
+                "paused",
+                "succeeded",
+                "failed",
+                "canceled",
+                "interrupted",
+              ].includes(updated.status)
             );
           }
           return JSON.stringify(updated) !== JSON.stringify(attempt);

@@ -9,6 +9,7 @@ import {
   createRunSnapshot,
   finishAttempt,
   runRecordSchema,
+  setAttemptControlState,
   startAttempt,
   type RunRecord,
 } from "../src/domain/run.js";
@@ -268,6 +269,8 @@ it("recovers only a verified active session and never starts another paid attemp
       streaming: "supported" as const,
       steering: "unsupported" as const,
       resume: "supported" as const,
+      pause: "unsupported" as const,
+      waitingInput: "unknown" as const,
     },
     async *execute() {
       launches++;
@@ -346,6 +349,28 @@ it("reconstructs an interrupted run when the service starts without relaunching 
       expect(reconstructed?.steps[0]?.attempts[0]?.status).toBe("interrupted");
     });
     expect((await readRun(root, record.snapshot.id))?.steps[0]?.attempts).toHaveLength(1);
+  } finally {
+    server.close();
+  }
+});
+
+it("invalidates a pending input request when restart recovery cannot resume it", async () => {
+  const { root, record } = await fixture();
+  const claimed = claimStep(record, "build", "candidate", "input");
+  await updateRun(root, claimed);
+  const attached = attachAttemptSession(claimed, "build", "session", "turn");
+  await updateRun(root, attached);
+  const attemptId = attached.steps[0]?.attempts[0]?.id;
+  if (!attemptId) throw new Error("Missing attempt");
+  const waiting = setAttemptControlState(attached, "build", attemptId, "waiting-input");
+  await updateRun(root, waiting);
+  const { server } = await startLocalServer({ projectDirectory: root, port: 0 });
+  try {
+    await vi.waitFor(async () => {
+      const recovered = await readRun(root, record.snapshot.id);
+      expect(recovered?.status).toBe("unavailable");
+      expect(recovered?.steps[0]?.attempts[0]?.status).toBe("interrupted");
+    });
   } finally {
     server.close();
   }
