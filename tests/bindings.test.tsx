@@ -16,7 +16,13 @@ const codex: AgentConnection = {
   version: "0.160.0",
   protocol: "Codex app-server",
   authentication: "authenticated",
-  capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+  capabilities: {
+    streaming: "unknown",
+    steering: "unknown",
+    resume: "unknown",
+    pause: "unsupported",
+    waitingInput: "unknown",
+  },
   models: [{ id: "model-a", displayName: "Model A", efforts: ["low"] }],
 };
 const cursor: AgentConnection = {
@@ -24,7 +30,13 @@ const cursor: AgentConnection = {
   executable: null,
   installation: "missing",
   authentication: "unknown",
-  capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+  capabilities: {
+    streaming: "unknown",
+    steering: "unknown",
+    resume: "unknown",
+    pause: "unsupported",
+    waitingInput: "unknown",
+  },
 };
 
 describe("step binding selectors", () => {

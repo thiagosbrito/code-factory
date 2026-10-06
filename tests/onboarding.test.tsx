@@ -23,7 +23,13 @@ function runtime(initial: ProjectConfig | null = null) {
       executable: "/bin/codex",
       installation: "detected",
       authentication: "unknown",
-      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+      capabilities: {
+        streaming: "unknown",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unsupported",
+        waitingInput: "unknown",
+      },
     },
   ];
   let connected: AgentConnection | null = null;
@@ -104,7 +110,13 @@ describe("first-use UI", () => {
       executable: "/bin/codex",
       installation: "detected",
       authentication: "unknown",
-      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+      capabilities: {
+        streaming: "unknown",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unsupported",
+        waitingInput: "unknown",
+      },
     };
     local.setAgents([
       base,

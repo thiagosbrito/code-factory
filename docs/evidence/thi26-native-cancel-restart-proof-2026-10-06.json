@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-06",
+  "provider": "codex app-server 0.160.0",
+  "environment": "unrestricted disposable Git repositories",
+  "cancellation": {
+    "threadId": "01a110c4-4348-7e71-8258-ad71304bfd07",
+    "turnId": "01a110c4-4413-7fa2-8282-6ce3061d40c0",
+    "pendingRequest": { "method": "item/tool/requestUserInput", "id": 0 },
+    "turnInterruptResponse": {},
+    "turnCompletedStatus": "interrupted",
+    "replySent": false
+  },
+  "restart": {
+    "threadId": "01a110c4-f25f-79a1-bd0b-8ddc3d5dd53a",
+    "turnId": "01a110c4-f2e4-73f1-962b-b506b926bc46",
+    "pendingRequest": { "method": "item/tool/requestUserInput", "id": 0 },
+    "firstAppServer": "killed while request pending",
+    "threadResumeAfterNewAppServer": {
+      "threadStatus": "idle",
+      "priorTurnStatus": "interrupted",
+      "liveResume": null,
+      "requestReplayed": false
+    }
+  },
+  "timeout": {
+    "observedRequestAutoResolutionMs": null,
+    "nativeAutoResolutionObserved": false,
+    "interpretation": "The observed request has no native deadline. Application-owned timeouts must not be presented as provider-confirmed resolution."
+  },
+  "remaining": [
+    "candidate adapter/runtime integration against these boundaries",
+    "stale-attempt native reply check",
+    "final candidate checks and PR review"
+  ]
+}

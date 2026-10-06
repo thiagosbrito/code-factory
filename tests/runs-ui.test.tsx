@@ -16,11 +16,15 @@ import { claimStep, completeStep } from "../src/domain/scheduler.js";
 import {
   createRunRecord,
   createRunSnapshot,
+  attachAttemptSession,
+  setAttemptControlState,
   startAttempt,
   finishAttempt,
   runRecordSchema,
 } from "../src/domain/run.js";
+import type { RunRecord } from "../src/domain/run.js";
 import { RunDetail } from "../src/ui/RunDetail.js";
+import { RunInputPrompt } from "../src/ui/RunInputPrompt.js";
 import { RunGraph } from "../src/ui/RunGraph.js";
 import { RunInspector } from "../src/ui/RunInspector.js";
 import { RunInspectorFiles } from "../src/ui/RunInspectorFiles.js";
@@ -44,7 +48,13 @@ it("preserves a scoped guidance draft through disconnect and gates it on verifie
     executable: null,
     installation: "built-in",
     authentication: "not-required",
-    capabilities: { streaming: "supported", steering: "unknown", resume: "unsupported" },
+    capabilities: {
+      streaming: "supported",
+      steering: "unknown",
+      resume: "unsupported",
+      pause: "unsupported",
+      waitingInput: "unknown",
+    },
   };
   const onSend = vi.fn<() => Promise<void>>(async () => undefined);
   const view = render(
@@ -86,7 +96,7 @@ it("preserves a scoped guidance draft through disconnect and gates it on verifie
   });
 });
 
-const makeRun = () => {
+const makeRun = (): RunRecord => {
   const loop = parseLoop({
     schemaVersion: 2,
     id: "flow",
@@ -176,6 +186,67 @@ const makeRun = () => {
     ],
   };
 };
+
+it("submits answers only for a connected provider with native input support", async () => {
+  let run = makeRun();
+  const attemptId = run.steps.find((step) => step.stepId === "build")?.attempts[0]?.id;
+  if (!attemptId) throw new Error("Missing attempt");
+  run = attachAttemptSession(run, "build", "thread-1", "turn-1");
+  run = setAttemptControlState(run, "build", attemptId, "waiting-input");
+  const requestEvidenceId = crypto.randomUUID();
+  run = runRecordSchema.parse({
+    ...run,
+    evidence: [
+      ...run.evidence,
+      {
+        kind: "input-request",
+        id: requestEvidenceId,
+        runId: run.snapshot.id,
+        stepId: "build",
+        attemptId,
+        createdAt: new Date().toISOString(),
+        sessionId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        requestId: 0,
+        questions: [{ id: "choice", header: "Choice", question: "Choose", options: [] }],
+        isBlocking: true,
+        autoResolutionMs: null,
+      },
+    ],
+  });
+  const agents: AgentConnection[] = [
+    {
+      provider: "mock",
+      executable: null,
+      installation: "built-in",
+      authentication: "not-required",
+      capabilities: {
+        streaming: "supported",
+        steering: "unsupported",
+        resume: "unsupported",
+        pause: "unsupported",
+        waitingInput: "supported",
+      },
+    },
+  ];
+  const onReply = vi.fn<() => Promise<void>>(async () => undefined);
+  const view = render(
+    <RunInputPrompt run={run} agents={agents} connected={false} onReply={onReply} />,
+  );
+  expect((screen.getByRole("button", { name: "Send answers" }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  view.rerender(<RunInputPrompt run={run} agents={agents} connected onReply={onReply} />);
+  await userEvent.type(screen.getByLabelText("Choice"), "yes");
+  await userEvent.click(screen.getByRole("button", { name: "Send answers" }));
+  expect(onReply).toHaveBeenCalledWith({
+    stepId: "build",
+    attemptId,
+    requestEvidenceId,
+    answers: { choice: { answers: ["yes"] } },
+  });
+});
 
 afterEach(() => {
   cleanup();

@@ -162,7 +162,13 @@ describe("loops library UI", () => {
       protocol: "app-server",
       version: "test",
       identity: "codex",
-      capabilities: { streaming: "supported", steering: "unknown", resume: "unknown" },
+      capabilities: {
+        streaming: "supported",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unsupported",
+        waitingInput: "unknown",
+      },
       models: [{ id: "agent-default", displayName: "Default" }],
     };
     const published = parseLoop({ ...draft(), status: "published" });
@@ -276,7 +282,13 @@ describe("loops library UI", () => {
       protocol: "app-server",
       version: "test",
       identity: "codex",
-      capabilities: { streaming: "supported", steering: "unknown", resume: "unknown" },
+      capabilities: {
+        streaming: "supported",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unsupported",
+        waitingInput: "unknown",
+      },
       models: [{ id: "agent-default", displayName: "Default" }],
     };
     vi.stubGlobal("fetch", async (path: string) => {
@@ -339,7 +351,13 @@ describe("loops library UI", () => {
       protocol: "app-server",
       version: "test",
       identity: "codex",
-      capabilities: { streaming: "supported", steering: "unknown", resume: "unknown" },
+      capabilities: {
+        streaming: "supported",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unsupported",
+        waitingInput: "unknown",
+      },
       models: [{ id: "agent-default", displayName: "Default" }],
     };
     let finishSave!: (response: Response) => void;

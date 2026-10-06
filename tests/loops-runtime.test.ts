@@ -36,7 +36,13 @@ const connected: AgentConnection = {
   version: "fixture",
   protocol: "codex-app-server",
   authentication: "authenticated",
-  capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+  capabilities: {
+    streaming: "unknown",
+    steering: "unknown",
+    resume: "unknown",
+    pause: "unsupported",
+    waitingInput: "unknown",
+  },
   models: [{ id: "model-a", displayName: "Model A", efforts: ["low"] }],
 };
 function draft() {

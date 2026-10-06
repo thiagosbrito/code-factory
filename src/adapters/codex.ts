@@ -20,12 +20,30 @@ const rpcMessageSchema = z.object({
   error: z.object({ message: z.string().optional() }).optional(),
 });
 type RpcMessage = z.infer<typeof rpcMessageSchema>;
+const inputRequestSchema = z.object({
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+  itemId: z.string().min(1),
+  questions: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        header: z.string(),
+        question: z.string().min(1),
+        options: z.array(z.object({ label: z.string(), description: z.string() })).default([]),
+      }),
+    )
+    .min(1),
+  isBlocking: z.boolean(),
+  autoResolutionMs: z.number().int().nonnegative().nullable(),
+});
 export const parseCodexMessage = (line: string): RpcMessage =>
   rpcMessageSchema.parse(JSON.parse(line));
 
 type RpcDispatch = {
   response(message: RpcMessage): void;
   notification(message: RpcMessage): void;
+  userInputRequest?(message: RpcMessage): boolean;
   send(message: Record<string, unknown>): void;
   approveFileChange?(request: RpcMessage): boolean;
 };
@@ -47,6 +65,11 @@ export const dispatchCodexMessage = (message: RpcMessage, handlers: RpcDispatch)
         }
       }
       handlers.send({ jsonrpc: "2.0", id: message.id, result: { decision } });
+    } else if (
+      message.method === "item/tool/requestUserInput" &&
+      handlers.userInputRequest?.(message)
+    ) {
+      return;
     } else {
       handlers.send({
         jsonrpc: "2.0",
@@ -64,6 +87,7 @@ export interface CodexRpc {
   request(method: string, params: Record<string, unknown>): Promise<unknown>;
   notify(method: string, params?: Record<string, unknown>): void;
   subscribe(listener: (message: RpcMessage) => void): () => void;
+  replyToInput?(id: string | number, answers: Record<string, { answers: string[] }>): void;
   close?(): void;
 }
 
@@ -101,6 +125,11 @@ export class CodexStdioRpc implements CodexRpc {
         notification: (notification) => {
           for (const listener of this.listeners) listener(notification);
         },
+        userInputRequest: (request) => {
+          if (this.listeners.size === 0) return false;
+          for (const listener of this.listeners) listener(request);
+          return true;
+        },
         send: (reply) => this.child.stdin.write(`${JSON.stringify(reply)}\n`),
         ...(options.approveFileChange ? { approveFileChange: options.approveFileChange } : {}),
       });
@@ -127,6 +156,10 @@ export class CodexStdioRpc implements CodexRpc {
 
   notify(method: string, params: Record<string, unknown> = {}): void {
     this.child.stdin.write(`${JSON.stringify({ method, params })}\n`);
+  }
+
+  replyToInput(id: string | number, answers: Record<string, { answers: string[] }>): void {
+    this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: { answers } })}\n`);
   }
 
   subscribe(listener: (message: RpcMessage) => void): () => void {
@@ -165,6 +198,7 @@ export class CodexAdapter implements AgentAdapter {
   readonly provider = "codex" as const;
   readonly capabilities: AgentCapabilities;
   private initialized?: Promise<void>;
+  private readonly pendingInput = new Map<string, { requestId: string | number; itemId: string }>();
 
   constructor(
     private readonly rpc: CodexRpc,
@@ -175,6 +209,8 @@ export class CodexAdapter implements AgentAdapter {
       streaming: "unknown",
       steering: version === "0.160.0" ? "supported" : "unknown",
       resume: "unknown",
+      pause: "unsupported",
+      waitingInput: version === "0.160.0" ? "supported" : "unknown",
     };
   }
 
@@ -186,7 +222,7 @@ export class CodexAdapter implements AgentAdapter {
     this.initialized ??= (async () => {
       await this.rpc.request("initialize", {
         clientInfo: { name: "code_factory", title: "Code Factory", version: "0.1.0" },
-        capabilities: null,
+        capabilities: { experimentalApi: true },
       });
       this.rpc.notify("initialized");
     })();
@@ -328,6 +364,18 @@ export class CodexAdapter implements AgentAdapter {
     return "supported";
   }
 
+  async replyToInput(
+    session: StepSession,
+    requestId: string | number,
+    answers: Record<string, { answers: string[] }>,
+  ): Promise<void> {
+    const key = `${session.sessionId}:${session.turnId}:${typeof requestId}:${requestId}`;
+    if (!this.pendingInput.has(key) || !this.rpc.replyToInput)
+      throw new Error("Native input request is no longer pending on this connection.");
+    this.pendingInput.delete(key);
+    this.rpc.replyToInput(requestId, answers);
+  }
+
   private turnOutput(turn: Record<string, unknown>): string {
     const items = Array.isArray(turn.items) ? turn.items.map(object) : [];
     return items
@@ -345,6 +393,7 @@ export class CodexAdapter implements AgentAdapter {
     close(): void;
   } {
     const queue: RpcMessage[] = [];
+    const pendingInput = this.pendingInput;
     let wake: (() => void) | undefined;
     const unsubscribe = this.rpc.subscribe((message) => {
       if (message.method !== "transport/closed" && message.params?.threadId !== seed.sessionId)
@@ -371,6 +420,23 @@ export class CodexAdapter implements AgentAdapter {
           const message = queue.shift();
           if (!message || (message.params?.turnId && message.params.turnId !== session.turnId))
             continue;
+          if (message.method === "item/tool/requestUserInput") {
+            const request = inputRequestSchema.parse(message.params);
+            if (message.id === undefined || !request.isBlocking)
+              throw new Error("Invalid blocking Codex input request.");
+            const key = `${session.sessionId}:${session.turnId}:${typeof message.id}:${message.id}`;
+            pendingInput.set(key, { requestId: message.id, itemId: request.itemId });
+            yield {
+              type: "input-request",
+              requestId: message.id,
+              itemId: request.itemId,
+              questions: request.questions,
+              isBlocking: true,
+              autoResolutionMs: request.autoResolutionMs,
+              ...session,
+            };
+            continue;
+          }
           if (message.method === "item/agentMessage/delta") {
             const delta = message.params?.delta;
             if (typeof delta === "string") {
@@ -380,6 +446,15 @@ export class CodexAdapter implements AgentAdapter {
           }
           if (message.method === "item/started" || message.method === "item/completed") {
             const item = message.params?.item;
+            if (message.method === "item/completed" && item && typeof item === "object") {
+              const itemId = object(item).id;
+              for (const [key, pending] of pendingInput)
+                if (
+                  key.startsWith(`${session.sessionId}:${session.turnId}:`) &&
+                  pending.itemId === itemId
+                )
+                  pendingInput.delete(key);
+            }
             if (
               item &&
               typeof item === "object" &&
@@ -425,6 +500,8 @@ export class CodexAdapter implements AgentAdapter {
           }
         }
       } finally {
+        for (const key of pendingInput.keys())
+          if (key.startsWith(`${session.sessionId}:${session.turnId}:`)) pendingInput.delete(key);
         unsubscribe();
       }
     };

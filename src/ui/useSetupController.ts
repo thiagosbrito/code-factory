@@ -46,7 +46,13 @@ export const useSetupController = ({
       executable: null,
       installation: "missing",
       authentication: "unknown",
-      capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+      capabilities: {
+        streaming: "unknown",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unknown",
+        waitingInput: "unknown",
+      },
       reason: "Verify the current executable and protocol to connect.",
     };
   });

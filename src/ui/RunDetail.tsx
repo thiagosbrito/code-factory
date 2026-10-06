@@ -5,6 +5,7 @@ import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import { RunGraph } from "./RunGraph";
 import { RunInspector } from "./RunInspector";
+import { RunInputPrompt } from "./RunInputPrompt";
 import { runStatus, runTitle, type RunScope } from "./run-view-model";
 
 export const RunDetail = ({
@@ -21,6 +22,7 @@ export const RunDetail = ({
   agents = [],
   onBack,
   onSendGuidance = async () => undefined,
+  onReplyToInput = async () => undefined,
 }: {
   run: RunRecord;
   summary: EvidenceSummary | null;
@@ -35,6 +37,12 @@ export const RunDetail = ({
   agents?: AgentConnection[];
   onBack: () => void;
   onSendGuidance?: (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
+  onReplyToInput?: (input: {
+    stepId: string;
+    attemptId: string;
+    requestEvidenceId: string;
+    answers: Record<string, { answers: string[] }>;
+  }) => Promise<void>;
 }) => {
   const [scope, setScope] = useState<RunScope | null>(null);
   const [initialTab, setInitialTab] = useState<"Activity" | "Files" | "Artifacts">("Activity");
@@ -76,11 +84,12 @@ export const RunDetail = ({
                 {executing ? "Executing…" : "Execute run"}
               </Button>
             )}
-            {(executing || run.status === "running") && connected && (
-              <Button variant="outline" onClick={onCancel}>
-                Cancel run
-              </Button>
-            )}
+            {(executing || ["running", "waiting-input", "paused"].includes(run.status)) &&
+              connected && (
+                <Button variant="outline" onClick={onCancel}>
+                  Cancel run
+                </Button>
+              )}
           </div>
         </div>
         <p className="mt-3 whitespace-pre-wrap text-sm">{run.snapshot.task.description}</p>
@@ -103,6 +112,7 @@ export const RunDetail = ({
           </span>
         </div>
       </header>
+      <RunInputPrompt run={run} agents={agents} connected={connected} onReply={onReplyToInput} />
       <section className="grid gap-2 sm:grid-cols-4" aria-label="Run summary">
         <Button
           variant="outline"

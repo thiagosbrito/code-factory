@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import type { AgentAdapter, AdapterEvent } from "../adapters/contract.js";
-import { attachAttemptSession, runRecordSchema, type RunRecord } from "../domain/run.js";
+import {
+  attachAttemptSession,
+  runRecordSchema,
+  setAttemptControlState,
+  type RunRecord,
+} from "../domain/run.js";
 import {
   claimStep,
   completeStep,
@@ -79,6 +84,8 @@ const appendFileReceipts = (
 };
 
 type Resolver = (provider: string) => AgentAdapter | null;
+const isActiveStatus = (status: string): boolean =>
+  status === "running" || status === "waiting-input" || status === "paused";
 const active = new Map<
   string,
   { work: Promise<RunRecord>; controller: AbortController; retry?: string }
@@ -367,7 +374,7 @@ const executeOnce = async (
         (item) =>
           item.stepId === stepId &&
           item.attempts.at(-1)?.id === attempt.id &&
-          item.status === "running",
+          isActiveStatus(item.status),
       );
       const inputs = stepInputs(record, stepId);
       const inspectable = /^\.code-factory\/workspaces\/[0-9a-f-]{36}$/i.test(
@@ -530,7 +537,9 @@ const executeOnce = async (
                     : { outcome: event.output.trim() }),
                   summary: event.output,
                 };
-              await commit((current) => appendEvent(current, stepId, attempt.id, event));
+              if (event.type === "input-request")
+                await commit((current) => recordInputRequest(current, stepId, attempt.id, event));
+              else await commit((current) => appendEvent(current, stepId, attempt.id, event));
               if (event.type === "started")
                 record = await deliverQueuedGuidance(project, record, stepId, attempt.id, adapter);
             }
@@ -608,15 +617,15 @@ const executeOnce = async (
           ),
         );
     } catch (error) {
-      if (record.steps.find((step) => step.stepId === stepId)?.status === "running")
+      if (isActiveStatus(record.steps.find((step) => step.stepId === stepId)?.status ?? ""))
         await commit((current) =>
-          initial.steps.some((item) => item.stepId === stepId && item.status === "running") ||
+          initial.steps.some((item) => item.stepId === stepId && isActiveStatus(item.status)) ||
           (definition.kind !== "check" && !signal.aborted)
             ? interruptStep(
                 current,
                 stepId,
                 error instanceof Error ? error.message : String(error),
-                initial.steps.some((item) => item.stepId === stepId && item.status === "running")
+                initial.steps.some((item) => item.stepId === stepId && isActiveStatus(item.status))
                   ? "recovery-unavailable"
                   : "execution-interrupted",
               )
@@ -647,7 +656,7 @@ const executeOnce = async (
     if (record.status !== "running") return record;
   }
 
-  const interrupted = record.steps.filter((step) => step.status === "running");
+  const interrupted = record.steps.filter((step) => isActiveStatus(step.status));
   if (interrupted.length) {
     await Promise.all(interrupted.map((step) => runStep(step.stepId)));
     if (record.status === "unavailable") return record;
@@ -737,6 +746,38 @@ const appendEvent = (
     : next;
 };
 
+const recordInputRequest = (
+  record: RunRecord,
+  stepId: string,
+  attemptId: string,
+  event: Extract<AdapterEvent, { type: "input-request" }>,
+): RunRecord => {
+  if (!event.isBlocking) throw new Error("Only blocking native requests can wait for input.");
+  const waiting = setAttemptControlState(record, stepId, attemptId, "waiting-input");
+  return runRecordSchema.parse({
+    ...waiting,
+    revision: waiting.revision,
+    evidence: [
+      ...waiting.evidence,
+      {
+        id: crypto.randomUUID(),
+        runId: waiting.snapshot.id,
+        stepId,
+        attemptId,
+        createdAt: new Date().toISOString(),
+        kind: "input-request",
+        sessionId: event.sessionId,
+        turnId: event.turnId,
+        itemId: event.itemId,
+        requestId: event.requestId,
+        questions: event.questions,
+        isBlocking: true,
+        autoResolutionMs: event.autoResolutionMs,
+      },
+    ],
+  });
+};
+
 const appendLocalEvent = (
   record: RunRecord,
   stepId: string,
@@ -781,7 +822,7 @@ const interruptStep = (
 ): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
   const attempt = step?.attempts.at(-1);
-  if (!attempt || attempt.status !== "running") return record;
+  if (!attempt || !isActiveStatus(attempt.status)) return record;
   const interrupted = runRecordSchema.parse({
     ...record,
     revision: record.revision + 1,
