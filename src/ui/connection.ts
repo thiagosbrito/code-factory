@@ -32,7 +32,8 @@ const connectionDetail = (connection: AgentConnection, verified: boolean, connec
   if (connected) return `${connection.identity} ${connection.version} · Connected`;
   if (verified && connection.authentication === "unauthenticated")
     return `${connection.identity} ${connection.version} · Authentication required`;
-  if (connection.provider === "codex") return "Detected; verification required";
+  if (connection.provider === "codex" || connection.provider === "kiro")
+    return "Detected; verification required";
   return "Detected; connection adapter unavailable";
 };
 

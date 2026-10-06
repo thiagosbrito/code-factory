@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-06",
+  "candidate": "uncommitted symphony/THI-19 worktree after Kiro native stream repair",
+  "environment": "unrestricted disposable Git workspaces",
+  "portableLoop": {
+    "schemaVersion": 2,
+    "id": "portable-proof",
+    "version": 1,
+    "steps": ["implement"],
+    "task": { "description": "Native portable proof" },
+    "sameParsedLoop": true,
+    "sameTask": true,
+    "sameBaselineShapeExceptCaptureTime": true
+  },
+  "providers": {
+    "kiro": {
+      "protocol": "kiro-v2-stream-json",
+      "authentication": "authenticated",
+      "binding": { "provider": "kiro", "model": "agent-default" },
+      "runId": "f6a3744f-480e-46f3-adc6-41d9ce3215de",
+      "nativeSessionId": "438138ee-74ff-47f6-abf5-4d9411ad9013",
+      "runStatus": "succeeded",
+      "stepStatus": "succeeded",
+      "projectFile": "proof.txt",
+      "projectFileContent": "kiro-runtime-proof",
+      "events": ["started", "tool", "message", "completed"]
+    },
+    "codex": {
+      "protocol": "Codex app-server JSON-RPC over stdio",
+      "authentication": "authenticated",
+      "binding": { "provider": "codex", "model": "gpt-6-sol" },
+      "runId": "d239484b-658c-4de3-82b8-0e5165a8dd68",
+      "nativeSessionId": "01a1105d-b302-7d61-8095-e686599cf01f",
+      "runStatus": "succeeded",
+      "stepStatus": "succeeded",
+      "projectFile": "proof.txt",
+      "projectFileContent": "kiro-runtime-proof\n",
+      "events": ["started", "tool", "message", "completed"]
+    }
+  },
+  "verifiedDifferences": [
+    "Kiro uses the CLI default model and exposes no active steering or session resume in this adapter.",
+    "Codex uses an explicit model and supports steering and session resume as verified in its separate native proof."
+  ],
+  "remaining": [
+    "complete factory UI journey",
+    "responsive/accessibility/reduced-motion browser receipt",
+    "final candidate checks and PR review"
+  ]
+}

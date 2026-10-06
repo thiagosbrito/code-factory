@@ -3,6 +3,7 @@ import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { createCodexAdapter } from "../adapters/codex.js";
+import { createKiroAdapter } from "../adapters/kiro.js";
 import type { AgentAdapter, AgentConnection } from "../adapters/contract.js";
 import { mockAdapter } from "../adapters/mock.js";
 import { discoverAgents } from "../adapters/discovery.js";
@@ -10,6 +11,7 @@ import { ProjectError } from "./project.js";
 
 export const connectionRequestSchema = z.discriminatedUnion("provider", [
   z.strictObject({ provider: z.literal("codex"), launch: z.literal(true) }),
+  z.strictObject({ provider: z.literal("kiro"), launch: z.literal(true) }),
   z.strictObject({
     provider: z.literal("custom"),
     launch: z.literal(true),
@@ -32,10 +34,13 @@ const resolveExecutable = async (
   request: ConnectionRequest,
   candidates: AgentConnection[],
 ): Promise<string> => {
-  if (request.provider === "codex") {
-    const executable = candidates.find((item) => item.provider === "codex")?.executable;
+  if (request.provider === "codex" || request.provider === "kiro") {
+    const executable = candidates.find((item) => item.provider === request.provider)?.executable;
     if (!executable)
-      throw new ProjectError("Codex executable is not detected. Install it and recheck.", 422);
+      throw new ProjectError(
+        `${request.provider} executable is not detected. Install it and recheck.`,
+        422,
+      );
     return executable;
   }
 
@@ -64,6 +69,9 @@ export class ConnectionRegistry {
     private readonly createCodex: (
       executable: string,
     ) => Promise<InspectableAdapter> = createCodexAdapter,
+    private readonly createKiro: (
+      executable: string,
+    ) => Promise<InspectableAdapter> = createKiroAdapter,
   ) {}
 
   async list(): Promise<AgentConnection[]> {
@@ -72,7 +80,11 @@ export class ConnectionRegistry {
       const active = this.active.get(candidate.provider)?.connection;
       if (active && (candidate.provider === "custom" || active.executable === candidate.executable))
         return active;
-      if (candidate.provider !== "codex" && candidate.provider !== "custom")
+      if (
+        candidate.provider !== "codex" &&
+        candidate.provider !== "kiro" &&
+        candidate.provider !== "custom"
+      )
         return {
           ...candidate,
           reason:
@@ -112,10 +124,16 @@ export class ConnectionRegistry {
     const executable = await resolveExecutable(request, candidates);
     let adapter: InspectableAdapter | undefined;
     try {
-      adapter = await this.createCodex(executable);
+      adapter = await (request.provider === "kiro"
+        ? this.createKiro(executable)
+        : this.createCodex(executable));
       const inspected = await adapter.inspect(this.projectDirectory);
-      if (inspected.provider !== "codex" || !inspected.version || !inspected.protocol)
-        throw new Error("Identity or protocol handshake did not verify Codex CLI.");
+      if (
+        inspected.provider !== (request.provider === "kiro" ? "kiro" : "codex") ||
+        !inspected.version ||
+        !inspected.protocol
+      )
+        throw new Error("Identity or protocol handshake did not verify the selected CLI.");
       const connection: AgentConnection =
         request.provider === "custom"
           ? {

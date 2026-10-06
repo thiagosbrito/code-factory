@@ -67,7 +67,7 @@ export const AgentSetupSection = ({
           </small>
         </div>
       )}
-      {(selected === "codex" || selected === "custom") && (
+      {(selected === "codex" || selected === "kiro" || selected === "custom") && (
         <Button
           type="button"
           variant="outline"
@@ -80,8 +80,8 @@ export const AgentSetupSection = ({
       )}
       {activeConnection?.authentication === "unauthenticated" && (
         <p className="mt-3 text-sm text-amber-800">
-          Authentication required. Run <code>codex login</code> in your terminal, then recheck.
-          Credentials stay with Codex.
+          Authentication required. Sign in with the selected agent CLI, then recheck. Credentials
+          stay with the agent.
         </p>
       )}
       {activeConnection && (

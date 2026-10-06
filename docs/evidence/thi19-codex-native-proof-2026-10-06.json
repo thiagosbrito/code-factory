@@ -1,0 +1,182 @@
+{
+  "version": "codex-cli 0.160.0",
+  "model": "gpt-6-sol",
+  "startedAt": "2026-10-06T07:55:16.696Z",
+  "methods": [
+    {
+      "method": "initialize",
+      "ok": true
+    },
+    {
+      "method": "account/read",
+      "ok": true
+    },
+    {
+      "method": "model/list",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    },
+    {
+      "method": "turn/steer",
+      "ok": true,
+      "acceptedTurnId": "01a11035-b902-7072-9594-2e6220ad7440"
+    },
+    {
+      "method": "initialize",
+      "ok": true
+    },
+    {
+      "method": "thread/resume",
+      "ok": true
+    },
+    {
+      "method": "thread/read",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    }
+  ],
+  "events": [
+    {
+      "type": "started",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11035-b85f-7532-b98b-525beb0c6fc0",
+      "turnId": "01a11035-b902-7072-9594-2e6220ad7440"
+    },
+    {
+      "type": "message",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11035-b85f-7532-b98b-525beb0c6fc0",
+      "turnId": "01a11035-b902-7072-9594-2e6220ad7440"
+    },
+    {
+      "type": "tool",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11035-b85f-7532-b98b-525beb0c6fc0",
+      "turnId": "01a11035-b902-7072-9594-2e6220ad7440"
+    },
+    {
+      "type": "tool",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11035-b85f-7532-b98b-525beb0c6fc0",
+      "turnId": "01a11035-b902-7072-9594-2e6220ad7440"
+    },
+    {
+      "type": "tool",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11035-b85f-7532-b98b-525beb0c6fc0",
+      "turnId": "01a11035-b902-7072-9594-2e6220ad7440"
+    },
+    {
+      "type": "tool",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11035-b85f-7532-b98b-525beb0c6fc0",
+      "turnId": "01a11035-b902-7072-9594-2e6220ad7440"
+    },
+    {
+      "type": "completed",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11035-b85f-7532-b98b-525beb0c6fc0",
+      "turnId": "01a11035-b902-7072-9594-2e6220ad7440",
+      "outcome": "succeeded"
+    }
+  ],
+  "checks": {
+    "authentication": true,
+    "steeringAcknowledged": true,
+    "started": true,
+    "streaming": true,
+    "completed": true,
+    "stableIdentity": true,
+    "editedProject": true,
+    "steeringApplied": true,
+    "recoveryAfterReconnect": true,
+    "controlledFailure": true,
+    "selectedRetry": true,
+    "noInterrupt": true
+  },
+  "failures": [],
+  "connection": {
+    "provider": "codex",
+    "version": "0.160.0",
+    "authentication": "authenticated",
+    "authenticationMechanism": "Codex-owned ChatGPT login",
+    "modelCount": 7
+  },
+  "completedOutput": "I’ll create proof.txt in this project, then confirm the result.Created `proof.txt` containing `native-proof` and `guidance.txt` containing `steer-acknowledged` in this project.",
+  "recoveredEvents": [
+    {
+      "type": "completed",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11035-b85f-7532-b98b-525beb0c6fc0",
+      "turnId": "01a11035-b902-7072-9594-2e6220ad7440",
+      "outcome": "succeeded",
+      "output": "I’ll create proof.txt in this project, then confirm the result.\nCreated `proof.txt` containing `native-proof` and `guidance.txt` containing `steer-acknowledged` in this project."
+    }
+  ],
+  "controlledFailure": "Codex stream error",
+  "failedSession": {
+    "sessionId": "01a11035-d941-78b2-a062-982192a38b82",
+    "turnId": "01a11035-d9b5-7831-8b58-41df7678b53b"
+  },
+  "retrySession": {
+    "runId": "thi6-native-proof",
+    "stepId": "selected-retry",
+    "attempt": 2,
+    "sessionId": "01a11035-e152-7b11-b368-ab6bcaa420a7",
+    "turnId": "01a11035-e1db-7120-9e14-86b9dd258274",
+    "outcome": "succeeded"
+  },
+  "projectFiles": [
+    {
+      "path": "proof.txt",
+      "content": "native-proof\n"
+    },
+    {
+      "path": "guidance.txt",
+      "content": "steer-acknowledged\n"
+    },
+    {
+      "path": "retry.txt",
+      "content": "retry-succeeded\n"
+    }
+  ],
+  "finishedAt": "2026-10-06T07:55:38.670Z"
+}
