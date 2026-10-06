@@ -114,6 +114,13 @@ branch, edits, and evidence. Do not restart completed work without a reason.
    record it as blocked and move to Backlog rather than silently resetting work.
 4. Implement the ticket's acceptance criteria. Keep unrelated improvements in
    the workpad as suggestions; do not create or execute extra tickets automatically.
+   A native process that fails only inside the worker sandbox does not block
+   independent implementation. Use an existing, scoped unrestricted protocol
+   receipt from the workpad to design the adapter, portable state, and behavior
+   tests. Finish and validate every part that can run in the workspace before
+   requesting external native or browser proof. Do not repeat the same failed
+   sandbox probe or claim that a simple protocol smoke test proves the full
+   ticket journey.
    Apply the TypeScript and React standards in CONTRIBUTING.md to new and changed
    code: separate rendering, state orchestration, domain rules, persistence, and
    adapters; split components by cohesive behavior and typed props; prefer
@@ -149,9 +156,13 @@ branch, edits, and evidence. Do not restart completed work without a reason.
 - For review fixes, the human returns the issue to Todo. Reuse its worktree,
   branch, PR, and workpad. Address feedback and rerun relevant validation.
 - If auth, permissions, tools, or unresolved product decisions block completion,
-  record a concise blocker and move to Backlog. Do not leave the issue active
-  and repeatedly spend turns on the same blocker. Missing required native proof
-  is a blocker, not a successful review handoff; preserve its uncommitted work.
+  first complete source changes and fixture checks that do not depend on the
+  blocker. Record the exact remaining proof and the candidate files in the
+  workpad, then move to Backlog. Do not leave the issue active and repeatedly
+  spend turns on the same blocker. Missing required native proof is a blocker,
+  not a successful review handoff; preserve its uncommitted work. A reviewer
+  may supply an unrestricted proof receipt and return the issue to Todo for
+  final checks and publication.
 - Do not merge PRs, publish packages, deploy, change remotes, delete branches,
   force-push, or reset existing work. Preserve evidence.
 - An invocation's max_turns is not a total ticket budget. The launcher has a
