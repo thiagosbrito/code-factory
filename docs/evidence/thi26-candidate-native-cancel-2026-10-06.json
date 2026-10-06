@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-06",
+  "observedAt": "2026-10-06T21:36:23.717Z",
+  "provider": "codex app-server 0.160.0",
+  "candidateCommit": "ac27bf1e42de3636cb834e313a6a68d61d8b7385",
+  "environment": "unrestricted disposable Git repository",
+  "threadId": "01a11325-6211-78d2-a3d6-cfa503f75c65",
+  "turnId": "01a11325-62a7-7e82-af23-d7c86b5e6047",
+  "activeToolObserved": {
+    "type": "commandExecution",
+    "state": "running",
+    "command": "sleep 30"
+  },
+  "action": "Abort the candidate CodexAdapter execution stream.",
+  "adapterResult": "AbortError",
+  "interpretation": "The candidate sent turn/interrupt for this exact thread and turn and awaited its successful response before surfacing AbortError. The active 30-second command was used to avoid the already-completed-turn race."
+}
