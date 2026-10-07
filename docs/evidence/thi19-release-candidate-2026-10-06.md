@@ -55,3 +55,15 @@ A disposable clone combined THI-19 `5f83b97`, latest main `0f9b1a5` (PR #25), an
 Combined full Vitest run passed 25 suites /166 tests; the additional Windows-fallback test passed in the final focused Kiro suite (7 tests). The final combined typecheck passed before that additional test, and the updated test also typechecks against the original candidate.
 
 Final THI-19 branch checks after the process-group repair passed `pnpm check` (24 suites /158 tests), `pnpm test:package`, and `git diff --check`. UI agent reports the mobile Enter repair in PR #27 `cc826ae` passed 10/10 on its branch and 10/10 on its disposable integration; that repair is not included in the packed artifact identified above, so this receipt retains its mobile failure truthfully.
+
+## Final combined review, 2026-10-07
+
+The later disposable candidate composed merged PR #29 (`e7085b4`), THI-28 PR #26 (`09ccaa3`), THI-19 PR #28 (`8f930da`), and THI-27 PR #27 (`4dbe62d`). This composition repairs the historical mobile keyboard failure above; the earlier screenshot and trace remain as evidence of that finding, not a claim about the final candidate.
+
+- `pnpm check` passed formatting, Oxlint, TypeScript, 25 Vitest suites / 172 tests, and production build.
+- `pnpm test:e2e` passed all three browser journeys: configured fixture ticket intake through parallel review/guidance/files/current validation/explicit acceptance, selected failed-review retry, and 390 × 844 select keyboard behavior with reduced motion. The PR #27 repair also passed 10/10 repeated packed mobile keyboard checks on its disposable integration.
+- `pnpm test:package` passed clean production-only install, public API, blank initialization/preservation, packaged UI/assets/API, and shutdown.
+- Fresh Kiro 2.28 and Codex 0.160.0 native receipts from the prior combined candidate cover model selection, overlapping reviews, no-delay selected retry, guidance/recovery, stale acceptance rejection and native cancellation. PR #29 adds native Codex turn interruption and local-check process-tree cancellation without changing Kiro's normal execution protocol.
+- Live Linear API retrieval remains unverified because the disposable runtime has no `CODE_FACTORY_LINEAR_API_KEY`. Configured tracker fixture retrieval and browser intake passed; this limitation must remain visible in release notes.
+
+No registry publication or deployment was performed.
