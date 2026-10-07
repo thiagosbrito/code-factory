@@ -18,6 +18,7 @@ pnpm check         # format, lint, strict types, tests, production build
 pnpm format       # format source
 pnpm build
 pnpm test:e2e     # fixture-backed browser journey and responsive accessibility checks
+pnpm test:e2e:native # opt-in authenticated Codex setup and model selection check
 pnpm test:package # production npm installation and packaged CLI/UI smoke test
 node dist/node/cli.js --help
 node dist/node/cli.js doctor
@@ -26,6 +27,8 @@ node dist/node/cli.js start --project /path/to/project
 ```
 
 The built package serves its bundled UI on http://127.0.0.1:4310. Use `--port 0` to select an available port automatically. Initialization exclusively creates `.code-factory/project.json`; it does not overwrite existing configuration or agent folders. No agent, model, or loop is preselected. `doctor` locates executable candidates without launching them; detection does not establish their identity, authentication, or capabilities.
+
+`pnpm test:e2e` runs browser journeys against disposable projects and fixture adapters. They cover setup and Kiro model selection, loop editing and translation, ticket intake, parallel review, guidance, cancellation, reload, retry, evidence, and mobile controls. `pnpm test:e2e:native` separately checks an installed, authenticated Codex CLI; it does not execute a model turn. The regular browser suite does not require agent credentials or a Linear key.
 
 ## Current scope
 

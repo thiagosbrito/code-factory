@@ -28,6 +28,7 @@
     "format:check": "oxfmt --check --threads=2",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:native": "CODE_FACTORY_E2E_NATIVE=1 playwright test native-onboarding.spec.ts",
     "test:package": "node scripts/smoke-package.mjs",
     "test:symphony": "node --test tests/symphony*.test.mjs",
     "symphony:install": "node scripts/symphony/install.mjs",

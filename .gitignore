@@ -5,6 +5,7 @@ playwright-report/
 test-results/
 .pnpm-*/
 .code-factory/
+.agents/
 *.tgz
 .DS_Store
 .env
