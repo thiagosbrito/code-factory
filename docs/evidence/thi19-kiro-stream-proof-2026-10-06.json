@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-06",
+  "provider": "kiro-cli 2.27.1",
+  "environment": "unrestricted disposable Git repository",
+  "command": "kiro-cli chat --output-format stream-json --trust-tools='' 'Reply with the single word ready.'",
+  "events": [
+    { "type": "runStarted", "payloadSchema": "acp", "acpProtocolVersion": 1, "engine": "v2" },
+    { "type": "metadata", "sessionId": "a37a6e06-d6f4-44aa-9ddb-203a3f4a6a50" },
+    {
+      "type": "sessionUpdate",
+      "sessionId": "a37a6e06-d6f4-44aa-9ddb-203a3f4a6a50",
+      "sessionUpdate": "agent_message_chunk",
+      "text": "ready"
+    },
+    {
+      "type": "runFinished",
+      "sessionId": "a37a6e06-d6f4-44aa-9ddb-203a3f4a6a50",
+      "status": "success",
+      "stopReason": "end_turn",
+      "finalText": "ready"
+    }
+  ],
+  "notYetVerified": [
+    "Code Factory adapter",
+    "project edit",
+    "guidance",
+    "retry",
+    "same portable loop",
+    "snapshot parity"
+  ]
+}

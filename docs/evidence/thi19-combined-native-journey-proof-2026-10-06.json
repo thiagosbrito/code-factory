@@ -1,0 +1,284 @@
+{
+  "startedAt": "2026-10-06T21:37:19.085Z",
+  "provider": "kiro",
+  "model": "claude-haiku-4.5",
+  "tracker": "configured fixture (not a live Linear retrieval)",
+  "firstTerminalSteps": [
+    {
+      "id": "19a0aa4c-94cf-4d6e-90e8-8037a03397f9",
+      "stepId": "build",
+      "status": "succeeded",
+      "outcome": "Done. Created native.txt with \"journey-proof\" in the project directory.",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "0781fff21f7921447f7984441d1ed1bb897457b099823f91ee452c7b0ba68a0f",
+      "attempts": [
+        {
+          "id": "1e4c49b2-d1dd-47cd-858b-2dada6d93604",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T21:37:22.867Z",
+          "endedAt": "2026-10-06T21:37:32.318Z",
+          "sessionId": "0ee4e299-605e-45d3-9bd5-867b932c350e",
+          "turnId": "a64fa96e-28c6-41cd-abba-07d4ad6641e0"
+        }
+      ]
+    },
+    {
+      "id": "4d374699-bef4-47b4-ad0a-23d74b414af9",
+      "stepId": "quality",
+      "status": "succeeded",
+      "outcome": "pass",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "f5d5f9ac1952e3ba375d744a4865b035bdb2e4aba6d5fb3525c005f0c85081cf",
+      "attempts": [
+        {
+          "id": "63e5be94-7da6-4788-8ea3-4c678e3b672e",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T21:37:32.458Z",
+          "endedAt": "2026-10-06T21:37:42.880Z",
+          "sessionId": "54042c5c-a192-4d93-9b97-4b6a53eb8ac9",
+          "turnId": "b4b32e59-c4a9-47c2-a4b8-3bad367e1296"
+        }
+      ]
+    },
+    {
+      "id": "8a381e8e-8dc6-4343-9824-664e0c9820e6",
+      "stepId": "security",
+      "status": "succeeded",
+      "outcome": "pass",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "f5d5f9ac1952e3ba375d744a4865b035bdb2e4aba6d5fb3525c005f0c85081cf",
+      "attempts": [
+        {
+          "id": "bebc8882-ba43-4e61-9960-41dad649ceb9",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T21:37:32.462Z",
+          "endedAt": "2026-10-06T21:37:42.096Z",
+          "sessionId": "cbccb911-e6d6-43dc-be5f-b4ae53cd7dac",
+          "turnId": "9d0e7970-7faf-4fb8-bf6d-7de0c52c085d"
+        }
+      ]
+    },
+    {
+      "id": "1931513f-2ef7-4747-aa41-fed5cbab0f2b",
+      "stepId": "check",
+      "status": "failed",
+      "outcome": "failed",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "3874bdcd389f33a07d512de9dcdc5a057b16739b8ed0cf03bd9ff0448a1c162b",
+      "attempts": [
+        {
+          "id": "cf3478a1-25d3-43df-92c0-4a74df877437",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "failed",
+          "startedAt": "2026-10-06T21:37:42.892Z",
+          "endedAt": "2026-10-06T21:37:43.123Z"
+        }
+      ]
+    }
+  ],
+  "firstTerminalMessages": [
+    {
+      "id": "fb989be1-ab45-4901-9b45-5badf77cee13",
+      "runId": "87bcb1e7-4fbd-4435-acac-5300e4135544",
+      "stepId": "build",
+      "attemptId": "1e4c49b2-d1dd-47cd-858b-2dada6d93604",
+      "createdAt": "2026-10-06T21:37:32.314Z",
+      "kind": "event",
+      "type": "lifecycle",
+      "title": "completed",
+      "detail": "Done. Created native.txt with \"journey-proof\" in the project directory.",
+      "state": "succeeded",
+      "sessionId": "0ee4e299-605e-45d3-9bd5-867b932c350e",
+      "turnId": "a64fa96e-28c6-41cd-abba-07d4ad6641e0",
+      "sequence": 17
+    },
+    {
+      "id": "10ad9665-9a28-4f84-b4c7-ec700f9be6a9",
+      "runId": "87bcb1e7-4fbd-4435-acac-5300e4135544",
+      "stepId": "security",
+      "attemptId": "bebc8882-ba43-4e61-9960-41dad649ceb9",
+      "createdAt": "2026-10-06T21:37:42.093Z",
+      "kind": "event",
+      "type": "lifecycle",
+      "title": "completed",
+      "detail": "pass",
+      "state": "succeeded",
+      "sessionId": "cbccb911-e6d6-43dc-be5f-b4ae53cd7dac",
+      "turnId": "9d0e7970-7faf-4fb8-bf6d-7de0c52c085d",
+      "sequence": 26
+    },
+    {
+      "id": "2130ab50-b99a-4736-a045-13b371d58894",
+      "runId": "87bcb1e7-4fbd-4435-acac-5300e4135544",
+      "stepId": "quality",
+      "attemptId": "63e5be94-7da6-4788-8ea3-4c678e3b672e",
+      "createdAt": "2026-10-06T21:37:42.878Z",
+      "kind": "event",
+      "type": "lifecycle",
+      "title": "completed",
+      "detail": "pass",
+      "state": "succeeded",
+      "sessionId": "54042c5c-a192-4d93-9b97-4b6a53eb8ac9",
+      "turnId": "b4b32e59-c4a9-47c2-a4b8-3bad367e1296",
+      "sequence": 27
+    }
+  ],
+  "finalSteps": [
+    {
+      "id": "19a0aa4c-94cf-4d6e-90e8-8037a03397f9",
+      "stepId": "build",
+      "status": "succeeded",
+      "outcome": "Done. Created native.txt with \"journey-proof\" in the project directory.",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "0781fff21f7921447f7984441d1ed1bb897457b099823f91ee452c7b0ba68a0f",
+      "attempts": [
+        {
+          "id": "1e4c49b2-d1dd-47cd-858b-2dada6d93604",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T21:37:22.867Z",
+          "endedAt": "2026-10-06T21:37:32.318Z",
+          "sessionId": "0ee4e299-605e-45d3-9bd5-867b932c350e",
+          "turnId": "a64fa96e-28c6-41cd-abba-07d4ad6641e0"
+        }
+      ]
+    },
+    {
+      "id": "4d374699-bef4-47b4-ad0a-23d74b414af9",
+      "stepId": "quality",
+      "status": "succeeded",
+      "outcome": "pass",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "f5d5f9ac1952e3ba375d744a4865b035bdb2e4aba6d5fb3525c005f0c85081cf",
+      "attempts": [
+        {
+          "id": "63e5be94-7da6-4788-8ea3-4c678e3b672e",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T21:37:32.458Z",
+          "endedAt": "2026-10-06T21:37:42.880Z",
+          "sessionId": "54042c5c-a192-4d93-9b97-4b6a53eb8ac9",
+          "turnId": "b4b32e59-c4a9-47c2-a4b8-3bad367e1296"
+        }
+      ]
+    },
+    {
+      "id": "8a381e8e-8dc6-4343-9824-664e0c9820e6",
+      "stepId": "security",
+      "status": "succeeded",
+      "outcome": "pass",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "f5d5f9ac1952e3ba375d744a4865b035bdb2e4aba6d5fb3525c005f0c85081cf",
+      "attempts": [
+        {
+          "id": "bebc8882-ba43-4e61-9960-41dad649ceb9",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T21:37:32.462Z",
+          "endedAt": "2026-10-06T21:37:42.096Z",
+          "sessionId": "cbccb911-e6d6-43dc-be5f-b4ae53cd7dac",
+          "turnId": "9d0e7970-7faf-4fb8-bf6d-7de0c52c085d"
+        }
+      ]
+    },
+    {
+      "id": "1931513f-2ef7-4747-aa41-fed5cbab0f2b",
+      "stepId": "check",
+      "status": "succeeded",
+      "outcome": "passed",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "3874bdcd389f33a07d512de9dcdc5a057b16739b8ed0cf03bd9ff0448a1c162b",
+      "attempts": [
+        {
+          "id": "cf3478a1-25d3-43df-92c0-4a74df877437",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "failed",
+          "startedAt": "2026-10-06T21:37:42.892Z",
+          "endedAt": "2026-10-06T21:37:43.123Z"
+        },
+        {
+          "id": "1d5fd5ff-2a33-4f8e-ab82-250065dd2bc5",
+          "number": 2,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T21:37:43.298Z",
+          "endedAt": "2026-10-06T21:37:43.535Z"
+        }
+      ]
+    }
+  ],
+  "runId": "87bcb1e7-4fbd-4435-acac-5300e4135544",
+  "steps": [
+    {
+      "stepId": "build",
+      "status": "succeeded",
+      "attempts": [
+        {
+          "id": "1e4c49b2-d1dd-47cd-858b-2dada6d93604",
+          "startedAt": "2026-10-06T21:37:22.867Z",
+          "endedAt": "2026-10-06T21:37:32.318Z"
+        }
+      ]
+    },
+    {
+      "stepId": "quality",
+      "status": "succeeded",
+      "attempts": [
+        {
+          "id": "63e5be94-7da6-4788-8ea3-4c678e3b672e",
+          "startedAt": "2026-10-06T21:37:32.458Z",
+          "endedAt": "2026-10-06T21:37:42.880Z"
+        }
+      ]
+    },
+    {
+      "stepId": "security",
+      "status": "succeeded",
+      "attempts": [
+        {
+          "id": "bebc8882-ba43-4e61-9960-41dad649ceb9",
+          "startedAt": "2026-10-06T21:37:32.462Z",
+          "endedAt": "2026-10-06T21:37:42.096Z"
+        }
+      ]
+    },
+    {
+      "stepId": "check",
+      "status": "succeeded",
+      "attempts": [
+        {
+          "id": "cf3478a1-25d3-43df-92c0-4a74df877437",
+          "startedAt": "2026-10-06T21:37:42.892Z",
+          "endedAt": "2026-10-06T21:37:43.123Z"
+        },
+        {
+          "id": "1d5fd5ff-2a33-4f8e-ab82-250065dd2bc5",
+          "startedAt": "2026-10-06T21:37:43.298Z",
+          "endedAt": "2026-10-06T21:37:43.535Z"
+        }
+      ]
+    }
+  ],
+  "parallelOverlap": true,
+  "freshValidation": true,
+  "explicitAcceptance": true,
+  "staleAcceptanceRejected": true,
+  "selectedRetryOnly": true,
+  "passed": true,
+  "endedAt": "2026-10-06T21:37:43.796Z",
+  "project": "/var/folders/vd/zgjc86kn7s7fy1g07qwmjltw0000gn/T/factory-native-journey-UIe2U0",
+  "candidate": "THI-19 5f83b97 + main 0f9b1a5 + THI-28 ee564f674fe941b16eda06a11df821fe5753c445 + Kiro POSIX process-group and pause/waitingInput compatibility edits",
+  "settleDelayMs": 0,
+  "version": "kiro-cli 2.28.0"
+}

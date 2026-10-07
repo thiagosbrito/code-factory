@@ -11,6 +11,7 @@ export type SetupControllerOptions = {
   onConnect: (
     request:
       | { provider: "codex"; launch: true }
+      | { provider: "kiro"; launch: true }
       | { provider: "custom"; launch: true; executable: string; protocol: "codex-app-server" },
   ) => Promise<AgentConnection>;
   onSaved: (state: ProjectResponse) => void;
@@ -131,13 +132,13 @@ export const useSetupController = ({
     }
   };
   const verify = async () => {
-    if (selected !== "codex" && selected !== "custom") return;
+    if (selected !== "codex" && selected !== "kiro" && selected !== "custom") return;
     setVerifying(true);
     setError("");
     try {
       const connection = await onConnect(
-        selected === "codex"
-          ? { provider: "codex", launch: true }
+        selected === "codex" || selected === "kiro"
+          ? { provider: selected, launch: true }
           : {
               provider: "custom",
               launch: true,

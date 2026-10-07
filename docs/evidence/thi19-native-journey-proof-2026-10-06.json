@@ -1,0 +1,280 @@
+{
+  "startedAt": "2026-10-06T11:45:43.725Z",
+  "provider": "kiro",
+  "model": "claude-haiku-4.5",
+  "tracker": "configured fixture (not a live Linear retrieval)",
+  "firstTerminalSteps": [
+    {
+      "id": "023c20d7-81b6-48e4-9934-3cd0afa9f2a5",
+      "stepId": "build",
+      "status": "succeeded",
+      "outcome": "Done. Created native.txt containing \"journey-proof\".",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "0781fff21f7921447f7984441d1ed1bb897457b099823f91ee452c7b0ba68a0f",
+      "attempts": [
+        {
+          "id": "99ff5460-9ee9-405d-9ce8-5b7ce42ae6f2",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T11:45:48.561Z",
+          "endedAt": "2026-10-06T11:45:58.797Z",
+          "sessionId": "d1198f70-e6f2-49f5-b380-fb29fb11c484",
+          "turnId": "7472dfd1-d9e5-4143-a5ee-99d0a4bf59ba"
+        }
+      ]
+    },
+    {
+      "id": "70f43095-6983-4656-ad13-4c32eefaf12d",
+      "stepId": "quality",
+      "status": "succeeded",
+      "outcome": "pass",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "5700fc29c2fbc383ab043481134d67383d9d808bc6d98040c9e5cb1b439eaca6",
+      "attempts": [
+        {
+          "id": "c2937607-2241-4f8c-a6fb-010b23cfbf79",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T11:45:58.914Z",
+          "endedAt": "2026-10-06T11:46:10.415Z",
+          "sessionId": "225cc6ec-a0d2-4533-a374-647582b377af",
+          "turnId": "da34079d-84b2-46ed-82cd-20c553424d63"
+        }
+      ]
+    },
+    {
+      "id": "f24a4b0a-ccdb-4902-95a8-e80edcddc69e",
+      "stepId": "security",
+      "status": "succeeded",
+      "outcome": "pass",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "5700fc29c2fbc383ab043481134d67383d9d808bc6d98040c9e5cb1b439eaca6",
+      "attempts": [
+        {
+          "id": "5f3894e8-1c59-4084-88ce-7eee31b0890c",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T11:45:58.916Z",
+          "endedAt": "2026-10-06T11:46:09.041Z",
+          "sessionId": "ef393ce3-fd5e-4062-8c35-7f0b8c6cd293",
+          "turnId": "ff1b1d19-54e3-49c4-a2e3-e357758e4835"
+        }
+      ]
+    },
+    {
+      "id": "a17aaf75-dd9a-4493-a612-cb04bcd308cf",
+      "stepId": "check",
+      "status": "failed",
+      "outcome": "failed",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "7ce5e7a6c94b6abec33f8eb1fbe15e49c8ba2fe0d5cf3fa2c09066a95a29132f",
+      "attempts": [
+        {
+          "id": "17262245-7287-4460-a66c-e1028bf05e8d",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "failed",
+          "startedAt": "2026-10-06T11:46:10.424Z",
+          "endedAt": "2026-10-06T11:46:10.616Z"
+        }
+      ]
+    }
+  ],
+  "firstTerminalMessages": [
+    {
+      "id": "ffd8fb4f-f892-455b-89e4-8b0025aff92b",
+      "runId": "d220d6a8-fdbb-4da4-aa88-b8a39c7008e1",
+      "stepId": "build",
+      "attemptId": "99ff5460-9ee9-405d-9ce8-5b7ce42ae6f2",
+      "createdAt": "2026-10-06T11:45:58.795Z",
+      "kind": "event",
+      "type": "lifecycle",
+      "title": "completed",
+      "detail": "Done. Created native.txt containing \"journey-proof\".",
+      "state": "succeeded",
+      "sessionId": "d1198f70-e6f2-49f5-b380-fb29fb11c484",
+      "turnId": "7472dfd1-d9e5-4143-a5ee-99d0a4bf59ba",
+      "sequence": 16
+    },
+    {
+      "id": "2ba626ec-8e92-4959-baca-d79fb497ab44",
+      "runId": "d220d6a8-fdbb-4da4-aa88-b8a39c7008e1",
+      "stepId": "security",
+      "attemptId": "5f3894e8-1c59-4084-88ce-7eee31b0890c",
+      "createdAt": "2026-10-06T11:46:09.038Z",
+      "kind": "event",
+      "type": "lifecycle",
+      "title": "completed",
+      "detail": "pass",
+      "state": "succeeded",
+      "sessionId": "ef393ce3-fd5e-4062-8c35-7f0b8c6cd293",
+      "turnId": "ff1b1d19-54e3-49c4-a2e3-e357758e4835",
+      "sequence": 33
+    },
+    {
+      "id": "4e9ee10a-9037-4e57-aaf6-640b8d661d0b",
+      "runId": "d220d6a8-fdbb-4da4-aa88-b8a39c7008e1",
+      "stepId": "quality",
+      "attemptId": "c2937607-2241-4f8c-a6fb-010b23cfbf79",
+      "createdAt": "2026-10-06T11:46:10.413Z",
+      "kind": "event",
+      "type": "lifecycle",
+      "title": "completed",
+      "detail": "pass",
+      "state": "succeeded",
+      "sessionId": "225cc6ec-a0d2-4533-a374-647582b377af",
+      "turnId": "da34079d-84b2-46ed-82cd-20c553424d63",
+      "sequence": 34
+    }
+  ],
+  "finalSteps": [
+    {
+      "id": "023c20d7-81b6-48e4-9934-3cd0afa9f2a5",
+      "stepId": "build",
+      "status": "succeeded",
+      "outcome": "Done. Created native.txt containing \"journey-proof\".",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "0781fff21f7921447f7984441d1ed1bb897457b099823f91ee452c7b0ba68a0f",
+      "attempts": [
+        {
+          "id": "99ff5460-9ee9-405d-9ce8-5b7ce42ae6f2",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T11:45:48.561Z",
+          "endedAt": "2026-10-06T11:45:58.797Z",
+          "sessionId": "d1198f70-e6f2-49f5-b380-fb29fb11c484",
+          "turnId": "7472dfd1-d9e5-4143-a5ee-99d0a4bf59ba"
+        }
+      ]
+    },
+    {
+      "id": "70f43095-6983-4656-ad13-4c32eefaf12d",
+      "stepId": "quality",
+      "status": "succeeded",
+      "outcome": "pass",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "5700fc29c2fbc383ab043481134d67383d9d808bc6d98040c9e5cb1b439eaca6",
+      "attempts": [
+        {
+          "id": "c2937607-2241-4f8c-a6fb-010b23cfbf79",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T11:45:58.914Z",
+          "endedAt": "2026-10-06T11:46:10.415Z",
+          "sessionId": "225cc6ec-a0d2-4533-a374-647582b377af",
+          "turnId": "da34079d-84b2-46ed-82cd-20c553424d63"
+        }
+      ]
+    },
+    {
+      "id": "f24a4b0a-ccdb-4902-95a8-e80edcddc69e",
+      "stepId": "security",
+      "status": "succeeded",
+      "outcome": "pass",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "5700fc29c2fbc383ab043481134d67383d9d808bc6d98040c9e5cb1b439eaca6",
+      "attempts": [
+        {
+          "id": "5f3894e8-1c59-4084-88ce-7eee31b0890c",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T11:45:58.916Z",
+          "endedAt": "2026-10-06T11:46:09.041Z",
+          "sessionId": "ef393ce3-fd5e-4062-8c35-7f0b8c6cd293",
+          "turnId": "ff1b1d19-54e3-49c4-a2e3-e357758e4835"
+        }
+      ]
+    },
+    {
+      "id": "a17aaf75-dd9a-4493-a612-cb04bcd308cf",
+      "stepId": "check",
+      "status": "succeeded",
+      "outcome": "passed",
+      "candidateId": "299146b2592b7cde74743a158bf25ab731e8585c68a65131bc95e686886bf727",
+      "inputHash": "7ce5e7a6c94b6abec33f8eb1fbe15e49c8ba2fe0d5cf3fa2c09066a95a29132f",
+      "attempts": [
+        {
+          "id": "17262245-7287-4460-a66c-e1028bf05e8d",
+          "number": 1,
+          "implementationRound": 1,
+          "status": "failed",
+          "startedAt": "2026-10-06T11:46:10.424Z",
+          "endedAt": "2026-10-06T11:46:10.616Z"
+        },
+        {
+          "id": "10c4f6c2-63e6-4411-8423-8513432e424e",
+          "number": 2,
+          "implementationRound": 1,
+          "status": "succeeded",
+          "startedAt": "2026-10-06T11:46:10.886Z",
+          "endedAt": "2026-10-06T11:46:11.059Z"
+        }
+      ]
+    }
+  ],
+  "runId": "d220d6a8-fdbb-4da4-aa88-b8a39c7008e1",
+  "steps": [
+    {
+      "stepId": "build",
+      "status": "succeeded",
+      "attempts": [
+        {
+          "id": "99ff5460-9ee9-405d-9ce8-5b7ce42ae6f2",
+          "startedAt": "2026-10-06T11:45:48.561Z",
+          "endedAt": "2026-10-06T11:45:58.797Z"
+        }
+      ]
+    },
+    {
+      "stepId": "quality",
+      "status": "succeeded",
+      "attempts": [
+        {
+          "id": "c2937607-2241-4f8c-a6fb-010b23cfbf79",
+          "startedAt": "2026-10-06T11:45:58.914Z",
+          "endedAt": "2026-10-06T11:46:10.415Z"
+        }
+      ]
+    },
+    {
+      "stepId": "security",
+      "status": "succeeded",
+      "attempts": [
+        {
+          "id": "5f3894e8-1c59-4084-88ce-7eee31b0890c",
+          "startedAt": "2026-10-06T11:45:58.916Z",
+          "endedAt": "2026-10-06T11:46:09.041Z"
+        }
+      ]
+    },
+    {
+      "stepId": "check",
+      "status": "succeeded",
+      "attempts": [
+        {
+          "id": "17262245-7287-4460-a66c-e1028bf05e8d",
+          "startedAt": "2026-10-06T11:46:10.424Z",
+          "endedAt": "2026-10-06T11:46:10.616Z"
+        },
+        {
+          "id": "10c4f6c2-63e6-4411-8423-8513432e424e",
+          "startedAt": "2026-10-06T11:46:10.886Z",
+          "endedAt": "2026-10-06T11:46:11.059Z"
+        }
+      ]
+    }
+  ],
+  "parallelOverlap": true,
+  "freshValidation": true,
+  "explicitAcceptance": true,
+  "staleAcceptanceRejected": true,
+  "selectedRetryOnly": true,
+  "passed": true,
+  "endedAt": "2026-10-06T11:46:11.555Z"
+}

@@ -5,7 +5,7 @@ import { discoverAgents } from "./adapters/discovery.js";
 import { initializeProject } from "./runtime/project.js";
 import { startLocalServer } from "./runtime/server.js";
 
-const help = `Code Factory\n\n  code-factory init [directory]\n  code-factory doctor\n  code-factory start [--project directory] [--port 4310]\n\nFoundation mode: project setup, candidate discovery, and a local UI.\nReal agent execution is not connected yet.\n`;
+const help = `Code Factory\n\n  code-factory init [directory]\n  code-factory doctor\n  code-factory start [--project directory] [--port 4310]\n\nInitialize a local project, inspect agent candidates, and open the local UI.\nConnect a supported agent in the UI before running agent-backed work.\n`;
 
 const main = async () => {
   const { positionals, values } = parseArgs({
@@ -41,7 +41,7 @@ const main = async () => {
       ? { devOrigin: process.env.CODE_FACTORY_DEV_ORIGIN }
       : {}),
   });
-  console.log(`Code Factory: ${url}\nAgent execution is not connected yet. Press Ctrl+C to stop.`);
+  console.log(`Code Factory: ${url}\nPress Ctrl+C to stop.`);
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => server.close());
 };
 

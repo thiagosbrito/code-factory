@@ -1,0 +1,91 @@
+{
+  "startedAt": "2026-10-06T10:47:26.879Z",
+  "model": "claude-haiku-4.5",
+  "catalogIds": [
+    "claude-opus-5.5",
+    "claude-sonnet-5.5",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-opus-4.8",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "claude-opus-4.7",
+    "claude-opus-4.6",
+    "claude-sonnet-4.6",
+    "claude-opus-4.5",
+    "claude-sonnet-4.5",
+    "claude-sonnet-4",
+    "claude-haiku-4.5"
+  ],
+  "restartRequiresVerification": true,
+  "selectedModelUsableAfterVerification": true,
+  "events": [
+    {
+      "type": "started",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "tool",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "tool",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "message",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44"
+    },
+    {
+      "type": "completed",
+      "sessionId": "a2c0c95f-d08d-49bd-bb92-0d9248a81f44",
+      "outcome": "succeeded"
+    }
+  ],
+  "nativeEdit": true,
+  "completed": true,
+  "version": "kiro-cli 2.27.1",
+  "passed": true,
+  "finishedAt": "2026-10-06T10:47:41.940Z"
+}

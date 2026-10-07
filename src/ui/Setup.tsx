@@ -24,6 +24,7 @@ export const Setup = ({
   onConnect: (
     request:
       | { provider: "codex"; launch: true }
+      | { provider: "kiro"; launch: true }
       | { provider: "custom"; launch: true; executable: string; protocol: "codex-app-server" },
   ) => Promise<AgentConnection>;
   onSaved: (state: ProjectResponse) => void;

@@ -1,0 +1,183 @@
+{
+  "version": "codex-cli 0.160.0",
+  "model": "gpt-6-sol",
+  "startedAt": "2026-10-06T21:34:27.488Z",
+  "methods": [
+    {
+      "method": "initialize",
+      "ok": true
+    },
+    {
+      "method": "account/read",
+      "ok": true
+    },
+    {
+      "method": "model/list",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    },
+    {
+      "method": "turn/steer",
+      "ok": true,
+      "acceptedTurnId": "01a11323-b998-7060-adb3-47be38dac410"
+    },
+    {
+      "method": "initialize",
+      "ok": true
+    },
+    {
+      "method": "thread/resume",
+      "ok": true
+    },
+    {
+      "method": "thread/read",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    },
+    {
+      "method": "thread/start",
+      "ok": true
+    },
+    {
+      "method": "turn/start",
+      "ok": true
+    }
+  ],
+  "events": [
+    {
+      "type": "started",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11323-b910-7b03-8d89-f92cb27020fc",
+      "turnId": "01a11323-b998-7060-adb3-47be38dac410"
+    },
+    {
+      "type": "message",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11323-b910-7b03-8d89-f92cb27020fc",
+      "turnId": "01a11323-b998-7060-adb3-47be38dac410"
+    },
+    {
+      "type": "tool",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11323-b910-7b03-8d89-f92cb27020fc",
+      "turnId": "01a11323-b998-7060-adb3-47be38dac410"
+    },
+    {
+      "type": "tool",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11323-b910-7b03-8d89-f92cb27020fc",
+      "turnId": "01a11323-b998-7060-adb3-47be38dac410"
+    },
+    {
+      "type": "tool",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11323-b910-7b03-8d89-f92cb27020fc",
+      "turnId": "01a11323-b998-7060-adb3-47be38dac410"
+    },
+    {
+      "type": "tool",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11323-b910-7b03-8d89-f92cb27020fc",
+      "turnId": "01a11323-b998-7060-adb3-47be38dac410"
+    },
+    {
+      "type": "completed",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11323-b910-7b03-8d89-f92cb27020fc",
+      "turnId": "01a11323-b998-7060-adb3-47be38dac410",
+      "outcome": "succeeded"
+    }
+  ],
+  "checks": {
+    "authentication": true,
+    "steeringAcknowledged": true,
+    "started": true,
+    "streaming": true,
+    "completed": true,
+    "stableIdentity": true,
+    "editedProject": true,
+    "steeringApplied": true,
+    "recoveryAfterReconnect": true,
+    "controlledFailure": true,
+    "selectedRetry": true,
+    "noInterrupt": true
+  },
+  "failures": [],
+  "connection": {
+    "provider": "codex",
+    "version": "0.160.0",
+    "authentication": "authenticated",
+    "authenticationMechanism": "Codex-owned ChatGPT login",
+    "modelCount": 8
+  },
+  "completedOutput": "I\u2019ll create `proof.txt` here with the requested text.Created `proof.txt` containing `native-proof` and `guidance.txt` containing `steer-acknowledged` in the disposable project.",
+  "recoveredEvents": [
+    {
+      "type": "completed",
+      "runId": "thi6-native-proof",
+      "stepId": "disposable-edit",
+      "attempt": 1,
+      "sessionId": "01a11323-b910-7b03-8d89-f92cb27020fc",
+      "turnId": "01a11323-b998-7060-adb3-47be38dac410",
+      "outcome": "succeeded",
+      "output": "I\u2019ll create `proof.txt` here with the requested text.\nCreated `proof.txt` containing `native-proof` and `guidance.txt` containing `steer-acknowledged` in the disposable project."
+    }
+  ],
+  "controlledFailure": "Codex stream error",
+  "failedSession": {
+    "sessionId": "01a11323-dd5a-7a52-bc31-e2e8eac41613",
+    "turnId": "01a11323-ddce-7303-8dda-f56982acf1d7"
+  },
+  "retrySession": {
+    "runId": "thi6-native-proof",
+    "stepId": "selected-retry",
+    "attempt": 2,
+    "sessionId": "01a11323-e52d-7873-94ac-534c30566e8b",
+    "turnId": "01a11323-e5b8-74b0-b289-8563ba64df1b",
+    "outcome": "succeeded"
+  },
+  "projectFiles": [
+    {
+      "path": "proof.txt",
+      "content": "native-proof\n"
+    },
+    {
+      "path": "guidance.txt",
+      "content": "steer-acknowledged\n"
+    },
+    {
+      "path": "retry.txt",
+      "content": "retry-succeeded\n"
+    }
+  ],
+  "finishedAt": "2026-10-06T21:34:46.096Z",
+  "candidate": "THI-19 5f83b97 + main 0f9b1a5 + THI-28 ee564f6 + Kiro compatibility edit"
+}

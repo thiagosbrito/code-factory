@@ -1,0 +1,16 @@
+{
+  "version": "kiro-cli 2.28.0",
+  "firstEvent": "started",
+  "before": [74665, 74726],
+  "after": [],
+  "stopped": true,
+  "capabilities": {
+    "streaming": "supported",
+    "steering": "unsupported",
+    "resume": "unsupported",
+    "pause": "unsupported",
+    "waitingInput": "unsupported"
+  },
+  "passed": true,
+  "candidate": "THI-19 5f83b97 + main 0f9b1a5 + THI-28 ee564f674fe941b16eda06a11df821fe5753c445 + Kiro POSIX process-group and pause/waitingInput compatibility edits"
+}
