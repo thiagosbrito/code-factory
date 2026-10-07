@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mockAdapter } from "../src/adapters/mock.js";
-import type { AdapterEvent } from "../src/adapters/contract.js";
+import { CancellationUnconfirmedError, type AdapterEvent } from "../src/adapters/contract.js";
 import { cancelRun, executeRun, retryStep } from "../src/runtime/scheduler.js";
 import { createRun, readRun, updateRun } from "../src/runtime/storage.js";
 import { startLocalServer } from "../src/runtime/server.js";
@@ -616,6 +616,66 @@ describe("portable scheduler", () => {
     }
   });
 
+  it.skipIf(process.platform === "win32")(
+    "cancels a check's descendant process before it can write to the workspace",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "factory-check-cancel-"));
+      try {
+        const workspace = join(root, ".code-factory", "workspaces", "candidate");
+        await mkdir(workspace, { recursive: true });
+        const seed = run({
+          steps: [
+            {
+              id: "check",
+              name: "Check",
+              kind: "check",
+              stage: "validation",
+              role: "checker",
+              instruction: "sh -c 'echo child-ready; sleep 1; echo survived > surviving.txt'",
+            },
+          ],
+          dependencies: [],
+          groups: [],
+          joins: [],
+        });
+        const record = createRunRecord(
+          createRunSnapshot(
+            seed.snapshot.loop,
+            { description: "Task" },
+            { provider: "mock", model: "default" },
+            {
+              id: "baseline",
+              kind: "git",
+              revision: "abc",
+              workspace: ".code-factory/workspaces/candidate",
+              capturedAt: new Date().toISOString(),
+            },
+          ),
+        );
+        await createRun(root, record);
+        const work = executeRun(root, record.snapshot.id, () => mockAdapter);
+        let ready = false;
+        for (let attempt = 0; attempt < 100 && !ready; attempt++) {
+          const current = await readRun(root, record.snapshot.id);
+          ready = !!current?.evidence.some(
+            (item) => item.kind === "event" && item.detail?.includes("child-ready"),
+          );
+          if (!ready) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(ready).toBe(true);
+        const result = await cancelRun(root, record.snapshot.id);
+        await work;
+        expect(result.status).toBe("canceled");
+        await new Promise((resolve) => setTimeout(resolve, 1_100));
+        await expect(readFile(join(workspace, "surviving.txt"), "utf8")).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("rejects a review that changes its frozen candidate copy", async () => {
     const root = await mkdtemp(join(tmpdir(), "factory-frozen-"));
     try {
@@ -709,6 +769,68 @@ describe("portable scheduler", () => {
       const canceled = await cancelRun(root, record.snapshot.id);
       expect(canceled.status).toBe("canceled");
       expect((await work).steps[0]?.attempts[0]?.status).toBe("canceled");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not confirm a canceled run when native interruption fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "factory-cancel-unconfirmed-"));
+    try {
+      await mkdir(join(root, ".code-factory", "workspaces", "candidate"), { recursive: true });
+      const seed = run({
+        steps: [step("build", "implementation")],
+        dependencies: [],
+        groups: [],
+        joins: [],
+      });
+      const record = createRunRecord(
+        createRunSnapshot(
+          seed.snapshot.loop,
+          { description: "Task" },
+          { provider: "mock", model: "default" },
+          {
+            id: "baseline",
+            kind: "git",
+            revision: "abc",
+            workspace: ".code-factory/workspaces/candidate",
+            capturedAt: new Date().toISOString(),
+          },
+        ),
+      );
+      await createRun(root, record);
+      let started: () => void = () => {};
+      const launched = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const adapter = {
+        ...mockAdapter,
+        async *execute(
+          input: Parameters<typeof mockAdapter.execute>[0],
+          signal: AbortSignal,
+        ): AsyncIterable<AdapterEvent> {
+          yield {
+            type: "started",
+            runId: input.runId,
+            stepId: input.stepId,
+            attempt: input.attempt,
+            sessionId: crypto.randomUUID(),
+            turnId: crypto.randomUUID(),
+          };
+          started();
+          await new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve(), { once: true }),
+          );
+          throw new CancellationUnconfirmedError("Native interruption failed.");
+        },
+      };
+      const work = executeRun(root, record.snapshot.id, () => adapter);
+      await launched;
+      const result = await cancelRun(root, record.snapshot.id);
+      expect(await work).toEqual(result);
+      expect(result.status).toBe("unavailable");
+      expect(result.status).not.toBe("canceled");
+      expect(result.steps[0]?.attempts[0]?.status).toBe("failed");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

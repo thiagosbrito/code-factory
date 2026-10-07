@@ -3,13 +3,14 @@ import { execFile } from "node:child_process";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { z } from "zod";
-import type {
-  AgentAdapter,
-  AgentCapabilities,
-  AgentConnection,
-  AdapterEvent,
-  StepExecutionInput,
-  StepSession,
+import {
+  CancellationUnconfirmedError,
+  type AgentAdapter,
+  type AgentCapabilities,
+  type AgentConnection,
+  type AdapterEvent,
+  type StepExecutionInput,
+  type StepSession,
 } from "./contract.js";
 
 const rpcMessageSchema = z.object({
@@ -321,8 +322,13 @@ export class CodexAdapter implements AgentAdapter {
         sessionId,
         turnId: identifier(turn.id),
       };
+      const cancellation = this.interruptOnAbort(session, signal);
       yield { type: "started", ...session };
-      yield* feed.stream(session);
+      try {
+        yield* feed.stream(session);
+      } finally {
+        await cancellation.close();
+      }
     } finally {
       feed.close();
     }
@@ -332,6 +338,7 @@ export class CodexAdapter implements AgentAdapter {
     signal.throwIfAborted();
     await this.initialize();
     const feed = this.events(session, signal);
+    const cancellation = this.interruptOnAbort(session, signal);
     try {
       await this.rpc.request("thread/resume", { threadId: session.sessionId, excludeTurns: true });
       const read = object(
@@ -352,8 +359,34 @@ export class CodexAdapter implements AgentAdapter {
       }
       yield* feed.stream(session, this.turnOutput(turn));
     } finally {
+      await cancellation.close();
       feed.close();
     }
+  }
+
+  private interruptOnAbort(session: StepSession, signal: AbortSignal): { close(): Promise<void> } {
+    let interrupt: Promise<unknown> | undefined;
+    const requestInterrupt = () => {
+      interrupt ??= this.rpc.request("turn/interrupt", {
+        threadId: session.sessionId,
+        turnId: session.turnId,
+      });
+    };
+    signal.addEventListener("abort", requestInterrupt, { once: true });
+    return {
+      close: async () => {
+        signal.removeEventListener("abort", requestInterrupt);
+        if (signal.aborted) requestInterrupt();
+        try {
+          await interrupt;
+        } catch (error) {
+          if (error instanceof Error && /no active turn to interrupt/i.test(error.message)) return;
+          throw new CancellationUnconfirmedError(
+            `Codex did not confirm turn interruption: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      },
+    };
   }
 
   async steer(

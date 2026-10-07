@@ -23,6 +23,7 @@ class FixtureRpc implements CodexRpc {
     private readonly failFirst = false,
     private readonly recoveryActive = false,
     private readonly requestInput = false,
+    private readonly interruptFailure = "",
   ) {}
   calls: { method: string; params: Record<string, unknown> }[] = [];
   private listeners = new Set<(message: Notification) => void>();
@@ -65,6 +66,10 @@ class FixtureRpc implements CodexRpc {
         ],
       };
     if (method === "thread/start") return { thread: { id: `thread-${++this.nextThread}` } };
+    if (method === "turn/interrupt") {
+      if (this.interruptFailure) throw new Error(this.interruptFailure);
+      return {};
+    }
     if (method === "turn/start") {
       const threadId = String(params.threadId);
       const turnId = `turn-${threadId}`;
@@ -398,6 +403,45 @@ describe("portable adapter conformance", () => {
       expectedTurnId: "turn-thread-1",
     });
     expect(rpc.calls.some((call) => call.method === "turn/interrupt")).toBe(false);
+  });
+
+  it("interrupts the exact native turn before an aborted execution stream closes", async () => {
+    const rpc = new FixtureRpc(false, false, true);
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    const controller = new AbortController();
+    const iterator = adapter.execute(input, controller.signal)[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: "started" } });
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: "input-request" } });
+    controller.abort();
+    await expect(iterator.next()).rejects.toMatchObject({ name: "AbortError" });
+    expect(rpc.calls.filter((call) => call.method === "turn/interrupt")).toEqual([
+      {
+        method: "turn/interrupt",
+        params: { threadId: "thread-1", turnId: "turn-thread-1" },
+      },
+    ]);
+  });
+
+  it("does not confirm cancellation when the native interrupt fails", async () => {
+    const rpc = new FixtureRpc(false, false, true, "transport closed");
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    const controller = new AbortController();
+    const iterator = adapter.execute(input, controller.signal)[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.next();
+    controller.abort();
+    await expect(iterator.next()).rejects.toThrow(/did not confirm turn interruption/);
+  });
+
+  it("accepts an already-finished native turn as safely stopped", async () => {
+    const rpc = new FixtureRpc(false, false, true, "no active turn to interrupt");
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    const controller = new AbortController();
+    const iterator = adapter.execute(input, controller.signal)[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.next();
+    controller.abort();
+    await expect(iterator.next()).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("reattaches to an in-progress turn and streams its remaining native events", async () => {
