@@ -1,13 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createLoopDraft, parseLoop, type LoopDefinition } from "../src/domain/loop.js";
-import { TranslationError } from "../src/translators/contract.js";
+import { importerGeneratedRole, TranslationError } from "../src/translators/contract.js";
 import { kiroWorkflowTranslator } from "../src/translators/kiro-workflow.js";
 import {
+  boundedJson,
   humanize,
   inferStage,
+  maxJsonLength,
   normalizeId,
-  truncateJson,
   uniqueId,
 } from "../src/translators/kiro-workflow-ids.js";
 import { formatIssuePath, parseKiroWorkflow } from "../src/translators/kiro-workflow-schema.js";
@@ -49,12 +50,19 @@ describe("kiro workflow ids", () => {
     expect(inferStage("wf-coder", "planet")).toBeUndefined();
   });
 
-  it("truncates JSON beyond 500 characters", () => {
-    const exact = "x".repeat(498);
-    expect(truncateJson(exact)).toBe(`"${exact}"`);
-    const over = "x".repeat(499);
-    expect(truncateJson(over)).toBe(`"${over}…`);
-    expect(truncateJson(over)).toHaveLength(501);
+  it("keeps JSON whole up to the limit and truncates beyond it", () => {
+    const exact = "x".repeat(maxJsonLength - 2);
+    expect(boundedJson(exact)).toEqual({
+      text: `"${exact}"`,
+      length: maxJsonLength,
+      truncated: false,
+    });
+    const over = "x".repeat(maxJsonLength - 1);
+    const bounded = boundedJson(over);
+    expect(bounded.text).toBe(`"${over}…`);
+    expect(bounded.text).toHaveLength(maxJsonLength + 1);
+    expect(bounded).toMatchObject({ length: maxJsonLength + 1, truncated: true });
+    expect(boundedJson({ a: [1] }).text).toBe('{\n  "a": [\n    1\n  ]\n}');
   });
 });
 
@@ -156,6 +164,45 @@ describe("kiro workflow boundary parser", () => {
     expect(parseFailure(workflowText(many))).toContain("more than 500 nodes");
   });
 
+  it("rejects deep or oversized free-form values with a TranslationError", () => {
+    // Built as text so the fixture itself never recurses: 20,000 nested objects.
+    const deep = `${'{"a":'.repeat(20_000)}1${"}".repeat(20_000)}`;
+    const withValue = (node: string) =>
+      `{"name":"Deep","inputs":{},"steps":[${node.replace("DEEP", deep)}]}`;
+    const repeatWith = (field: string) =>
+      `{"type":"repeat","id":"r","maxIterations":2,"onMaxIterations":"abort","steps":[{"type":"step","id":"a","agent":"x","prompt":"p"}],"${field}":DEEP}`;
+    expect(parseFailure(withValue(repeatWith("stopWhen")))).toMatch(
+      /^steps\[0\]\.stopWhen\.a\.a.*: Kiro workflow value nesting exceeds 64 levels\.$/,
+    );
+    expect(parseFailure(withValue(repeatWith("stopCondition")))).toContain(
+      "Kiro workflow value nesting exceeds 64 levels.",
+    );
+    for (const field of ["completion", "artifacts"])
+      expect(
+        parseFailure(
+          withValue(`{"type":"step","id":"a","agent":"x","prompt":"p","${field}":DEEP}`),
+        ),
+      ).toContain(`steps[0].${field}.a`);
+    expect(
+      parseFailure(withValue('{"type":"watch","id":"w","handler":"h","config":DEEP}')),
+    ).toContain("steps[0].config.a");
+    expect(parseFailure(withValue('{"type":DEEP,"id":"t"}'))).toContain("steps[0].type.a");
+    const wide = JSON.stringify(Array.from({ length: 20_001 }, () => 0));
+    expect(
+      parseFailure(
+        withValue(`{"type":"step","id":"a","agent":"x","prompt":"p","completion":${wide}}`),
+      ),
+    ).toContain("more than 20000 JSON values");
+    const shallow = repeat("r", [step("a")], { stopWhen: { all: [{ file: "x", equals: 1 }] } });
+    expect(parseKiroWorkflow(workflowText([shallow])).workflow.steps).toHaveLength(1);
+  });
+
+  it("names a missing node type instead of printing undefined", () => {
+    expect(parseFailure(workflowText([{ id: "a", agent: "x", prompt: "p" }]))).toContain(
+      "steps[0].type: missing Kiro node type; expected step, sequence, parallel, repeat or watch",
+    );
+  });
+
   it("reports unknown root and node keys instead of failing", () => {
     const { issues } = parseKiroWorkflow(workflowText([step("a", { retries: 3 })], { version: 2 }));
     expect(issues).toEqual([unknownField("version"), unknownField("steps[0].retries")]);
@@ -200,7 +247,6 @@ const parallel = (id: string, branches: unknown[], joinPolicy = "all") => ({
 });
 const sequence = (id: string, steps: unknown[]) => ({ type: "sequence", id, steps });
 const watch = (id: string) => ({ type: "watch", id, handler: "on-save" });
-const repeatNote = 'Code Factory import note: this step decides Kiro repeat "';
 
 describe("kiro workflow translator: focused fixture", () => {
   it("maps the focused recipe into a valid loop with a reviewed report", async () => {
@@ -220,6 +266,7 @@ describe("kiro workflow translator: focused fixture", () => {
       "business-review",
       "test-review",
       "acceptance",
+      "delivery-rounds-decision",
       "delivery-rounds-exit",
     ]);
     expect(edges(loop)).toEqual(
@@ -236,7 +283,8 @@ describe("kiro workflow translator: focused fixture", () => {
         "react-review→test-review",
         "business-review→test-review",
         "test-review→acceptance",
-        "acceptance→delivery-rounds-exit",
+        "acceptance→delivery-rounds-decision",
+        "delivery-rounds-decision→delivery-rounds-exit",
       ].sort(),
     );
     expect(loop.groups).toEqual([
@@ -258,9 +306,10 @@ describe("kiro workflow translator: focused fixture", () => {
           "business-review",
           "test-review",
           "acceptance",
+          "delivery-rounds-decision",
         ],
         maxIterations: 2,
-        exitWhen: { stepId: "acceptance", outcome: "stop" },
+        exitWhen: { stepId: "delivery-rounds-decision", outcome: "stop" },
         continueWhen: { outcome: "continue", to: "implement-and-prepare" },
       },
     ]);
@@ -270,7 +319,7 @@ describe("kiro workflow translator: focused fixture", () => {
     ]);
     expect(loop.decisions).toEqual([
       {
-        stepId: "acceptance",
+        stepId: "delivery-rounds-decision",
         branches: [
           { outcome: "stop", to: "delivery-rounds-exit" },
           { outcome: "continue", to: "implement-and-prepare" },
@@ -289,30 +338,58 @@ describe("kiro workflow translator: focused fixture", () => {
       "business-review": "review",
       "test-review": "review",
       acceptance: undefined,
+      "delivery-rounds-decision": undefined,
       "delivery-rounds-exit": undefined,
     });
     expect(loop.steps.every((candidate) => candidate.binding === undefined)).toBe(true);
     expect(loop.steps.every(({ kind }) => kind === "agent")).toBe(true);
     expect(stepOf(loop, "react-review").role).toBe("ui-react-reviewer");
     expect(stepOf(loop, "generate-candidate").role).toBe("economy-writer");
-    expect(stepOf(loop, "delivery-rounds-exit").role).toBe("Repeat exit");
+    expect(stepOf(loop, "delivery-rounds-decision")).toMatchObject({
+      name: "Delivery rounds decision (importer generated)",
+      role: importerGeneratedRole,
+      groupId: "delivery-rounds",
+    });
+    expect(stepOf(loop, "delivery-rounds-exit")).toMatchObject({
+      name: "Delivery rounds exit (importer generated)",
+      role: importerGeneratedRole,
+    });
+    expect(stepOf(loop, "delivery-rounds-exit").groupId).toBeUndefined();
+    expect(loop.steps.filter(({ role }) => role === importerGeneratedRole)).toHaveLength(2);
     const prompt = (id: string) => {
       if (id === "prepare") return "Prepare {{task}}.";
       if (id === "acceptance") return "Accept the round. Previous: {{previous.output}}.";
       return `${id} step. Context: {{prepare.output}}.`;
     };
-    for (const { id, instruction } of loop.steps.slice(0, -1))
+    for (const { id, instruction } of loop.steps.slice(0, -2))
       expect(instruction.startsWith(prompt(id))).toBe(true);
     expect(stepOf(loop, "prepare").instruction).toMatch(
       /Code Factory import note: Kiro model "claude-opus-5\.5", effort "medium" \(not bound; choose a binding in the editor\)\.$/,
     );
-    const acceptance = stepOf(loop, "acceptance").instruction;
-    const modelAt = acceptance.indexOf('Kiro model "claude-opus-5.5", effort "high"');
-    const repeatAt = acceptance.indexOf(`${repeatNote}delivery-rounds"`);
-    expect(modelAt).toBeGreaterThan(0);
-    expect(repeatAt).toBeGreaterThan(modelAt);
-    expect(acceptance).toContain(
-      'Kiro stop condition: {"fileCheck":{"path":".kiro-artifacts/orchestration/{{run_id}}/acceptance.json","jsonPath":"verdict","value":"PASS"}}',
+    // The Kiro acceptance step keeps its own prompt and output contract unchanged.
+    expect(stepOf(loop, "acceptance").instruction).toBe(
+      `${prompt("acceptance")}\n\n---\nCode Factory import note: Kiro model "claude-opus-5.5", effort "high" (not bound; choose a binding in the editor).`,
+    );
+    const decision = stepOf(loop, "delivery-rounds-decision").instruction;
+    expect(decision).toContain('Read the output of step "acceptance"');
+    expect(decision).toContain('"stop" when the condition holds, otherwise "continue"');
+    expect(decision).toContain(
+      `Kiro stop condition (verbatim JSON):\n${JSON.stringify(
+        {
+          stopCondition: {
+            fileCheck: {
+              path: ".kiro-artifacts/orchestration/{{run_id}}/acceptance.json",
+              jsonPath: "verdict",
+              value: "PASS",
+            },
+          },
+        },
+        null,
+        2,
+      )}`,
+    );
+    expect(stepOf(loop, "delivery-rounds-exit").instruction).toContain(
+      "Importer-generated pass-through step",
     );
 
     const issues = report.issues;
@@ -330,6 +407,22 @@ describe("kiro workflow translator: focused fixture", () => {
     has("steps[3].stopCondition", "lossy");
     has("steps[3]", "lossy");
     has("steps[3].onMaxIterations", "lossy");
+    const messageAt = (field: string, start: string) =>
+      issues.filter((item) => item.field === field && item.message.startsWith(start));
+    const added = 'Added importer-generated agent step "delivery-rounds-';
+    expect(messageAt("steps[3]", `${added}decision"`)).toHaveLength(1);
+    expect(messageAt("steps[3]", `${added}exit"`)).toHaveLength(1);
+    expect(messageAt("steps[1]", "Parallel gather-context: Code Factory starts one")).toHaveLength(
+      1,
+    );
+    // Every review inside the repeat is reported; the all-review parallel is not serialized.
+    const rejectingReviews = issues.filter(({ message }) =>
+      message.includes('"changes-requested" verdict rejects the run'),
+    );
+    expect(rejectingReviews).toHaveLength(3);
+    expect(
+      messageAt("steps[3].steps[3].steps[0]", "Parallel react-business-reviews: Code Factory"),
+    ).toEqual([]);
     const templates = issues.filter(({ field }) => field === "steps[*].prompt");
     expect(templates).toHaveLength(1);
     expect(templates[0]?.kind).toBe("lossy");
@@ -359,29 +452,94 @@ describe("kiro workflow translator: mapping rules", () => {
     );
   });
 
-  it("drops the review stage from the step carrying the repeat decision", () => {
+  it("decides a repeat in a generated step so the last body step keeps its stage", () => {
     const { loop, report } = importSteps([
       repeat("loop", [step("preview-build"), step("final-review", { agent: "ui-reviewer" })]),
       step("ship"),
     ]);
-    expect(stepOf(loop, "final-review").stage).toBeUndefined();
+    expect(stepOf(loop, "final-review").stage).toBe("review");
+    expect(stepOf(loop, "final-review").instruction).toBe("final-review step.");
     expect(stepOf(loop, "preview-build").stage).toBeUndefined();
     expect(loop.decisions).toEqual([
       {
-        stepId: "final-review",
+        stepId: "loop-decision",
         branches: [
           { outcome: "stop", to: "ship" },
           { outcome: "continue", to: "preview-build" },
         ],
       },
     ]);
-    expect(loop.steps.map(({ id }) => id)).toEqual(["preview-build", "final-review", "ship"]);
+    // A single successor is the stop target, so no exit step is generated.
+    expect(loop.steps.map(({ id }) => id)).toEqual([
+      "preview-build",
+      "final-review",
+      "loop-decision",
+      "ship",
+    ]);
+    expect(edges(loop)).toEqual(
+      ["preview-build→final-review", "final-review→loop-decision", "loop-decision→ship"].sort(),
+    );
+    expect(stepOf(loop, "loop-decision")).toMatchObject({
+      role: importerGeneratedRole,
+      groupId: "loop",
+    });
+    expect(stepOf(loop, "loop-decision").instruction).toContain(
+      "Kiro stop condition: none (Kiro repeats until the round limit).",
+    );
     expect(report.issues).toContainEqual({
       field: "steps[0].steps[1]",
       kind: "lossy",
       message:
-        'Step "final-review" carries the repeat decision, so its review stage was not imported.',
+        'Review step "final-review" is inside Kiro repeat "loop": a "changes-requested" verdict rejects the run instead of starting another round.',
     });
+  });
+
+  it("reports parallel scheduling and any-join differences", () => {
+    const { report } = importSteps([
+      step("start"),
+      parallel("work", [step("a"), step("b")], "any"),
+      parallel("reviews", [step("r1-review"), step("r2-review")]),
+    ]);
+    const at = (field: string) =>
+      report.issues.filter((item) => item.field === field).map(({ message }) => message);
+    expect(at("steps[1]")).toEqual([
+      "Parallel work: Code Factory starts one non-review step at a time, so these branches run one after another instead of concurrently.",
+    ]);
+    expect(at("steps[1].joinPolicy")).toEqual([
+      "any imported as an any join: the next step becomes ready once one branch succeeds, but the other branches are not canceled, and review steps started together are all awaited before another step starts.",
+    ]);
+    expect(at("steps[2]")).toEqual([]);
+  });
+
+  it("states the run-time fallback for every Kiro repeat-limit policy", () => {
+    const onMax = (policy: string) =>
+      importSteps([repeat("r", [step("a")], { onMaxIterations: policy })]).report.issues.find(
+        ({ field }) => field === "steps[0].onMaxIterations",
+      );
+    expect(onMax("abort")).toEqual({
+      field: "steps[0].onMaxIterations",
+      kind: "lossy",
+      message: "Code Factory rejects the run when the round limit is reached.",
+    });
+    expect(onMax("continue")).toEqual({
+      field: "steps[0].onMaxIterations",
+      kind: "unsupported",
+      message:
+        'Kiro onMaxIterations "continue" has no loop equivalent; Code Factory rejects the run when the round limit is reached instead of continuing after the repeat.',
+    });
+    expect(onMax("pause")?.message).toBe(
+      'Kiro onMaxIterations "pause" has no loop equivalent; Code Factory rejects the run when the round limit is reached instead of pausing.',
+    );
+  });
+
+  it("reports loop validation failures with field paths", () => {
+    const draft: LoopDefinition = {
+      ...blankDraft(),
+      policy: { maxAttemptsPerStep: 3, maxImplementationRounds: 0 },
+    };
+    expect(failure(() => kiroWorkflowTranslator.import(workflowText([step("a")]), draft))).toMatch(
+      /^Kiro workflow could not be represented as a valid loop: policy\.maxImplementationRounds: /,
+    );
   });
 
   it("notes a model inherited from the workflow default", () => {
@@ -453,7 +611,7 @@ describe("kiro workflow translator: mapping rules", () => {
     expect(template?.message).toMatch(/: \{\{task\}\}, \{\{run_id\}\}$/);
   });
 
-  it("clamps repeat rounds and truncates long stop conditions", () => {
+  it("clamps repeat rounds and preserves long stop conditions", () => {
     const { loop, report } = importSteps([
       repeat("r", [step("a")], { maxIterations: 50, stopWhen: "x".repeat(600) }),
     ]);
@@ -464,13 +622,32 @@ describe("kiro workflow translator: mapping rules", () => {
       "Clamped from 50 to 10.",
       "Effective rounds are limited by the draft policy (2).",
     ]);
-    const stop = `${JSON.stringify({ stopWhen: "x".repeat(600) }).slice(0, 500)}…`;
-    expect(stepOf(loop, "a").instruction).toContain(`Kiro stop condition: ${stop}`);
-    expect(stepOf(loop, "a").instruction.endsWith(stop)).toBe(true);
+    const stop = JSON.stringify({ stopWhen: "x".repeat(600) }, null, 2);
+    expect(stepOf(loop, "a").instruction).toBe("a step.");
+    const decision = stepOf(loop, "r-decision").instruction;
+    expect(decision.endsWith(`Kiro stop condition (verbatim JSON):\n${stop}`)).toBe(true);
+    expect(report.issues.filter(({ field }) => field === "steps[0].stopWhen")).toEqual([
+      {
+        field: "steps[0].stopWhen",
+        kind: "lossy",
+        message:
+          'Kiro stop condition is not evaluated by Code Factory; importer-generated step "r-decision" asks an agent to evaluate it and return "stop" or "continue".',
+      },
+    ]);
+  });
+
+  it("bounds a stop condition beyond the size limit and reports the cut", () => {
+    const text = "y".repeat(maxJsonLength);
+    const { loop, report } = importSteps([
+      repeat("r", [step("a")], { stopCondition: { containsText: text } }),
+    ]);
+    const full = JSON.stringify({ stopCondition: { containsText: text } }, null, 2);
+    const decision = stepOf(loop, "r-decision").instruction;
+    expect(decision.endsWith(`${full.slice(0, maxJsonLength)}…`)).toBe(true);
     expect(report.issues).toContainEqual({
-      field: "steps[0].stopWhen",
+      field: "steps[0].stopCondition",
       kind: "lossy",
-      message: `Kiro stop condition ${stop} is not evaluated by Code Factory; step "a" must return "stop" or "continue".`,
+      message: `Kiro stop condition is ${full.length} characters as JSON; step "r-decision" keeps only the first ${maxJsonLength}.`,
     });
   });
 
@@ -558,7 +735,8 @@ describe("kiro workflow translator: fan-out and fan-in", () => {
         "b2→c2",
         "c1→loop-step",
         "c2→loop-step",
-        "loop-step→r-exit",
+        "loop-step→r-decision",
+        "r-decision→r-exit",
         "r-exit→d1",
         "r-exit→d2",
       ].sort(),
@@ -573,12 +751,15 @@ describe("kiro workflow translator: fan-out and fan-in", () => {
       "repeat:r",
       "parallel:after",
     ]);
-    expect(loop.steps.map(({ id }) => id).indexOf("r-exit")).toBe(
-      loop.steps.map(({ id }) => id).indexOf("loop-step") + 1,
-    );
+    const order = loop.steps.map(({ id }) => id);
+    expect(order.slice(order.indexOf("loop-step"), order.indexOf("loop-step") + 3)).toEqual([
+      "loop-step",
+      "r-decision",
+      "r-exit",
+    ]);
     expect(loop.decisions).toEqual([
       {
-        stepId: "loop-step",
+        stepId: "r-decision",
         branches: [
           { outcome: "stop", to: "r-exit" },
           { outcome: "continue", to: "loop-step" },
@@ -604,7 +785,8 @@ describe("kiro workflow translator: fan-out and fan-in", () => {
       [
         "start→loop-step",
         "start→side",
-        "loop-step→r-exit",
+        "loop-step→r-decision",
+        "r-decision→r-exit",
         "r-exit→d1",
         "r-exit→d2",
         "side→d1",

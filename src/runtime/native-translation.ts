@@ -23,12 +23,19 @@ const translatorFor = (format: string) => {
   }
 };
 
-/** User-correctable translation failures become 422 responses; anything else is a defect. */
-const translate = <T>(run: () => T): T => {
+/**
+ * User-correctable translation failures become 422 responses; anything else is a defect.
+ * `source` names the native file an import read, so malformed content is locatable.
+ */
+const translate = <T>(run: () => T, source?: string): T => {
   try {
     return run();
   } catch (error) {
-    if (error instanceof TranslationError) throw new ProjectError(error.message, 422);
+    if (error instanceof TranslationError)
+      throw new ProjectError(
+        source && !error.aboutDraft ? `${source}: ${error.message}` : error.message,
+        422,
+      );
     throw error;
   }
 };
@@ -80,7 +87,7 @@ export const previewNative = async (
   const revision = digest(JSON.stringify(loop) + "\0" + (current ?? "<absent>"));
   if (direction === "import") {
     if (current === null) throw new ProjectError("Native rule was not found.", 404);
-    const translated = translate(() => translator.import(current, loop));
+    const translated = translate(() => translator.import(current, loop), relativePath);
     return { ...translated, relativePath, revision, conflicts: [], direction };
   }
   if (!exporter) throw importOnly(); // narrows for the call below

@@ -47,6 +47,11 @@ export type KiroWorkflow = {
 
 const maxDepth = 16;
 const maxNodes = 500;
+// Bounds every JSON value, including free-form fields (`stopWhen`, `config`, `completion`),
+// so later serialization cannot exhaust the stack. Node depth 16 uses about 34 levels.
+const maxValueDepth = 64;
+const maxValues = 20_000;
+const maxPathLength = 200;
 const maxListedIssues = 5;
 const nodeTypes = ["step", "sequence", "parallel", "repeat", "watch"] as const;
 type NodeType = (typeof nodeTypes)[number];
@@ -148,6 +153,34 @@ const guardStructure = (value: unknown): TranslationIssue[] => {
   return issues;
 };
 
+const boundedPath = (path: readonly PropertyKey[]): string => {
+  const text = formatIssuePath(path);
+  return text.length > maxPathLength ? `${text.slice(0, maxPathLength)}…` : text;
+};
+
+/** Iterative depth and size bound over the whole parsed document, free-form values included. */
+const guardValues = (value: unknown): void => {
+  const stack: { value: unknown; path: PropertyKey[] }[] = [{ value, path: [] }];
+  let count = 0;
+  for (let next = stack.pop(); next; next = stack.pop()) {
+    count++;
+    if (count > maxValues)
+      throw new TranslationError(`Kiro workflow has more than ${maxValues} JSON values.`);
+    if (next.path.length > maxValueDepth)
+      throw new TranslationError(
+        `${boundedPath(next.path)}: Kiro workflow value nesting exceeds ${maxValueDepth} levels.`,
+      );
+    const { path } = next;
+    if (Array.isArray(next.value))
+      next.value.forEach((item: unknown, index) =>
+        stack.push({ value: item, path: [...path, index] }),
+      );
+    else if (isRecord(next.value))
+      for (const [key, item] of Object.entries(next.value))
+        stack.push({ value: item, path: [...path, key] });
+  }
+};
+
 const idSchema = z.string().trim().min(1).max(128);
 const optionalText = z.string().min(1).optional();
 const stopConditionSchema = z
@@ -215,7 +248,11 @@ const nodeSchema: z.ZodType<KiroNode> = z.lazy(() =>
     {
       error: (issue) =>
         issue.code === "invalid_union" && isRecord(issue.input)
-          ? `unknown Kiro node type "${describeRaw(issue.input["type"])}"; expected step, sequence, parallel, repeat or watch`
+          ? `${
+              issue.input["type"] === undefined
+                ? "missing Kiro node type"
+                : `unknown Kiro node type "${describeRaw(issue.input["type"])}"`
+            }; expected step, sequence, parallel, repeat or watch`
           : undefined,
     },
   ),
@@ -241,7 +278,9 @@ export const parseKiroWorkflow = (
     const reason = error instanceof Error ? error.message : String(error);
     throw new TranslationError(`Kiro workflow is not valid JSON: ${reason}`);
   }
+  // Node nesting is checked first so a deep recipe gets the more specific message.
   const issues = guardStructure(value);
+  guardValues(value);
   const parsed = workflowSchema.safeParse(value);
   if (!parsed.success)
     throw new TranslationError(

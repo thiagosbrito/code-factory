@@ -1,6 +1,13 @@
 import type { LoopDefinition } from "../domain/loop.js";
-import { TranslationError, type TranslationIssue } from "./contract.js";
-import { humanize, inferStage, normalizeId, truncateJson, uniqueId } from "./kiro-workflow-ids.js";
+import { importerGeneratedRole, TranslationError, type TranslationIssue } from "./contract.js";
+import {
+  boundedJson,
+  humanize,
+  inferStage,
+  maxJsonLength,
+  normalizeId,
+  uniqueId,
+} from "./kiro-workflow-ids.js";
 import {
   formatIssuePath,
   type KiroNode,
@@ -46,11 +53,29 @@ const templatePattern = /\{\{[^{}]+\}\}/g;
 const emptyFragment = (): Fragment => ({ entries: [], exits: [] });
 const isEmpty = (fragment: Fragment): boolean => fragment.entries.length === 0;
 
-const describeStop = (node: KiroRepeat): string => {
-  if (node.stopCondition) return truncateJson(node.stopCondition);
-  if (node.stopWhen !== undefined) return truncateJson({ stopWhen: node.stopWhen });
-  return "none (repeat until the round limit)";
+/** The Kiro stop rule as instruction text, kept whole up to the `boundedJson` limit. */
+const describeStop = (node: KiroRepeat): ReturnType<typeof boundedJson> | undefined => {
+  if (node.stopCondition) return boundedJson({ stopCondition: node.stopCondition });
+  if (node.stopWhen !== undefined) return boundedJson({ stopWhen: node.stopWhen });
+  return undefined;
 };
+
+const decisionInstruction = (
+  node: KiroRepeat,
+  observed: string,
+  stop: ReturnType<typeof describeStop>,
+): string =>
+  [
+    `Importer-generated step: Code Factory added it to decide Kiro repeat "${node.id}". It is not part of the Kiro recipe.`,
+    `Read the output of step "${observed}" in the inputs below, and any file the stop condition names, then decide whether the Kiro stop condition holds. Do not change files.`,
+    'Reply with exactly one word: "stop" when the condition holds, otherwise "continue".',
+    stop
+      ? `Kiro stop condition (verbatim JSON):\n${stop.text}`
+      : "Kiro stop condition: none (Kiro repeats until the round limit).",
+  ].join("\n\n");
+
+const exitInstruction = (node: KiroRepeat): string =>
+  `Importer-generated pass-through step: Code Factory needs a step after Kiro repeat "${node.id}" stops, and Kiro has no step here. Do not change files or run commands. Reply with one line: "Repeat ${node.id} stopped."`;
 
 const stopField = (node: KiroRepeat, path: SourcePath): SourcePath => {
   if (node.stopCondition) return [...path, "stopCondition"];
@@ -91,7 +116,6 @@ export const mapKiroWorkflow = (
 
   const steps: LoopStep[] = [];
   const stepById = new Map<string, LoopStep>();
-  const sourcePathByStep = new Map<string, SourcePath>();
   let dependencies: LoopDependency[] = [];
   const joins: LoopJoin[] = [];
   const decisions: LoopDecision[] = [];
@@ -133,7 +157,6 @@ export const mapKiroWorkflow = (
     };
     steps.push(step);
     stepById.set(id, step);
-    sourcePathByStep.set(id, path);
     prompts.push(node.prompt);
     const unsupported = (key: string, message: string) =>
       issue(nodeIssues, "unsupported", [...path, key], message);
@@ -160,6 +183,14 @@ export const mapKiroWorkflow = (
       unsupported("captureOutput", "Kiro output capture has no loop equivalent.");
     if (node.completion !== undefined)
       unsupported("completion", "Kiro completion settings are not imported.");
+    // Only a repeat's decision step may continue on a verdict; other reviews reject the run.
+    if (context.repeat && stage === "review")
+      issue(
+        nodeIssues,
+        "lossy",
+        path,
+        `Review step "${id}" is inside Kiro repeat "${context.repeat.rawId}": a "changes-requested" verdict rejects the run instead of starting another round.`,
+      );
     return { entries: [id], exits: [id] };
   };
 
@@ -183,6 +214,7 @@ export const mapKiroWorkflow = (
     context: Context,
     order: number,
   ): Fragment => {
+    const firstStep = steps.length;
     const branches = node.branches
       .map((branch, index) => ({
         branch,
@@ -223,6 +255,22 @@ export const mapKiroWorkflow = (
         );
     }
     const entries = branches.flatMap(({ fragment }) => fragment.entries);
+    // The scheduler launches one ready non-review step at a time, and launches ready
+    // review steps together only when no non-review step is ready.
+    if (steps.slice(firstStep).some(({ stage }) => stage !== "review"))
+      issue(
+        nodeIssues,
+        "lossy",
+        path,
+        `Parallel ${node.id}: Code Factory starts one non-review step at a time, so these branches run one after another instead of concurrently.`,
+      );
+    if (mode === "any")
+      issue(
+        nodeIssues,
+        "lossy",
+        [...path, "joinPolicy"],
+        "any imported as an any join: the next step becomes ready once one branch succeeds, but the other branches are not canceled, and review steps started together are all awaited before another step starts.",
+      );
     if (groupId) {
       for (const id of entries) {
         const member = stepById.get(id);
@@ -353,53 +401,69 @@ export const mapKiroWorkflow = (
   if (isEmpty(root)) throw new TranslationError("Kiro workflow has no importable steps.");
 
   const stopTexts: string[] = [];
+  /** Moves every outgoing edge and join input of `from` onto `to`, then links `from → to`. */
+  const insertAfter = (from: string, added: LoopStep) => {
+    const anchor = stepById.get(from);
+    if (!anchor) throw new Error(`Mapped step ${from} is missing.`);
+    dependencies = dependencies.map((dependency) =>
+      dependency.from === from ? { ...dependency, from: added.id } : dependency,
+    );
+    for (const join of joins) join.from = join.from.map((id) => (id === from ? added.id : id));
+    dependencies.push({ from, to: added.id });
+    steps.splice(steps.indexOf(anchor) + 1, 0, added);
+    stepById.set(added.id, added);
+  };
   pendingRepeats.forEach((pending, index) => {
     const { node, path, groupId, entry, exit } = pending;
-    const exitStep = stepById.get(exit);
-    if (!exitStep) throw new Error(`Mapped repeat exit ${exit} is missing.`);
-    const targets = dependencies.filter(({ from }) => from === exit).map(({ to }) => to);
+    // The last Kiro body step keeps its own prompt and output contract. A dedicated
+    // decision step reads its output and returns only "stop" or "continue", because the
+    // scheduler fails a decision step whose whole output is not a declared outcome.
+    const decision = uniqueId(normalizeId(`${groupId}-decision`), stepIds);
+    const stop = describeStop(node);
+    insertAfter(exit, {
+      id: decision,
+      name: `${humanize(node.id)} decision (importer generated)`,
+      kind: "agent",
+      role: importerGeneratedRole,
+      instruction: decisionInstruction(node, exit, stop),
+      expectedOutputs: [],
+      groupId,
+    });
+    issue(
+      repeatIssues,
+      "lossy",
+      path,
+      `Added importer-generated agent step "${decision}" after "${exit}" to return the repeat decision ("stop" or "continue"). It runs one extra agent turn per round, and on "continue" step "${entry}" receives that outcome instead of the "${exit}" output.`,
+    );
+    const targets = dependencies.filter(({ from }) => from === decision).map(({ to }) => to);
     let exitTo = targets[0];
     if (targets.length !== 1 || !exitTo) {
+      // Repeat groups need a stop target outside the body. Steps are agent turns or host
+      // check commands; a pass-through agent turn avoids running anything on the host.
       const synthetic = uniqueId(normalizeId(`${groupId}-exit`), stepIds);
-      const syntheticStep: LoopStep = {
+      insertAfter(decision, {
         id: synthetic,
-        name: `${humanize(node.id)} exit`,
+        name: `${humanize(node.id)} exit (importer generated)`,
         kind: "agent",
-        role: "Repeat exit",
-        instruction: `Imported from Kiro repeat "${node.id}". Kiro has no step here; summarize the accepted round and record that the repeat stopped.`,
+        role: importerGeneratedRole,
+        instruction: exitInstruction(node),
         expectedOutputs: [],
-      };
-      dependencies = dependencies.map((dependency) =>
-        dependency.from === exit ? { ...dependency, from: synthetic } : dependency,
-      );
-      for (const join of joins) join.from = join.from.map((id) => (id === exit ? synthetic : id));
-      dependencies.push({ from: exit, to: synthetic });
-      steps.splice(steps.indexOf(exitStep) + 1, 0, syntheticStep);
-      stepById.set(synthetic, syntheticStep);
+      });
       exitTo = synthetic;
       issue(
         repeatIssues,
         "lossy",
         path,
-        `Added step "${synthetic}" as the exit target required by Code Factory repeat groups.`,
+        `Added importer-generated agent step "${synthetic}" as the exit target required by Code Factory repeat groups. It runs one pass-through agent turn after the repeat stops.`,
       );
     }
     decisions.push({
-      stepId: exit,
+      stepId: decision,
       branches: [
         { outcome: "stop", to: exitTo },
         { outcome: "continue", to: entry },
       ],
     });
-    if (exitStep.stage === "review") {
-      delete exitStep.stage;
-      issue(
-        repeatIssues,
-        "lossy",
-        sourcePathByStep.get(exit) ?? path,
-        `Step "${exit}" carries the repeat decision, so its review stage was not imported.`,
-      );
-    }
     const maxIterations = Math.min(node.maxIterations, maxRepeatIterations);
     groups.push({
       order: pending.order,
@@ -407,21 +471,26 @@ export const mapKiroWorkflow = (
         id: groupId,
         name: humanize(node.id),
         kind: "repeat",
-        stepIds: pending.stepIds,
+        stepIds: [...pending.stepIds, decision],
         maxIterations,
-        exitWhen: { stepId: exit, outcome: "stop" },
+        exitWhen: { stepId: decision, outcome: "stop" },
         continueWhen: { outcome: "continue", to: entry },
       },
     });
-    const stop = describeStop(node);
-    stopTexts.push(stop);
-    exitStep.instruction += `\n\n---\nCode Factory import note: this step decides Kiro repeat "${node.id}". Return outcome "stop" when the stop condition holds, otherwise "continue".\nKiro stop condition: ${stop}`;
+    if (stop) stopTexts.push(stop.text);
     issue(
       repeatIssues,
       "lossy",
       stopField(node, path),
-      `Kiro stop condition ${stop} is not evaluated by Code Factory; step "${exit}" must return "stop" or "continue".`,
+      `Kiro stop condition is not evaluated by Code Factory; importer-generated step "${decision}" asks an agent to evaluate it and return "stop" or "continue".`,
     );
+    if (stop?.truncated)
+      issue(
+        repeatIssues,
+        "lossy",
+        stopField(node, path),
+        `Kiro stop condition is ${stop.length} characters as JSON; step "${decision}" keeps only the first ${maxJsonLength}.`,
+      );
     const rounds: SourcePath = [...path, "maxIterations"];
     if (node.maxIterations > maxRepeatIterations)
       issue(
@@ -457,7 +526,7 @@ export const mapKiroWorkflow = (
         repeatIssues,
         "unsupported",
         onMax,
-        `Kiro onMaxIterations "${node.onMaxIterations}" has no loop equivalent.`,
+        `Kiro onMaxIterations "${node.onMaxIterations}" has no loop equivalent; Code Factory rejects the run when the round limit is reached instead of ${node.onMaxIterations === "continue" ? "continuing after the repeat" : "pausing"}.`,
       );
   });
 

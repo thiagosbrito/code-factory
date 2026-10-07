@@ -3,7 +3,7 @@ import type { LoopDefinition } from "../domain/loop.js";
 type LoopStage = NonNullable<LoopDefinition["steps"][number]["stage"]>;
 
 const maxIdLength = 64;
-const maxJsonLength = 500;
+export const maxJsonLength = 8_000;
 
 const trimTrailingDash = (value: string): string => value.replace(/-+$/, "");
 
@@ -55,7 +55,18 @@ export const inferStage = (agent: string, id: string): LoopStage | undefined => 
   return stageRules.find((rule) => rule.tokens.some((token) => tokens.has(token)))?.stage;
 };
 
-export const truncateJson = (value: unknown): string => {
-  const text = JSON.stringify(value) ?? "null";
-  return text.length > maxJsonLength ? `${text.slice(0, maxJsonLength)}…` : text;
+/**
+ * Indented JSON kept whole up to `maxJsonLength` characters. Callers report `truncated`.
+ * Input depth is already bounded by the boundary parser, so `JSON.stringify` cannot overflow.
+ */
+export const boundedJson = (
+  value: unknown,
+): { text: string; length: number; truncated: boolean } => {
+  const text = JSON.stringify(value, null, 2) ?? "null";
+  const truncated = text.length > maxJsonLength;
+  return {
+    text: truncated ? `${text.slice(0, maxJsonLength)}…` : text,
+    length: text.length,
+    truncated,
+  };
 };

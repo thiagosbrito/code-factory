@@ -231,7 +231,8 @@ describe("Kiro workflow import", () => {
     const preview = await previewNative(root, kiroRequest(draft()), "import");
     if (!("loop" in preview)) throw new Error("Expected an import preview.");
     expect(preview.relativePath).toBe(".kiro/workflows/focused.workflow.json");
-    expect(preview.loop.steps).toHaveLength(12);
+    // Eleven Kiro steps plus the importer-generated repeat decision and exit steps.
+    expect(preview.loop.steps).toHaveLength(13);
     expect(preview.report.issues.length).toBeGreaterThan(0);
     const applied = await applyNative(
       root,
@@ -275,6 +276,44 @@ describe("Kiro workflow import", () => {
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({
       error: "Import requires an empty draft to preserve existing steps.",
+    });
+  });
+
+  it("names the native file and field path when the workflow is malformed", async () => {
+    const root = await kiroProject();
+    const registry = new ConnectionRegistry(root, async () => []);
+    const { server, url } = await startLocalServer({
+      projectDirectory: root,
+      port: 0,
+      connections: registry,
+    });
+    servers.push(server);
+    const preview = (content: string) =>
+      writeFile(join(root, ".kiro", "workflows", "focused.workflow.json"), content).then(() =>
+        fetch(`${url}/api/native/import/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(kiroRequest(draft())),
+        }),
+      );
+    const malformed = await preview(
+      JSON.stringify({ name: "Bad", inputs: {}, steps: [{ type: "step", id: "a", agent: "x" }] }),
+    );
+    expect(malformed.status).toBe(422);
+    expect(await malformed.json()).toEqual({
+      error: expect.stringMatching(
+        /^\.kiro\/workflows\/focused\.workflow\.json: Invalid Kiro workflow: steps\[0\]\.prompt: /,
+      ),
+    });
+    const deep = `${'{"a":'.repeat(20_000)}1${"}".repeat(20_000)}`;
+    const nested = await preview(
+      `{"name":"Deep","inputs":{},"steps":[{"type":"repeat","id":"r","maxIterations":2,"onMaxIterations":"abort","steps":[{"type":"step","id":"a","agent":"x","prompt":"p"}],"stopWhen":${deep}}]}`,
+    );
+    expect(nested.status).toBe(422);
+    expect(await nested.json()).toEqual({
+      error: expect.stringMatching(
+        /^\.kiro\/workflows\/focused\.workflow\.json: steps\[0\]\.stopWhen\.a.*: Kiro workflow value nesting exceeds 64 levels\.$/,
+      ),
     });
   });
 });
