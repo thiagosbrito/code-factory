@@ -1,8 +1,10 @@
 import type { ConfigurationTranslator } from "./contract.js";
 import { cursorRuleTranslator } from "./cursor-rule.js";
-
-const translators: readonly ConfigurationTranslator[] = [cursorRuleTranslator];
-
+import { kiroWorkflowTranslator } from "./kiro-workflow.js";
+const translators: readonly ConfigurationTranslator[] = [
+  cursorRuleTranslator,
+  kiroWorkflowTranslator,
+];
 export const listTranslators = (): readonly ConfigurationTranslator[] => translators;
 export const getTranslator = (format: string): ConfigurationTranslator => {
   const translator = translators.find((candidate) => candidate.format === format);

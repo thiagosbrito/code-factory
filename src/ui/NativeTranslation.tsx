@@ -24,7 +24,14 @@ const previewSchema = z.object({
 type Preview = z.infer<typeof previewSchema>;
 type Direction = "import" | "export";
 const formatsSchema = z.object({
-  formats: z.array(z.object({ format: z.string(), provider: z.string(), label: z.string() })),
+  formats: z.array(
+    z.object({
+      format: z.string(),
+      provider: z.string(),
+      label: z.string(),
+      directions: z.array(z.enum(["import", "export"])).min(1),
+    }),
+  ),
 });
 
 export const NativeTranslation = ({
@@ -66,6 +73,9 @@ export const NativeTranslation = ({
         setMessage(error instanceof Error ? error.message : String(error)),
       );
   }, [format]);
+  const selected = formats.find((item) => item.format === format);
+  // Until formats load, keep Export enabled so the control does not flicker.
+  const canExport = selected ? selected.directions.includes("export") : true;
   const request = (expectedRevision?: string) => ({ format, name, loop, expectedRevision });
   const previewChange = async () => {
     setWorking(true);
@@ -129,6 +139,8 @@ export const NativeTranslation = ({
             value={format}
             disabled={disabled || working}
             onChange={(event) => {
+              const next = formats.find((item) => item.format === event.target.value);
+              if (next && !next.directions.includes(direction)) setDirection("import");
               setFormat(event.target.value);
               setCandidates([]);
               setPreview(null);
@@ -155,7 +167,9 @@ export const NativeTranslation = ({
             }}
           >
             <option value="import">Import</option>
-            <option value="export">Export</option>
+            <option value="export" disabled={!canExport}>
+              Export
+            </option>
           </NativeSelect>
         </label>
         <label className="text-sm">
@@ -190,6 +204,9 @@ export const NativeTranslation = ({
         Available formats are listed above. Other native formats are unsupported. Translation does
         not connect or run an agent.
       </p>
+      {selected && !canExport && (
+        <p className="mt-2 text-xs text-muted-foreground">{selected.label} is import-only.</p>
+      )}
       {preview && (
         <div className="mt-3 rounded-md border bg-white p-3 text-sm">
           <p>
@@ -206,6 +223,21 @@ export const NativeTranslation = ({
             </p>
           ))}
           {preview.loop && <p>Imported draft step: {preview.loop.steps[0]?.name}</p>}
+          {preview.loop && preview.loop.steps.length > 1 && (
+            <>
+              <p>
+                Imported draft: {preview.loop.steps.length} steps
+                {preview.loop.groups.length
+                  ? `, ${preview.loop.groups.length} ${preview.loop.groups.length === 1 ? "group" : "groups"}`
+                  : ""}
+              </p>
+              <ul aria-label="Imported steps">
+                {preview.loop.steps.map((step) => (
+                  <li key={step.id}>{step.name}</li>
+                ))}
+              </ul>
+            </>
+          )}
           {preview.content && (
             <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2">
               {preview.content}

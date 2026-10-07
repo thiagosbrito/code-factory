@@ -1,0 +1,130 @@
+{
+  "name": "UI delivery reduced (fixture)",
+  "description": "Sanitized fixture.",
+  "inputs": {
+    "task": "prompt",
+    "scope": "string",
+    "workspace_root": "string",
+    "run_id": "string"
+  },
+  "steps": [
+    { "type": "step", "id": "prepare", "agent": "wf-coder", "prompt": "Prepare {{task}}." },
+    {
+      "type": "parallel",
+      "id": "gather-context",
+      "joinPolicy": "all",
+      "branches": [
+        {
+          "type": "step",
+          "id": "domain-context",
+          "agent": "economy-reader",
+          "prompt": "domain-context step."
+        },
+        {
+          "type": "step",
+          "id": "ui-test-context",
+          "agent": "economy-reader",
+          "prompt": "ui-test-context step."
+        }
+      ]
+    },
+    { "type": "step", "id": "design-plan", "agent": "wf-coder", "prompt": "design-plan step." },
+    {
+      "type": "repeat",
+      "id": "delivery-rounds",
+      "maxIterations": 2,
+      "onMaxIterations": "abort",
+      "stopCondition": {
+        "fileCheck": {
+          "path": ".kiro-artifacts/orchestration/{{run_id}}/acceptance.json",
+          "jsonPath": "verdict",
+          "value": "PASS"
+        }
+      },
+      "steps": [
+        {
+          "type": "step",
+          "id": "implement-and-prepare",
+          "agent": "wf-coder",
+          "prompt": "implement-and-prepare step."
+        },
+        {
+          "type": "step",
+          "id": "generate-candidate",
+          "agent": "economy-writer",
+          "prompt": "generate-candidate step."
+        },
+        {
+          "type": "step",
+          "id": "integrate-and-check",
+          "agent": "wf-coder",
+          "prompt": "integrate-and-check step."
+        },
+        {
+          "type": "sequence",
+          "id": "independent-reviews",
+          "steps": [
+            {
+              "type": "parallel",
+              "id": "standards-reviews",
+              "joinPolicy": "allSettled",
+              "branches": [
+                {
+                  "type": "step",
+                  "id": "code-quality-review",
+                  "agent": "ui-code-quality-reviewer",
+                  "prompt": "code-quality-review step."
+                },
+                {
+                  "type": "step",
+                  "id": "react-review",
+                  "agent": "ui-react-reviewer",
+                  "prompt": "react-review step."
+                }
+              ]
+            },
+            {
+              "type": "parallel",
+              "id": "performance-security-reviews",
+              "joinPolicy": "allSettled",
+              "branches": [
+                {
+                  "type": "step",
+                  "id": "performance-review",
+                  "agent": "ui-performance-reviewer",
+                  "prompt": "performance-review step."
+                },
+                {
+                  "type": "step",
+                  "id": "security-review",
+                  "agent": "ui-security-reviewer",
+                  "prompt": "security-review step."
+                }
+              ]
+            },
+            {
+              "type": "parallel",
+              "id": "business-test-reviews",
+              "joinPolicy": "allSettled",
+              "branches": [
+                {
+                  "type": "step",
+                  "id": "business-review",
+                  "agent": "ui-business-reviewer",
+                  "prompt": "business-review step."
+                },
+                {
+                  "type": "step",
+                  "id": "test-review",
+                  "agent": "ui-test-reviewer",
+                  "prompt": "test-review step."
+                }
+              ]
+            }
+          ]
+        },
+        { "type": "step", "id": "acceptance", "agent": "wf-coder", "prompt": "acceptance step." }
+      ]
+    }
+  ]
+}

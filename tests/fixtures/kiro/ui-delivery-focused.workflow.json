@@ -1,0 +1,165 @@
+{
+  "name": "UI delivery focused (fixture)",
+  "description": "Sanitized fixture.",
+  "inputs": {
+    "task": "prompt",
+    "scope": "string",
+    "workspace_root": "string",
+    "run_id": "string"
+  },
+  "steps": [
+    {
+      "type": "step",
+      "id": "prepare",
+      "agent": "wf-coder",
+      "prompt": "Prepare {{task}}.",
+      "modelId": "claude-opus-5.5",
+      "effortLevel": "medium",
+      "artifacts": {
+        "requirements": ".kiro-artifacts/orchestration/{{run_id}}/requirements.json"
+      },
+      "captureOutput": true
+    },
+    {
+      "type": "parallel",
+      "id": "gather-context",
+      "joinPolicy": "all",
+      "branches": [
+        {
+          "type": "step",
+          "id": "domain-context",
+          "agent": "economy-reader",
+          "prompt": "domain-context step. Context: {{prepare.output}}.",
+          "modelId": "claude-sonnet-5",
+          "effortLevel": "low",
+          "captureOutput": true
+        },
+        {
+          "type": "step",
+          "id": "ui-test-context",
+          "agent": "economy-reader",
+          "prompt": "ui-test-context step. Context: {{prepare.output}}.",
+          "modelId": "claude-sonnet-5",
+          "effortLevel": "low",
+          "captureOutput": true
+        }
+      ]
+    },
+    {
+      "type": "step",
+      "id": "design-plan",
+      "agent": "wf-coder",
+      "prompt": "design-plan step. Context: {{prepare.output}}.",
+      "modelId": "claude-opus-5.5",
+      "effortLevel": "high",
+      "artifacts": {
+        "plan": ".kiro-artifacts/orchestration/{{run_id}}/plan.md",
+        "planned_checks": ".kiro-artifacts/orchestration/{{run_id}}/planned-checks.json"
+      },
+      "captureOutput": true
+    },
+    {
+      "type": "repeat",
+      "id": "delivery-rounds",
+      "maxIterations": 2,
+      "onMaxIterations": "abort",
+      "stopCondition": {
+        "fileCheck": {
+          "path": ".kiro-artifacts/orchestration/{{run_id}}/acceptance.json",
+          "jsonPath": "verdict",
+          "value": "PASS"
+        }
+      },
+      "steps": [
+        {
+          "type": "step",
+          "id": "implement-and-prepare",
+          "agent": "wf-coder",
+          "prompt": "implement-and-prepare step. Context: {{prepare.output}}.",
+          "modelId": "claude-opus-5.5",
+          "effortLevel": "high",
+          "artifacts": {
+            "generation_job": ".kiro-artifacts/orchestration/{{run_id}}/generation-job.json",
+            "owner_state": ".kiro-artifacts/orchestration/{{run_id}}/owner-state.json"
+          },
+          "captureOutput": true
+        },
+        {
+          "type": "step",
+          "id": "generate-candidate",
+          "agent": "economy-writer",
+          "prompt": "generate-candidate step. Context: {{prepare.output}}.",
+          "modelId": "claude-sonnet-5",
+          "effortLevel": "low",
+          "captureOutput": true
+        },
+        {
+          "type": "step",
+          "id": "integrate-and-check",
+          "agent": "wf-coder",
+          "prompt": "integrate-and-check step. Context: {{prepare.output}}.",
+          "modelId": "claude-opus-5.5",
+          "effortLevel": "high",
+          "artifacts": {
+            "checks": ".kiro-artifacts/orchestration/{{run_id}}/checks.json",
+            "review_packet": ".kiro-artifacts/orchestration/{{run_id}}/review-packet.json"
+          },
+          "captureOutput": true
+        },
+        {
+          "type": "sequence",
+          "id": "independent-reviews",
+          "steps": [
+            {
+              "type": "parallel",
+              "id": "react-business-reviews",
+              "joinPolicy": "allSettled",
+              "branches": [
+                {
+                  "type": "step",
+                  "id": "react-review",
+                  "agent": "ui-react-reviewer",
+                  "prompt": "react-review step. Context: {{prepare.output}}.",
+                  "modelId": "claude-sonnet-5",
+                  "effortLevel": "medium",
+                  "captureOutput": true
+                },
+                {
+                  "type": "step",
+                  "id": "business-review",
+                  "agent": "ui-business-reviewer",
+                  "prompt": "business-review step. Context: {{prepare.output}}.",
+                  "modelId": "claude-sonnet-5",
+                  "effortLevel": "medium",
+                  "captureOutput": true
+                }
+              ]
+            },
+            {
+              "type": "step",
+              "id": "test-review",
+              "agent": "ui-test-reviewer",
+              "prompt": "test-review step. Context: {{prepare.output}}.",
+              "modelId": "claude-sonnet-5",
+              "effortLevel": "medium",
+              "captureOutput": true
+            }
+          ]
+        },
+        {
+          "type": "step",
+          "id": "acceptance",
+          "agent": "wf-coder",
+          "prompt": "Accept the round. Previous: {{previous.output}}.",
+          "modelId": "claude-opus-5.5",
+          "effortLevel": "high",
+          "artifacts": {
+            "acceptance": ".kiro-artifacts/orchestration/{{run_id}}/acceptance.json",
+            "feedback": ".kiro-artifacts/orchestration/{{run_id}}/feedback.json"
+          },
+          "captureOutput": true
+        }
+      ]
+    }
+  ]
+}

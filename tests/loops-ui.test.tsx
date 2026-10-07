@@ -59,7 +59,14 @@ it("previews native import losses and waits for explicit application", async () 
     requests.push(path);
     if (path === "/api/native/formats")
       return Response.json({
-        formats: [{ format: "cursor-rule-mdc", provider: "cursor", label: "Cursor project rule" }],
+        formats: [
+          {
+            format: "cursor-rule-mdc",
+            provider: "cursor",
+            label: "Cursor project rule",
+            directions: ["import", "export"],
+          },
+        ],
       });
     if (path.startsWith("/api/native/candidates")) return Response.json({ names: ["review"] });
     if (path === "/api/native/import/preview" || path === "/api/native/import/apply") {
@@ -94,6 +101,118 @@ it("previews native import losses and waits for explicit application", async () 
   await waitFor(() => expect(apply).toHaveBeenCalledOnce());
   expect(appliedRevision).toBe("revision-1");
   expect(requests).toContain("/api/native/import/apply");
+});
+
+it("marks Kiro workflows import-only and summarizes a multi-step import", async () => {
+  const user = userEvent.setup();
+  const agent = (id: string, name: string, groupId?: string) => ({
+    id,
+    name,
+    kind: "agent",
+    role: "wf-coder",
+    instruction: `${name}.`,
+    ...(groupId ? { groupId } : {}),
+  });
+  const imported = parseLoop({
+    ...createLoopDraft("native", "Native"),
+    steps: [
+      agent("prepare", "Prepare"),
+      agent("domain-context", "Domain context", "gather-context"),
+      agent("ui-test-context", "Ui test context", "gather-context"),
+    ],
+    dependencies: [
+      { from: "prepare", to: "domain-context" },
+      { from: "prepare", to: "ui-test-context" },
+    ],
+    groups: [
+      {
+        id: "gather-context",
+        name: "Gather context",
+        kind: "parallel",
+        stepIds: ["domain-context", "ui-test-context"],
+      },
+    ],
+  });
+  let previews = 0;
+  vi.stubGlobal("fetch", async (path: string) => {
+    if (path === "/api/native/formats")
+      return Response.json({
+        formats: [
+          {
+            format: "cursor-rule-mdc",
+            provider: "cursor",
+            label: "Cursor project rule",
+            directions: ["import", "export"],
+          },
+          {
+            format: "kiro-workflow-json",
+            provider: "kiro",
+            label: "Kiro workflow",
+            directions: ["import"],
+          },
+        ],
+      });
+    if (path.startsWith("/api/native/candidates")) return Response.json({ names: ["focused"] });
+    if (path === "/api/native/import/preview") {
+      previews++;
+      if (previews > 1)
+        return Response.json(
+          { error: "Import requires an empty draft to preserve existing steps." },
+          { status: 422 },
+        );
+      return Response.json({
+        relativePath: ".kiro/workflows/focused.workflow.json",
+        revision: "revision-1",
+        direction: "import",
+        conflicts: [],
+        report: {
+          issues: [
+            {
+              field: "steps[3].steps[3].steps[0].joinPolicy",
+              kind: "lossy",
+              message: "allSettled imported as all; a failed branch now blocks the join.",
+            },
+          ],
+        },
+        loop: imported,
+      });
+    }
+    throw new Error(`Unexpected ${path}`);
+  });
+  render(
+    <NativeTranslation
+      loop={createLoopDraft("native", "Native")}
+      apply={() => true}
+      disabled={false}
+    />,
+  );
+  await screen.findByRole("option", { name: "Kiro workflow" });
+  const exportOption = screen.getByRole("option", { name: "Export" });
+  expect(exportOption).toHaveProperty("disabled", false);
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "Native format" }),
+    "Kiro workflow",
+  );
+  expect(exportOption).toHaveProperty("disabled", true);
+  expect(screen.getByText("Kiro workflow is import-only.")).toBeTruthy();
+  fireEvent.change(screen.getByRole("combobox", { name: "Configuration name" }), {
+    target: { value: "focused" },
+  });
+  await user.click(screen.getByRole("button", { name: "Preview" }));
+  expect(
+    await screen.findByText(/lossy: steps\[3\]\.steps\[3\]\.steps\[0\]\.joinPolicy/),
+  ).toBeTruthy();
+  expect(screen.getByText("Imported draft: 3 steps, 1 group")).toBeTruthy();
+  const list = screen.getByRole("list", { name: "Imported steps" });
+  expect(
+    within(list)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(["Prepare", "Domain context", "Ui test context"]);
+  await user.click(screen.getByRole("button", { name: "Preview" }));
+  expect(
+    await screen.findByText("Import requires an empty draft to preserve existing steps."),
+  ).toBeTruthy();
 });
 
 describe("loops library UI", () => {

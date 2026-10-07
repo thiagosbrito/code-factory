@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parseLoop } from "../domain/loop.js";
+import { TranslationError } from "../translators/contract.js";
 import { getTranslator, listTranslators } from "../translators/registry.js";
 import { nativeFile } from "./native-files.js";
 import { ProjectError } from "./project.js";
@@ -22,8 +23,22 @@ const translatorFor = (format: string) => {
   }
 };
 
+/** User-correctable translation failures become 422 responses; anything else is a defect. */
+const translate = <T>(run: () => T): T => {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof TranslationError) throw new ProjectError(error.message, 422);
+    throw error;
+  }
+};
 export const nativeFormats = () =>
-  listTranslators().map(({ format, provider, label }) => ({ format, provider, label }));
+  listTranslators().map(({ format, provider, label, export: exporter }) => ({
+    format,
+    provider,
+    label,
+    directions: exporter ? (["import", "export"] as const) : (["import"] as const),
+  }));
 
 export const nativeCandidates = async (project: string, format: string) => {
   const translator = translatorFor(format);
@@ -46,6 +61,10 @@ export const previewNative = async (
 ) => {
   const request = requestSchema.parse(input);
   const translator = translatorFor(request.format);
+  const exporter = translator.export;
+  const importOnly = () =>
+    new ProjectError(`${translator.label} is import-only; export is unsupported.`, 422);
+  if (direction === "export" && !exporter) throw importOnly();
   const loop = parseLoop(request.loop);
   if (loop.status !== "draft") throw new ProjectError("Native translation requires a draft.", 422);
   const relativePath = `${translator.relativeDirectory}/${request.name}${translator.extension}`;
@@ -61,10 +80,11 @@ export const previewNative = async (
   const revision = digest(JSON.stringify(loop) + "\0" + (current ?? "<absent>"));
   if (direction === "import") {
     if (current === null) throw new ProjectError("Native rule was not found.", 404);
-    const translated = translator.import(current, loop);
+    const translated = translate(() => translator.import(current, loop));
     return { ...translated, relativePath, revision, conflicts: [], direction };
   }
-  const translated = translator.export(loop);
+  if (!exporter) throw importOnly(); // narrows for the call below
+  const translated = translate(() => exporter(loop));
   return {
     ...translated,
     relativePath,

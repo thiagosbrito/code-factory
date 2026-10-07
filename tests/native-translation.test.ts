@@ -1,4 +1,13 @@
-import { mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,6 +18,10 @@ import {
   nativeFormats,
   previewNative,
 } from "../src/runtime/native-translation.js";
+import { ConnectionRegistry } from "../src/runtime/connections.js";
+import { initializeProject } from "../src/runtime/project.js";
+import { startLocalServer } from "../src/runtime/server.js";
+import { saveDraft } from "../src/runtime/storage.js";
 
 const roots: string[] = [];
 const project = async () => {
@@ -47,6 +60,13 @@ describe("native configuration translation", () => {
         format: "cursor-rule-mdc",
         provider: "cursor",
         label: "Cursor project rule (.mdc)",
+        directions: ["import", "export"],
+      },
+      {
+        format: "kiro-workflow-json",
+        provider: "kiro",
+        label: "Kiro workflow",
+        directions: ["import"],
       },
     ]);
     const preview = await previewNative(root, request(loop), "export");
@@ -182,5 +202,79 @@ describe("native configuration translation", () => {
     await writeFile(join(external, "sample.mdc"), "user-owned content");
     await expect(previewNative(root, request(draft()), "import")).rejects.toThrow("link");
     expect(await readFile(join(external, "sample.mdc"), "utf8")).toBe("user-owned content");
+  });
+});
+
+describe("Kiro workflow import", () => {
+  const servers: { close: (callback: () => void) => void }[] = [];
+  afterEach(async () => {
+    await Promise.all(
+      servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(resolve))),
+    );
+  });
+  const kiroRequest = (loop: unknown) => ({ format: "kiro-workflow-json", name: "focused", loop });
+  const kiroProject = async () => {
+    const root = await project();
+    await initializeProject(root);
+    await mkdir(join(root, ".kiro", "workflows"), { recursive: true });
+    const content = await readFile(
+      new URL("./fixtures/kiro/ui-delivery-focused.workflow.json", import.meta.url),
+      "utf8",
+    );
+    await writeFile(join(root, ".kiro", "workflows", "focused.workflow.json"), content);
+    return root;
+  };
+
+  it("previews and applies a project workflow, rejects export and saves the draft", async () => {
+    const root = await kiroProject();
+    expect(await nativeCandidates(root, "kiro-workflow-json")).toEqual(["focused"]);
+    const preview = await previewNative(root, kiroRequest(draft()), "import");
+    if (!("loop" in preview)) throw new Error("Expected an import preview.");
+    expect(preview.relativePath).toBe(".kiro/workflows/focused.workflow.json");
+    expect(preview.loop.steps).toHaveLength(12);
+    expect(preview.report.issues.length).toBeGreaterThan(0);
+    const applied = await applyNative(
+      root,
+      { ...kiroRequest(draft()), expectedRevision: preview.revision },
+      "import",
+    );
+    expect(applied).toEqual(preview);
+    const exportPreview = previewNative(root, kiroRequest(draft()), "export");
+    await expect(exportPreview).rejects.toThrow("import-only");
+    await expect(exportPreview).rejects.toMatchObject({ status: 422 });
+    const exportApply = applyNative(
+      root,
+      { ...kiroRequest(draft()), expectedRevision: "stale" },
+      "export",
+    );
+    await expect(exportApply).rejects.toThrow("import-only");
+    await expect(exportApply).rejects.toMatchObject({ status: 422 });
+    expect(await readdir(join(root, ".kiro", "workflows"))).toEqual(["focused.workflow.json"]);
+    await expect(saveDraft(root, preview.loop)).resolves.toEqual(preview.loop);
+  });
+
+  it("returns 422 with the empty-draft message over HTTP", async () => {
+    const root = await kiroProject();
+    // No agent discovery: this request never needs an agent connection.
+    const registry = new ConnectionRegistry(root, async () => []);
+    const { server, url } = await startLocalServer({
+      projectDirectory: root,
+      port: 0,
+      connections: registry,
+    });
+    servers.push(server);
+    const populated = parseLoop({
+      ...draft(),
+      steps: [{ id: "one", name: "One", kind: "agent", role: "", instruction: "Own" }],
+    });
+    const response = await fetch(`${url}/api/native/import/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(kiroRequest(populated)),
+    });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: "Import requires an empty draft to preserve existing steps.",
+    });
   });
 });
