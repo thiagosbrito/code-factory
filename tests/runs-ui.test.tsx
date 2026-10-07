@@ -274,6 +274,120 @@ afterEach(() => {
   window.history.replaceState(null, "", "#");
 });
 
+/** A failed ticket-only run whose latest attempt reported the given lookup output. */
+const blockedTicketRun = (detail: string, maxAttemptsPerStep = 3) => {
+  const loop = parseLoop({
+    schemaVersion: 2,
+    id: "issue-flow",
+    name: "Issue flow",
+    version: 1,
+    status: "published",
+    steps: [{ id: "build", name: "Build", kind: "agent", role: "builder", instruction: "Build" }],
+    dependencies: [],
+    groups: [],
+    joins: [],
+    decisions: [],
+    policy: { maxAttemptsPerStep },
+  });
+  const initial = createRunRecord(
+    createRunSnapshot(
+      loop,
+      { description: "", ticketId: "PROJ-123" },
+      { provider: "codex", model: "agent-default" },
+    ),
+  );
+  const failed = completeStep(claimStep(initial, "build", "candidate", "inputs"), "build", {
+    status: "failed",
+  });
+  const attemptId = failed.steps[0]?.attempts[0]?.id;
+  if (!attemptId) throw new Error("Missing issue lookup attempt");
+  const run = runRecordSchema.parse({
+    ...failed,
+    evidence: [
+      {
+        id: crypto.randomUUID(),
+        runId: failed.snapshot.id,
+        stepId: "build",
+        attemptId,
+        createdAt: new Date().toISOString(),
+        kind: "event",
+        type: "lifecycle",
+        title: "completed",
+        detail,
+        state: "succeeded",
+        sequence: 0,
+      },
+    ],
+  });
+  return { run, attemptId };
+};
+const renderDetail = (
+  run: RunRecord,
+  onRetry: (stepId: string, attemptId: string) => void = () => {},
+) =>
+  render(
+    <RunDetail
+      run={run}
+      summary={null}
+      accepting={false}
+      onAccept={() => {}}
+      connected
+      executing={false}
+      onExecute={() => {}}
+      onCancel={() => {}}
+      onRetry={onRetry}
+      onBack={() => {}}
+    />,
+  );
+
+it.each([
+  ["provider-neutral", "BLOCKED: Issue PROJ-123 could not be retrieved; MCP unavailable"],
+  ["legacy Jira", "BLOCKED: Jira issue PROJ-123 could not be retrieved; MCP unavailable"],
+])("offers an issue tracker connection retry for the %s sentinel", async (_label, detail) => {
+  const { run, attemptId } = blockedTicketRun(detail);
+  const onRetry = vi.fn<(stepId: string, attemptId: string) => void>();
+  renderDetail(run, onRetry);
+  const banner = screen.getByRole("region", { name: "Connect your issue tracker to continue" });
+  expect(banner.textContent).toContain(
+    "Connect its issue tracker MCP (for example Jira or Linear) in your Codex settings",
+  );
+  // The banner is not an alert; the problem is announced through a separate live message.
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(
+    screen
+      .getAllByRole("status")
+      .some(
+        (item) =>
+          item.textContent ===
+          "Issue PROJ-123 could not be retrieved. Connect your issue tracker to continue.",
+      ),
+  ).toBe(true);
+  expect(screen.getByText("Issue tracker connection needed")).toBeTruthy();
+  await userEvent.click(within(banner).getByRole("button", { name: "Retry after connecting" }));
+  expect(onRetry).toHaveBeenCalledWith("build", attemptId);
+});
+
+it("disables the connection retry once the step's attempt budget is spent", () => {
+  const { run } = blockedTicketRun("BLOCKED: Issue PROJ-123 could not be retrieved", 1);
+  renderDetail(run);
+  const banner = screen.getByRole("region", { name: "Connect your issue tracker to continue" });
+  expect(
+    within(banner).getByRole("button", { name: "Retry after connecting" }).hasAttribute("disabled"),
+  ).toBe(true);
+  expect(banner.textContent).toContain("This step has reached its retry limit.");
+});
+
+it("shows no connection banner for an unrelated failure", () => {
+  const { run } = blockedTicketRun("Build failed: tests are red");
+  renderDetail(run);
+  expect(screen.queryByRole("region", { name: /issue tracker/ })).toBeNull();
+  expect(
+    screen
+      .getAllByRole("status")
+      .some((item) => item.textContent?.includes("could not be retrieved")),
+  ).toBe(false);
+});
+
 it("shows validation separately from human acceptance and records an explicit click", async () => {
   const onAccept = vi.fn<() => void>();
   const summary: EvidenceSummary = {

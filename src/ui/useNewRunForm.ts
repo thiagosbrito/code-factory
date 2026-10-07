@@ -13,6 +13,7 @@ export const useNewRunForm = ({
   loops,
   agents,
   defaultBinding,
+  trackerConfigured,
   canStart,
   onStarted,
   onOpenChange,
@@ -20,6 +21,7 @@ export const useNewRunForm = ({
   loops: LoopDefinition[];
   agents: AgentConnection[];
   defaultBinding: ExecutionBinding | null;
+  trackerConfigured: boolean;
   canStart: boolean;
   onStarted: (id: string, run?: RunRecord) => void;
   onOpenChange: (open: boolean) => void;
@@ -41,7 +43,9 @@ export const useNewRunForm = ({
     .find(Boolean);
   const hasTicketInput = Boolean(ticketId.trim());
   const ticketReady =
-    !hasTicketInput || (ticketState === "found" && ticket?.id === ticketId.trim().toUpperCase());
+    !hasTicketInput ||
+    !trackerConfigured ||
+    (ticketState === "found" && ticket?.id === ticketId.trim().toUpperCase());
 
   const retrieve = async () => {
     const id = ticketId.trim().toUpperCase();

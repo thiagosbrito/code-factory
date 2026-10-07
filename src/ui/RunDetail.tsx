@@ -1,12 +1,12 @@
-import { useRef, useState } from "react";
-import type { RunRecord } from "../domain/run.js";
+import { useId, useRef, useState } from "react";
+import { hasRetryBudget, type RunRecord } from "../domain/run.js";
 import type { EvidenceSummary } from "../domain/acceptance.js";
 import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import { RunGraph } from "./RunGraph";
 import { RunInspector } from "./RunInspector";
 import { RunInputPrompt } from "./RunInputPrompt";
-import { runStatus, runTitle, type RunScope } from "./run-view-model";
+import { runStatusLabel, runTitle, trackerConnectionStep, type RunScope } from "./run-view-model";
 
 export const RunDetail = ({
   run,
@@ -61,6 +61,20 @@ export const RunDetail = ({
   const files = summary?.files.length ?? 0;
   const artifacts = summary?.artifacts.length ?? 0;
   const checks = summary?.requirements.filter((item) => item.state === "met").length ?? 0;
+  const connectionHeadingId = useId();
+  // Computed once per render and shared by the status label and the banner.
+  const connectionStep = trackerConnectionStep(run);
+  const connectionProvider = connectionStep
+    ? run.snapshot.bindings[connectionStep.stepId]?.provider
+    : undefined;
+  const connectionAgentName =
+    connectionProvider === "codex"
+      ? "Codex"
+      : connectionProvider === "kiro"
+        ? "Kiro"
+        : connectionProvider;
+  const connectionAttempt = connectionStep?.attempts.at(-1);
+  const connectionRetryAvailable = connectionStep ? hasRetryBudget(run, connectionStep) : false;
   return (
     <div className="mt-7 space-y-5">
       <Button variant="outline" size="sm" onClick={onBack}>
@@ -68,7 +82,8 @@ export const RunDetail = ({
       </Button>
       <header className="rounded-lg border bg-white p-5">
         <p className="text-xs font-semibold uppercase tracking-wide text-primary">
-          {run.snapshot.task.ticket?.id ?? "Description only"} · Run {run.snapshot.id}
+          {run.snapshot.task.ticket?.id ?? run.snapshot.task.ticketId ?? "Description only"} · Run{" "}
+          {run.snapshot.id}
         </p>
         <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -94,7 +109,9 @@ export const RunDetail = ({
         </div>
         <p className="mt-3 whitespace-pre-wrap text-sm">{run.snapshot.task.description}</p>
         <div className="mt-4 flex flex-wrap gap-3 text-xs">
-          <span className={`run-status run-status-${run.status}`}>{runStatus(run)}</span>
+          <span className={`run-status run-status-${run.status}`}>
+            {runStatusLabel(run, connectionStep)}
+          </span>
           <span>{active} active steps</span>
           <span>
             {complete} of {run.steps.length} complete
@@ -112,6 +129,62 @@ export const RunDetail = ({
           </span>
         </div>
       </header>
+      {/* Kept mounted so the message is announced once when the banner appears, without
+          turning the banner's buttons into alert content. */}
+      <output aria-live="polite" className="sr-only">
+        {connectionStep
+          ? `Issue ${run.snapshot.task.ticketId ?? ""} could not be retrieved. Connect your issue tracker to continue.`
+          : ""}
+      </output>
+      {connectionStep && (
+        <section
+          aria-labelledby={connectionHeadingId}
+          className="rounded-lg border border-amber-300 bg-amber-50 p-5"
+        >
+          <h3 id={connectionHeadingId} className="font-semibold">
+            Connect your issue tracker to continue
+          </h3>
+          <p className="mt-1 text-sm">
+            {run.snapshot.task.ticketId} could not be read. Connect its issue tracker MCP (for
+            example Jira or Linear) in your {connectionAgentName ?? "selected AI tool"} settings,
+            then retry this step. Your run and workspace are saved.
+          </p>
+          {!connectionRetryAvailable && (
+            <p className="mt-2 text-sm">
+              This step has reached its retry limit. Start a new run after connecting your issue
+              tracker.
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              disabled={
+                !connected ||
+                executing ||
+                !onRetry ||
+                !connectionAttempt ||
+                !connectionRetryAvailable
+              }
+              onClick={() => {
+                if (connectionAttempt) onRetry?.(connectionStep.stepId, connectionAttempt.id);
+              }}
+            >
+              Retry after connecting
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() =>
+                open({
+                  kind: "step",
+                  stepId: connectionStep.stepId,
+                  attemptId: connectionAttempt?.id ?? null,
+                })
+              }
+            >
+              Inspect attempt
+            </Button>
+          </div>
+        </section>
+      )}
       <RunInputPrompt run={run} agents={agents} connected={connected} onReply={onReplyToInput} />
       <section className="grid gap-2 sm:grid-cols-4" aria-label="Run summary">
         <Button

@@ -123,6 +123,14 @@ describe("protected run intake", () => {
     expect(combined.snapshot.task.ticket?.id).toBe("THI-9");
   });
 
+  it("starts a ticket-only run for agent MCP lookup when no direct tracker is configured", async () => {
+    const root = await project();
+    const request = input({ description: "", ticketId: "PROJ-123" });
+    const run = await startRun(root, request, [agent]);
+    expect(run.snapshot.task).toEqual({ description: "", ticketId: "PROJ-123" });
+    expect(await startRun(root, request, [agent])).toEqual(run);
+  });
+
   it("rejects empty input, missing publication, unverified connection, and failed ticket", async () => {
     const root = await project();
     await expect(startRun(root, input({ description: "" }), [agent])).rejects.toThrow(
@@ -134,9 +142,6 @@ describe("protected run intake", () => {
     await expect(
       startRun(root, input(), [{ ...agent, authentication: "unknown" }]),
     ).rejects.toThrow(/Verify and authenticate/);
-    await expect(
-      startRun(root, input({ description: "", ticketId: "THI-9" }), [agent]),
-    ).rejects.toThrow(/tracker/);
     await expect(
       startRun(root, input({ description: "Extra", ticketId: "THI-9" }), [agent], {
         retrieve: async () => {

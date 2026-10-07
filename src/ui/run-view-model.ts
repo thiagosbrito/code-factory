@@ -1,20 +1,48 @@
 import type { RunRecord } from "../domain/run.js";
 import type { Evidence } from "../domain/evidence.js";
 import type { EvidenceSummary } from "../domain/acceptance.js";
+import { isIssueBlockedOutput } from "../domain/ticket.js";
 
 export type RunStep = RunRecord["steps"][number];
 export type StepDefinition = RunRecord["snapshot"]["loop"]["steps"][number];
 export type RunScope = { kind: "run" } | { kind: "step"; stepId: string; attemptId: string | null };
 
 export const runTitle = (run: RunRecord): string =>
-  run.snapshot.task.ticket?.title ?? run.snapshot.task.description.slice(0, 80);
+  run.snapshot.task.ticket?.title ??
+  run.snapshot.task.ticketId ??
+  run.snapshot.task.description.slice(0, 80);
+
+/** The failed step whose latest attempt reported that the agent could not read the issue. */
+export const trackerConnectionStep = (run: RunRecord): RunStep | undefined => {
+  const ticketId = run.snapshot.task.ticketId;
+  // Cheap guards first: only failed agent-lookup runs need the evidence scan.
+  if (run.status !== "failed" || !ticketId) return undefined;
+  return run.steps.find(
+    (step) =>
+      step.status === "failed" &&
+      run.evidence.some(
+        (item) =>
+          item.kind === "event" &&
+          item.stepId === step.stepId &&
+          item.attemptId === step.attempts.at(-1)?.id &&
+          item.title === "completed" &&
+          isIssueBlockedOutput(item.detail, ticketId),
+      ),
+  );
+};
+
+/** Callers that already computed the connection step pass it here to avoid a second scan. */
+export const runStatusLabel = (run: RunRecord, connectionStep: RunStep | undefined): string =>
+  connectionStep
+    ? "Issue tracker connection needed"
+    : run.status === "succeeded"
+      ? "Completed"
+      : run.status === "pending"
+        ? "Pending"
+        : (run.status[0] ?? "").toUpperCase() + run.status.slice(1);
 
 export const runStatus = (run: RunRecord): string =>
-  run.status === "succeeded"
-    ? "Completed"
-    : run.status === "pending"
-      ? "Pending"
-      : (run.status[0] ?? "").toUpperCase() + run.status.slice(1);
+  runStatusLabel(run, trackerConnectionStep(run));
 
 export const scopeEvidence = (run: RunRecord, scope: RunScope): Evidence[] =>
   run.evidence.filter((item) =>

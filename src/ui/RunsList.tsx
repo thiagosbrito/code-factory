@@ -20,7 +20,7 @@ export const RunsList = ({ runs, onOpen }: { runs: RunRecord[]; onOpen: (id: str
   const visible = runs.filter(
     (run) =>
       matchesStatus(run, filter) &&
-      `${runTitle(run)} ${run.snapshot.task.ticket?.id ?? ""} ${run.snapshot.task.description} ${run.snapshot.loop.name} ${run.snapshot.id}`
+      `${runTitle(run)} ${run.snapshot.task.ticket?.id ?? run.snapshot.task.ticketId ?? ""} ${run.snapshot.task.description} ${run.snapshot.loop.name} ${run.snapshot.id}`
         .toLowerCase()
         .includes(query.trim().toLowerCase()),
   );
@@ -69,7 +69,8 @@ export const RunsList = ({ runs, onOpen }: { runs: RunRecord[]; onOpen: (id: str
               <span className="min-w-0">
                 <strong className="block truncate text-sm">{runTitle(run)}</strong>
                 <small className="block truncate text-xs text-muted-foreground">
-                  {run.snapshot.task.ticket?.id ?? "Description only"} · {run.snapshot.id}
+                  {run.snapshot.task.ticket?.id ?? run.snapshot.task.ticketId ?? "Description only"}{" "}
+                  · {run.snapshot.id}
                 </small>
               </span>
               <span className="text-sm">

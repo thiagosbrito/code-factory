@@ -54,7 +54,15 @@ export const NewRunDialog = ({
     changeLoop,
     changeTicket,
     changeDescription,
-  } = useNewRunForm({ loops, agents, defaultBinding, canStart, onStarted, onOpenChange });
+  } = useNewRunForm({
+    loops,
+    agents,
+    defaultBinding,
+    trackerConfigured,
+    canStart,
+    onStarted,
+    onOpenChange,
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -135,7 +143,7 @@ export const NewRunDialog = ({
                     void retrieve();
                   }
                 }}
-                placeholder="e.g. THI-9"
+                placeholder="e.g. PROJ-123"
               />
               <Button
                 type="button"
@@ -148,7 +156,8 @@ export const NewRunDialog = ({
             </div>
             {!trackerConfigured && (
               <p className="mt-1 text-xs text-muted-foreground">
-                Tracker unavailable. Description-only runs remain available.
+                The selected agent will read this issue through its configured issue tracker MCP
+                (for example Jira or Linear) when the run starts. Connect it in that AI tool first.
               </p>
             )}
             {ticketState === "loading" && (
@@ -192,7 +201,7 @@ export const NewRunDialog = ({
             <label htmlFor="task-description" className="mb-1 block text-sm font-medium">
               Task description{" "}
               <span className="font-normal text-muted-foreground">
-                optional with a retrieved ticket
+                optional with a ticket number
               </span>
             </label>
             <Textarea

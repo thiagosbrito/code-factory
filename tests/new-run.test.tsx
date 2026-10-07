@@ -169,6 +169,31 @@ describe("new run dialog", () => {
     });
   });
 
+  it("starts an issue run through the agent when no direct tracker is configured", async () => {
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", async (_path: string, options: RequestInit) => {
+      requests.push(JSON.parse(String(options.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ runId: "44444444-4444-4444-8444-444444444444" }), {
+        status: 201,
+      });
+    });
+    const started = vi.fn<(id: string) => void>();
+    view({ tracker: false, onStarted: started });
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/Ticket number/), "PROJ-123");
+    expect(
+      screen.getByText(
+        /selected agent will read this issue through its configured issue tracker MCP/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retrieve" }).hasAttribute("disabled")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Start run" }));
+    await waitFor(() =>
+      expect(started.mock.calls[0]?.[0]).toBe("44444444-4444-4444-8444-444444444444"),
+    );
+    expect(requests).toMatchObject([{ description: "", ticketId: "PROJ-123" }]);
+  });
+
   it.each([
     [401, "Tracker authentication failed"],
     [503, "Ticket retrieval failed"],

@@ -97,7 +97,7 @@ describe("run snapshots", () => {
     expect(run.bindings.quality?.provider).toBe("codex");
     expect(() =>
       createRunSnapshot(loop, { description: " " }, { provider: "mock", model: "agent-default" }),
-    ).toThrow(/description or retrieve a ticket/);
+    ).toThrow(/description or ticket ID/);
     expect(() =>
       createRunSnapshot(
         createLoopDraft("draft", "Draft"),

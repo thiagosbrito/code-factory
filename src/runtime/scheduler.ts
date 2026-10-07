@@ -25,6 +25,13 @@ import {
   skipInactive,
   type StepResult,
 } from "../domain/scheduler.js";
+import {
+  extractRetrievedIssue,
+  isIssueBlockedOutput,
+  issueBlockedSentinel,
+  retrievedIssueEnd,
+  retrievedIssueStart,
+} from "../domain/ticket.js";
 import { mutateRun, readRun } from "./storage.js";
 import { acknowledgeGuidance, deliverQueuedGuidance, expireQueuedGuidance } from "./guidance.js";
 import { snapshotFileDiffs } from "./inspection.js";
@@ -130,6 +137,56 @@ export const fileDigest = async (directory: string): Promise<string> => {
   return hash.digest("hex");
 };
 
+const issueLookupInstruction = (ticketId: string): string =>
+  [
+    `Issue ${ticketId} has not been retrieved by Code Factory. Before doing this step, use the issue tracker MCP available in your selected AI tool (for example Jira or Linear) to read the issue, including its title, description and acceptance criteria. Use those requirements for this step.`,
+    `Include the retrieved details in your output between these exact lines so later steps receive them:`,
+    retrievedIssueStart(ticketId),
+    "Title: <title>",
+    "Description: <description>",
+    "Acceptance criteria: <acceptance criteria>",
+    retrievedIssueEnd,
+    `If the issue tracker MCP is unavailable or the issue cannot be read, begin your output with "${issueBlockedSentinel(ticketId)}" and do not make changes or claim the task is complete.`,
+  ].join("\n");
+
+/**
+ * Agent turns are isolated, so the issue is read once by an entry step (no incoming dependency)
+ * and Code Factory carries the delimited details from that step's latest succeeded completion
+ * evidence into every later step, round, and retry instead of asking agents to fetch it again.
+ */
+const issueContext = (record: RunRecord, stepId: string, ticketId: string): string => {
+  const { loop } = record.snapshot;
+  const entryStepIds = new Set(
+    loop.steps
+      .filter((step) => !loop.dependencies.some((edge) => edge.to === step.id))
+      .map((step) => step.id),
+  );
+  const succeededEntryAttempts = new Set(
+    record.steps
+      .filter((step) => entryStepIds.has(step.stepId))
+      .flatMap((step) => step.attempts)
+      .filter((attempt) => attempt.status === "succeeded")
+      .map((attempt) => attempt.id),
+  );
+  const retrieved = [...record.evidence]
+    .reverse()
+    .map((item) =>
+      item.kind === "event" &&
+      item.title === "completed" &&
+      item.attemptId &&
+      succeededEntryAttempts.has(item.attemptId)
+        ? extractRetrievedIssue(item.detail, ticketId)
+        : undefined,
+    )
+    .find(Boolean);
+  if (retrieved)
+    return `Issue ${ticketId} was retrieved earlier in this run. Use these details as the requirements and do not fetch the issue again:\n${retrieved}`;
+  const step = record.steps.find((item) => item.stepId === stepId);
+  if (entryStepIds.has(stepId) && !step?.attempts.some((item) => item.status === "succeeded"))
+    return issueLookupInstruction(ticketId);
+  return `Issue ${ticketId} details were not captured by the first step. Do not fetch the issue again; work from the task and inputs below.`;
+};
+
 const stepInputs = (record: RunRecord, stepId: string) => {
   const sourceIds = record.snapshot.loop.dependencies
     .filter((edge) => edge.to === stepId)
@@ -171,6 +228,7 @@ const stepInputs = (record: RunRecord, stepId: string) => {
       `Retrieved ticket ${task.ticket.id}: ${task.ticket.title}\n${task.ticket.summary}`,
     task.ticket?.attachments.length &&
       `Ticket attachments:\n${task.ticket.attachments.map((item) => `${item.title}: ${item.url}`).join("\n")}`,
+    task.ticketId && issueContext(record, stepId, task.ticketId),
     ...sources.map(
       (source) =>
         `Input from ${source.stepId} (outcome: ${source.outcome ?? "none"}, candidate: ${source.candidateId ?? "none"}):\n${source.output ?? ""}`,
@@ -634,6 +692,14 @@ const executeOnce = async (
         (await fileDigest(executionDirectory)) !== step.candidateId
       )
         result = { status: "failed", summary: "Reviewer changed the frozen candidate." };
+      const blockedSummary = result.summary;
+      if (
+        result.status === "succeeded" &&
+        record.snapshot.task.ticketId &&
+        blockedSummary !== undefined &&
+        isIssueBlockedOutput(blockedSummary, record.snapshot.task.ticketId)
+      )
+        result = { status: "failed", summary: blockedSummary };
       const decision = record.snapshot.loop.decisions.find((item) => item.stepId === stepId);
       if (
         result.status === "succeeded" &&

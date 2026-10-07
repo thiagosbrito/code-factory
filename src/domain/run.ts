@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { executionBindingSchema, parseLoop, loopSchema, type ExecutionBinding } from "./loop.js";
 import { evidenceSchema } from "./evidence.js";
+import { ticketIdSchema } from "./ticket.js";
 
 export const taskSchema = z
   .strictObject({
     description: z.string().trim(),
+    ticketId: ticketIdSchema.optional(),
     ticket: z
       .strictObject({
         id: z.string().min(1),
@@ -17,8 +19,8 @@ export const taskSchema = z
       .optional(),
   })
   .refine(
-    (task) => Boolean(task.description || task.ticket),
-    "Enter a description or retrieve a ticket.",
+    (task) => Boolean(task.description || task.ticketId || task.ticket),
+    "Enter a description or ticket ID.",
   );
 export const baselineSchema = z
   .strictObject({
@@ -352,15 +354,15 @@ export const createRunRecord = (snapshot: RunSnapshot): RunRecord => {
     evidence: [],
   });
 };
+/** Attempts are budgeted per implementation round, so a repair round restores retries. */
+export const hasRetryBudget = (record: RunRecord, step: RunRecord["steps"][number]): boolean =>
+  step.attempts.filter((attempt) => attempt.implementationRound === record.implementationRound)
+    .length < record.snapshot.loop.policy.maxAttemptsPerStep;
 /** A retry increments the attempt only. Repair scheduling explicitly advances the round. */
 export const startAttempt = (record: RunRecord, stepId: string): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
   if (!step) throw new Error(`Unknown step: ${stepId}`);
-  if (
-    step.attempts.filter((attempt) => attempt.implementationRound === record.implementationRound)
-      .length >= record.snapshot.loop.policy.maxAttemptsPerStep
-  )
-    throw new Error(`Attempt limit reached for ${stepId}.`);
+  if (!hasRetryBudget(record, step)) throw new Error(`Attempt limit reached for ${stepId}.`);
   if (step.attempts.some((attempt) => attempt.status === "running"))
     throw new Error(`Step ${stepId} already has a running attempt.`);
   return runRecordSchema.parse({

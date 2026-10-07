@@ -87,7 +87,9 @@ export const RunInspectorDetails = ({
         <dd>
           {run.snapshot.task.ticket
             ? `${run.snapshot.task.ticket.id} · ${run.snapshot.task.ticket.title}`
-            : "Description only"}
+            : run.snapshot.task.ticketId
+              ? `${run.snapshot.task.ticketId} · read through the agent's issue tracker MCP`
+              : "Description only"}
         </dd>
         <dt>Captured</dt>
         <dd>{new Date(run.snapshot.baseline.capturedAt).toLocaleString()}</dd>

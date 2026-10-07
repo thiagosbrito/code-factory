@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   advanceImplementationRound,
+  hasRetryBudget,
   runRecordSchema,
   startAttempt,
   type RunRecord,
@@ -242,11 +243,7 @@ export const prepareStepRetry = (
     throw new Error("Active work must finish before retry.");
   if (step.attempts.at(-1)?.id !== expectedAttemptId)
     throw new Error("Retry target changed; reload the run.");
-  if (
-    step.attempts.filter((item) => item.implementationRound === record.implementationRound)
-      .length >= record.snapshot.loop.policy.maxAttemptsPerStep
-  )
-    throw new Error("Attempt limit reached for this step.");
+  if (!hasRetryBudget(record, step)) throw new Error("Attempt limit reached for this step.");
   const descendants = new Set(getDependentStepIds(record.snapshot.loop, stepId));
   const invalidated = record.steps.filter(
     (item) => descendants.has(item.stepId) && item.status !== "pending",

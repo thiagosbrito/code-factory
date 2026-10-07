@@ -30,7 +30,8 @@ const matchesRequest = (record: RunRecord, input: StartRunInput): boolean => {
     record.snapshot.loop.id === input.loopId &&
     record.snapshot.loop.version === input.loopVersion &&
     record.snapshot.task.description === input.description &&
-    record.snapshot.task.ticket?.id === input.ticketId?.toUpperCase()
+    (record.snapshot.task.ticket?.id ?? record.snapshot.task.ticketId) ===
+      input.ticketId?.toUpperCase()
   );
 };
 
@@ -86,8 +87,6 @@ const startOnce = async (
     if (binding.effort && !model?.efforts?.includes(binding.effort))
       throw new ProjectError(`Effort ${binding.effort} is unavailable.`, 422);
   }
-  if (input.ticketId && !tracker)
-    throw new ProjectError("Configure a tracker before retrieving tickets.", 422);
   const ticket = input.ticketId && tracker ? await tracker.retrieve(input.ticketId) : undefined;
   const baseline = await captureGitBaseline(project).catch((error: unknown) => {
     throw new ProjectError(
@@ -99,7 +98,14 @@ const startOnce = async (
     const record = createRunRecord(
       createRunSnapshot(
         loop,
-        { description: input.description, ...(ticket ? { ticket } : {}) },
+        {
+          description: input.description,
+          ...(ticket
+            ? { ticket }
+            : input.ticketId
+              ? { ticketId: input.ticketId.toUpperCase() }
+              : {}),
+        },
         config.defaultBinding,
         baseline,
         input.requestId,
