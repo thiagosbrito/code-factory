@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { cp, lstat, mkdtemp, readFile, readdir, readlink, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
   CancellationUnconfirmedError,
   type AgentAdapter,
@@ -193,6 +193,47 @@ const reviewResult = (output: string): Pick<StepResult, "outcome" | "findings"> 
   };
 };
 
+const processGroupExists = (pid: number): boolean => {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return !(error instanceof Error && "code" in error && error.code === "ESRCH");
+  }
+};
+
+const waitForProcessGroupExit = async (pid: number, timeoutMs: number): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupExists(pid) && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  return !processGroupExists(pid);
+};
+
+const terminateCheckTree = async (child: ChildProcess): Promise<boolean> => {
+  if (!child.pid) return false;
+  if (process.platform === "win32")
+    return new Promise((resolve) => {
+      const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      killer.once("error", () => resolve(child.exitCode !== null));
+      killer.once("close", (code) => resolve(code === 0 || child.exitCode !== null));
+    });
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "ESRCH";
+  }
+  if (await waitForProcessGroupExit(child.pid, 2_000)) return true;
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) return false;
+  }
+  return waitForProcessGroupExit(child.pid, 2_000);
+};
+
 const checkCommand = async (
   command: string,
   cwd: string,
@@ -201,7 +242,12 @@ const checkCommand = async (
 ): Promise<StepResult> =>
   new Promise((resolveCheck) => {
     if (signal.aborted) return resolveCheck({ status: "canceled" });
-    const child = spawn(command, { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, {
+      cwd,
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
     let output = "";
     let buffered = "";
     let retained = 0;
@@ -242,8 +288,14 @@ const checkCommand = async (
     child.stderr.on("data", (chunk: Buffer) => {
       capture(chunk);
     });
-    const timeout = setTimeout(() => child.kill("SIGTERM"), 300_000);
-    const abort = () => child.kill("SIGTERM");
+    let stopReason: "abort" | "timeout" | undefined;
+    let termination: Promise<boolean> | undefined;
+    const stop = (reason: "abort" | "timeout") => {
+      stopReason ??= reason;
+      termination ??= terminateCheckTree(child);
+    };
+    const timeout = setTimeout(() => stop("timeout"), 300_000);
+    const abort = () => stop("abort");
     signal.addEventListener("abort", abort, { once: true });
     child.on("error", (error) => {
       clearTimeout(timeout);
@@ -270,12 +322,22 @@ const checkCommand = async (
       clearTimeout(timeout);
       signal.removeEventListener("abort", abort);
       flush();
-      void pending.then(
-        () =>
+      void Promise.all([pending, termination ?? Promise.resolve(true)]).then(
+        ([, stopped]) =>
           resolveCheck({
-            status: signal.aborted ? "canceled" : code === 0 ? "succeeded" : "failed",
+            status: !stopped
+              ? "unavailable"
+              : stopReason === "abort"
+                ? "canceled"
+                : code === 0 && !stopReason
+                  ? "succeeded"
+                  : "failed",
             outcome: code === 0 ? "passed" : "failed",
-            summary: output,
+            summary: !stopped
+              ? "Check process-tree termination could not be confirmed."
+              : stopReason === "timeout"
+                ? `${output}\nCheck timed out after 300000ms.`.trim()
+                : output,
             exitCode: code,
           }),
         () => resolveCheck({ status: "failed", summary: "Check output could not be persisted." }),
