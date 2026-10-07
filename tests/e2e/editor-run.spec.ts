@@ -26,7 +26,13 @@ const detectedCodex: AgentConnection = {
   executable: "/fixture/codex",
   installation: "detected",
   authentication: "unknown",
-  capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+  capabilities: {
+    streaming: "unknown",
+    steering: "unknown",
+    resume: "unknown",
+    pause: "unknown",
+    waitingInput: "unknown",
+  },
 };
 
 const test = base.extend<{ harness: Harness }>({
@@ -65,12 +71,24 @@ const test = base.extend<{ harness: Harness }>({
           executable: "/fixture/kiro",
           installation: "detected",
           authentication: "unknown",
-          capabilities: { streaming: "unknown", steering: "unknown", resume: "unknown" },
+          capabilities: {
+            streaming: "unknown",
+            steering: "unknown",
+            resume: "unknown",
+            pause: "unknown",
+            waitingInput: "unknown",
+          },
         },
       ],
       async (executable) => ({
         provider: "codex" as const,
-        capabilities: { streaming: "supported", steering: "supported", resume: "supported" },
+        capabilities: {
+          streaming: "supported",
+          steering: "supported",
+          resume: "supported",
+          pause: "unsupported",
+          waitingInput: "unsupported",
+        },
         close() {},
         async inspect(): Promise<AgentConnection> {
           return {
@@ -80,7 +98,13 @@ const test = base.extend<{ harness: Harness }>({
             version: "0.1.0-fixture",
             protocol: "Codex app-server JSON-RPC over stdio",
             authentication: "authenticated",
-            capabilities: { streaming: "supported", steering: "supported", resume: "supported" },
+            capabilities: {
+              streaming: "supported",
+              steering: "supported",
+              resume: "supported",
+              pause: "unsupported",
+              waitingInput: "unsupported",
+            },
             models: [
               { id: "model-a", displayName: "Model A", efforts: ["low", "high"] },
               { id: "model-b", displayName: "Model B", efforts: [] },
