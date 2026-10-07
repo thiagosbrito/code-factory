@@ -1,8 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
+import { isAbsolute, relative } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { z } from "zod";
+import type { ToolGrantInEffect } from "../domain/tool-grant.js";
 import {
   CancellationUnconfirmedError,
   type AgentAdapter,
@@ -57,6 +61,41 @@ type RpcDispatch = {
   userInputRequest?(message: RpcMessage): boolean;
   send(message: Record<string, unknown>): void;
   approveFileChange?(request: RpcMessage): boolean;
+  approveCommandExecution?(request: RpcMessage): boolean;
+};
+
+export type CodexThreadPolicy = { grant: ToolGrantInEffect | null; root: string };
+const commandApprovalSchema = z.object({
+  threadId: z.string(),
+  turnId: z.string(),
+  itemId: z.string(),
+  cwd: z.string().nullable().optional(),
+  kind: z.enum(["command", "writeStdin"]).optional().default("command"),
+  networkApprovalContext: z.unknown().optional(),
+});
+
+/**
+ * Accept a command approval only with a Codex project grant, for a plain command (not stdin to a
+ * terminal, not a network prompt) whose real working directory is inside the step's directory.
+ */
+export const decideCommandApproval = (
+  params: unknown,
+  policy: CodexThreadPolicy | undefined,
+): "accept" | "decline" => {
+  const parsed = commandApprovalSchema.safeParse(params);
+  if (!parsed.success || policy?.grant?.provider !== "codex") return "decline";
+  const { kind, networkApprovalContext, cwd } = parsed.data;
+  if (kind !== "command") return "decline";
+  if (networkApprovalContext !== undefined && networkApprovalContext !== null) return "decline";
+  if (!cwd || !isAbsolute(cwd)) return "decline";
+  let real: string;
+  try {
+    real = realpathSync.native(cwd);
+  } catch {
+    return "decline";
+  }
+  const offset = relative(policy.root, real);
+  return offset.startsWith("..") || isAbsolute(offset) ? "decline" : "accept";
 };
 
 /** Route app-server messages, declining approvals and rejecting unknown requests by default. */
@@ -68,12 +107,15 @@ export const dispatchCodexMessage = (message: RpcMessage, handlers: RpcDispatch)
     ]);
     if (approvalMethods.has(message.method)) {
       let decision = "decline";
-      if (message.method === "item/fileChange/requestApproval") {
-        try {
-          if (handlers.approveFileChange?.(message) === true) decision = "accept";
-        } catch {
-          /* Keep the default denial. */
-        }
+      try {
+        if (
+          message.method === "item/fileChange/requestApproval"
+            ? handlers.approveFileChange?.(message) === true
+            : handlers.approveCommandExecution?.(message) === true
+        )
+          decision = "accept";
+      } catch {
+        /* Keep the default denial. */
       }
       handlers.send({ jsonrpc: "2.0", id: message.id, result: { decision } });
     } else if (
@@ -114,7 +156,10 @@ export class CodexStdioRpc implements CodexRpc {
 
   constructor(
     executable: string,
-    options: { approveFileChange?(request: RpcMessage): boolean } = {},
+    options: {
+      approveFileChange?(request: RpcMessage): boolean;
+      approveCommandExecution?(request: RpcMessage): boolean;
+    } = {},
   ) {
     this.child = spawn(executable, ["app-server", "--listen", "stdio://"], { stdio: "pipe" });
     createInterface({ input: this.child.stdout }).on("line", (line) => {
@@ -139,6 +184,9 @@ export class CodexStdioRpc implements CodexRpc {
         userInputRequest: (request) => claimCodexInputRequest(this.listeners, request),
         send: (reply) => this.child.stdin.write(`${JSON.stringify(reply)}\n`),
         ...(options.approveFileChange ? { approveFileChange: options.approveFileChange } : {}),
+        ...(options.approveCommandExecution
+          ? { approveCommandExecution: options.approveCommandExecution }
+          : {}),
       });
     });
     const fail = (error: Error) => {
@@ -184,7 +232,13 @@ export const createCodexAdapter = async (executable: string): Promise<CodexAdapt
   const { stdout } = await promisify(execFile)(executable, ["--version"], { timeout: 5000 });
   const version = /^codex-cli (\d+\.\d+\.\d+)(?:\s|$)/.exec(stdout.trim())?.[1];
   if (!version) throw new Error("Executable is not a supported Codex CLI");
-  return new CodexAdapter(new CodexStdioRpc(executable), executable, version);
+  // The RPC must exist before the adapter; the holder lets its approval hook reach the adapter.
+  const holder: { adapter?: CodexAdapter } = {};
+  const rpc = new CodexStdioRpc(executable, {
+    approveCommandExecution: (request) => holder.adapter?.approveCommandExecution(request) ?? false,
+  });
+  holder.adapter = new CodexAdapter(rpc, executable, version);
+  return holder.adapter;
 };
 
 const object = (value: unknown): Record<string, unknown> => {
@@ -206,6 +260,18 @@ export class CodexAdapter implements AgentAdapter {
   readonly capabilities: AgentCapabilities;
   private initialized?: Promise<void>;
   private readonly pendingInput = new Map<string, { requestId: string | number; itemId: string }>();
+  // Policies live only in this process, so a thread resumed after a restart is declined.
+  private readonly threadPolicies = new Map<string, CodexThreadPolicy>();
+
+  approveCommandExecution(request: RpcMessage): boolean {
+    const threadId = request.params?.threadId;
+    return (
+      decideCommandApproval(
+        request.params,
+        typeof threadId === "string" ? this.threadPolicies.get(threadId) : undefined,
+      ) === "accept"
+    );
+  }
 
   constructor(
     private readonly rpc: CodexRpc,
@@ -283,6 +349,8 @@ export class CodexAdapter implements AgentAdapter {
   async *execute(input: StepExecutionInput, signal: AbortSignal): AsyncIterable<AdapterEvent> {
     signal.throwIfAborted();
     await this.initialize();
+    // An unresolvable directory keeps its literal path; approvals then fail closed on realpath.
+    const root = await realpath(input.projectDirectory).catch(() => input.projectDirectory);
     const thread = object(
       object(
         await this.rpc.request("thread/start", {
@@ -294,6 +362,10 @@ export class CodexAdapter implements AgentAdapter {
       ).thread,
     );
     const sessionId = identifier(thread.id);
+    this.threadPolicies.set(sessionId, {
+      grant: input.toolGrant?.provider === "codex" ? input.toolGrant : null,
+      root,
+    });
     const feed = this.events(
       { runId: input.runId, stepId: input.stepId, attempt: input.attempt, sessionId, turnId: "" },
       signal,
@@ -330,6 +402,7 @@ export class CodexAdapter implements AgentAdapter {
         await cancellation.close();
       }
     } finally {
+      this.threadPolicies.delete(sessionId);
       feed.close();
     }
   }

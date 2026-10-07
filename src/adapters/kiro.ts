@@ -11,7 +11,26 @@ import type {
   StepExecutionInput,
   StepSession,
 } from "./contract.js";
+import { KIRO_DEFAULT_TRUSTED_TOOLS } from "../domain/tool-grant.js";
 
+/**
+ * Non-interactive chat arguments. Only the trusted-tool list varies: a project Kiro grant adds
+ * its exact scope; trust-all is never emitted.
+ */
+export const kiroChatArgs = (input: StepExecutionInput): string[] => [
+  "chat",
+  "--agent-engine",
+  "v2",
+  "--output-format",
+  "stream-json",
+  "--no-interactive",
+  `--trust-tools=${[
+    ...KIRO_DEFAULT_TRUSTED_TOOLS,
+    ...(input.toolGrant?.provider === "kiro" ? input.toolGrant.scope : []),
+  ].join(",")}`,
+  ...(input.binding.model === "agent-default" ? [] : ["--model", input.binding.model]),
+  input.instruction,
+];
 const streamEvent = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("runStarted"),
@@ -108,26 +127,12 @@ export class KiroAdapter implements AgentAdapter {
     if (signal.aborted) throw new Error("Kiro execution aborted before launch");
     if (input.binding.effort)
       throw new Error("Kiro does not advertise supported effort choices in its model catalog");
-    const child = spawn(
-      this.executable,
-      [
-        "chat",
-        "--agent-engine",
-        "v2",
-        "--output-format",
-        "stream-json",
-        "--no-interactive",
-        "--trust-tools=fs_read,fs_write",
-        ...(input.binding.model === "agent-default" ? [] : ["--model", input.binding.model]),
-        input.instruction,
-      ],
-      {
-        cwd: input.projectDirectory,
-        stdio: ["ignore", "pipe", "pipe"],
-        // Kiro launches a second process; own its process group so cancellation reaches both.
-        detached: process.platform !== "win32",
-      },
-    );
+    const child = spawn(this.executable, kiroChatArgs(input), {
+      cwd: input.projectDirectory,
+      stdio: ["ignore", "pipe", "pipe"],
+      // Kiro launches a second process; own its process group so cancellation reaches both.
+      detached: process.platform !== "win32",
+    });
     const abort = () => terminateChild(child);
     this.children.add(child);
     signal.addEventListener("abort", abort, { once: true });

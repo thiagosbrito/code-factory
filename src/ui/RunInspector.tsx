@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
 import type { EvidenceSummary } from "../domain/acceptance.js";
 import type { AgentConnection } from "../adapters/contract.js";
+import { RETRY_NOT_ELIGIBLE, retryBlocker } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import {
   definitionForScope,
   scopeEvidence,
+  stepDisplayStatus,
   stepForScope,
   validScope,
   type RunScope,
@@ -43,7 +45,9 @@ export const RunInspector = ({
   agents?: AgentConnection[];
   onSendGuidance?: (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
   initialTab?: Tab;
-  onRetry?: ((stepId: string, attemptId: string) => void) | undefined;
+  onRetry?:
+    | ((stepId: string, attemptId: string, focusTarget?: HTMLElement | null) => void)
+    | undefined;
   executing?: boolean;
 }) => {
   const scope = validScope(run, requestedScope);
@@ -101,12 +105,13 @@ export const RunInspector = ({
     definition?.kind === "check" ||
     run.snapshot.bindings[definition?.id ?? ""]?.provider === "mock" ||
     connection?.authentication === "authenticated";
+  const domainBlocker = step ? retryBlocker(run, step.stepId) : "Unknown retry target.";
   const retryReason = !connected
     ? "Reconnect the runtime first."
     : executing
       ? "Work is already active."
-      : run.status !== "failed" || step?.status !== "failed"
-        ? "Only failed work can be retried."
+      : domainBlocker === RETRY_NOT_ELIGIBLE || !step
+        ? "Only failed or blocked review work can be retried."
         : scope.kind === "step" && scope.attemptId !== latestAttempt?.id
           ? "Select the latest attempt to retry."
           : !connectionReady
@@ -168,7 +173,7 @@ export const RunInspector = ({
             <p className="text-xs text-muted-foreground">
               {scope.kind === "run"
                 ? run.snapshot.id
-                : `${definition?.role ?? "Step"} · ${step?.status ?? "unknown"}`}
+                : `${definition?.role ?? "Step"} · ${step ? stepDisplayStatus(run, step) : "unknown"}`}
             </p>
           </div>
           <Button
@@ -235,7 +240,8 @@ export const RunInspector = ({
             }}
             onConfirm={() => {
               setRetryOpen(false);
-              onRetry(step.stepId, latestAttempt.id);
+              // The dialog's own button is focused here, so pass the inspector trigger explicitly.
+              onRetry(step.stepId, latestAttempt.id, retryTrigger.current);
             }}
           />
         )}

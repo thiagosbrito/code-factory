@@ -1190,7 +1190,8 @@ it("confirms a failed step retry and restores focus after Escape and confirmatio
   });
   const attemptId = failed.steps[0]?.attempts[0]?.id;
   if (!attemptId) throw new Error("Missing attempt");
-  const onRetry = vi.fn<(stepId: string, attemptId: string) => void>();
+  const onRetry =
+    vi.fn<(stepId: string, attemptId: string, focusTarget?: HTMLElement | null) => void>();
   render(
     <RunInspector
       run={failed}
@@ -1213,6 +1214,7 @@ it("confirms a failed step retry and restores focus after Escape and confirmatio
   await waitFor(() => expect(document.activeElement).toBe(trigger));
   await user.click(trigger);
   await user.click(screen.getByRole("button", { name: "Start Attempt 2" }));
-  expect(onRetry).toHaveBeenCalledExactlyOnceWith("build", attemptId);
+  // The inspector trigger is the focus target for a follow-up permission dialog.
+  expect(onRetry).toHaveBeenCalledExactlyOnceWith("build", attemptId, trigger);
   await waitFor(() => expect(document.activeElement).toBe(trigger));
 });

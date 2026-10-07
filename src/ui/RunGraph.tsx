@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
+import { NOT_REACHED, stepDisplayStatus } from "./run-view-model";
 
 type Point = { x: number; y: number };
 const nodeWidth = 210;
@@ -173,6 +174,7 @@ export const RunGraph = ({
               const step = run.steps.find((item) => item.stepId === definition.id);
               if (!point) return null;
               const status = step?.status ?? "pending";
+              const shown = stepDisplayStatus(run, step);
               return (
                 <button
                   key={definition.id}
@@ -180,7 +182,7 @@ export const RunGraph = ({
                   type="button"
                   style={{ left: point.x, top: point.y, width: nodeWidth, minHeight: nodeHeight }}
                   className={`run-graph-node run-graph-node-${status} absolute rounded-lg border bg-white p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
-                  aria-label={`${definition.name}, ${status}, ${step?.attempts.length ?? 0} attempts`}
+                  aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts`}
                   aria-pressed={selectedStepId === definition.id}
                   onClick={() => onSelect(definition.id)}
                   onKeyDown={(event) => {
@@ -194,7 +196,11 @@ export const RunGraph = ({
                     }
                   }}
                 >
-                  <span className={`run-status run-status-${status}`}>{status}</span>
+                  <span
+                    className={`run-status ${shown === NOT_REACHED ? "run-status-not-reached" : `run-status-${status}`}`}
+                  >
+                    {shown}
+                  </span>
                   <strong className="mt-2 block text-sm">{definition.name}</strong>
                   <span className="block text-xs text-muted-foreground">
                     {definition.role} · {step?.attempts.length ?? 0} attempts

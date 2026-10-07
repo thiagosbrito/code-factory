@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import {
   advanceImplementationRound,
-  hasRetryBudget,
+  isHeldReviewBlock,
+  RETRY_LIMIT_REACHED,
+  retryBlocker,
   runRecordSchema,
   startAttempt,
   type RunRecord,
@@ -160,6 +162,9 @@ export const completeStep = (record: RunRecord, stepId: string, result: StepResu
       group.exitWhen.stepId === stepId &&
       group.continueWhen.outcome === result.outcome,
   );
+  // A blocked verdict persists as succeeded/blocked, and an `all` join accepts any succeeded
+  // source, so a run keeps `blocked` while any review still holds that verdict.
+  const stillBlocked = steps.some((item) => isHeldReviewBlock(record, item));
   const status =
     result.status === "succeeded"
       ? record.status === "failed" ||
@@ -168,8 +173,7 @@ export const completeStep = (record: RunRecord, stepId: string, result: StepResu
         record.status === "blocked" ||
         record.status === "rejected"
         ? record.status
-        : record.snapshot.loop.steps.find((item) => item.id === stepId)?.stage === "review" &&
-            result.outcome === "blocked"
+        : stillBlocked
           ? "blocked"
           : record.snapshot.loop.steps.find((item) => item.id === stepId)?.stage === "review" &&
               result.outcome === "changes-requested" &&
@@ -228,6 +232,8 @@ export const hashInputs = (candidateId: string, sourceIds: string[]): string =>
     .update(JSON.stringify([candidateId, [...sourceIds].sort()]))
     .digest("hex");
 
+export { retryBlocker };
+
 /** Reopen only the selected failure and results that consumed its output. */
 export const prepareStepRetry = (
   record: RunRecord,
@@ -237,13 +243,12 @@ export const prepareStepRetry = (
   const step = record.steps.find((item) => item.stepId === stepId);
   if (!step || !record.snapshot.loop.steps.some((item) => item.id === stepId))
     throw new Error("Unknown retry target.");
-  if (record.status !== "failed" || step.status !== "failed")
-    throw new Error("Only a failed step in a failed run can be retried.");
-  if (record.steps.some((item) => isActiveStatus(item.status)))
-    throw new Error("Active work must finish before retry.");
-  if (step.attempts.at(-1)?.id !== expectedAttemptId)
-    throw new Error("Retry target changed; reload the run.");
-  if (!hasRetryBudget(record, step)) throw new Error("Attempt limit reached for this step.");
+  // Keep the earlier precedence: eligibility, then a stale view, then the attempt limit, so a
+  // stale view of an exhausted step asks for a reload instead of reporting the limit.
+  const blocker = retryBlocker(record, stepId);
+  const stale = step.attempts.at(-1)?.id !== expectedAttemptId;
+  if (blocker && !(stale && blocker === RETRY_LIMIT_REACHED)) throw new Error(blocker);
+  if (stale) throw new Error("Retry target changed; reload the run.");
   const descendants = new Set(getDependentStepIds(record.snapshot.loop, stepId));
   const invalidated = record.steps.filter(
     (item) => descendants.has(item.stepId) && item.status !== "pending",

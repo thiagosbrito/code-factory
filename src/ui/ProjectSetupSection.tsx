@@ -8,12 +8,16 @@ export const ProjectSetupSection = ({
   nameRef,
   error,
   onNameChange,
+  setupCommand = "",
+  onSetupCommandChange = () => undefined,
 }: {
   statePath: string;
   name: string;
   nameRef: RefObject<HTMLInputElement | null>;
   error: string;
   onNameChange: (value: string) => void;
+  setupCommand?: string;
+  onSetupCommandChange?: (value: string) => void;
 }) => {
   return (
     <SetupSection
@@ -48,6 +52,20 @@ export const ProjectSetupSection = ({
             Validated by the local runtime. Restart with --project to use another workspace.
           </small>
         </div>
+        <label className="grid gap-2 text-sm font-medium sm:col-span-2" htmlFor="setup-command">
+          Setup command (optional)
+          <Input
+            id="setup-command"
+            value={setupCommand}
+            onChange={(event) => onSetupCommandChange(event.target.value)}
+            aria-describedby="setup-command-help"
+            placeholder="pnpm install --frozen-lockfile"
+          />
+          <small id="setup-command-help" className="font-normal text-muted-foreground">
+            Runs once in each new run worktree before the first step, without a shell. Quote
+            arguments that contain spaces.
+          </small>
+        </label>
       </div>
     </SetupSection>
   );

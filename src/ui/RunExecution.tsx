@@ -1,6 +1,7 @@
 import type { RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
 import { RunActivity } from "./RunActivity";
+import { NOT_REACHED, stepDisplayStatus } from "./run-view-model";
 
 export const RunExecution = ({
   run,
@@ -57,7 +58,15 @@ export const RunExecution = ({
             <li key={definition.id} className="rounded-md border p-3 text-sm">
               <div className="flex justify-between gap-3">
                 <strong>{definition.name}</strong>
-                <span>{step?.status ?? "pending"}</span>
+                <span
+                  className={
+                    stepDisplayStatus(run, step) === NOT_REACHED
+                      ? "run-status-not-reached"
+                      : undefined
+                  }
+                >
+                  {stepDisplayStatus(run, step)}
+                </span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {definition.kind} · {step?.attempts.length ?? 0} attempts

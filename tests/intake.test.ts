@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -31,9 +31,15 @@ const agent: AgentConnection = {
   models: [{ id: "agent-default", displayName: "Default" }],
 };
 async function project() {
-  const root = await mkdtemp(join(tmpdir(), "factory-intake-"));
-  roots.push(root);
+  // Run worktrees live beside the repository, so the repo sits inside a disposable parent.
+  const parent = await mkdtemp(join(tmpdir(), "factory-intake-"));
+  roots.push(parent);
+  const root = join(parent, "repo");
+  await mkdir(root);
   execFileSync("git", ["init", "-q", root]);
+  // Test-only local identity; product code never writes Git config.
+  execFileSync("git", ["-C", root, "config", "user.name", "Test"]);
+  execFileSync("git", ["-C", root, "config", "user.email", "test@example.com"]);
   await writeFile(join(root, "file.txt"), "original\n");
   execFileSync("git", ["-C", root, "add", "file.txt"]);
   execFileSync("git", [

@@ -8,8 +8,21 @@ import { ConnectionRegistry, connectionRequestSchema } from "./connections.js";
 import { listLoops, readDraft, readPublishedVersion, saveDraft, publishDraft } from "./storage.js";
 import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
-import { cancelRun, executeRun, retryStep } from "./scheduler.js";
-import { fileDigest, workspaceFor } from "./scheduler.js";
+import { cancelRun, executeRun, retryStep, withIdleRunSlot } from "./scheduler.js";
+import { fileDigest, resolveRunWorkspace } from "./workspace.js";
+import {
+  describeRunWorkspace,
+  promoteRun,
+  PromotionError,
+  removeRunWorktree,
+} from "./run-branch.js";
+import { grantToolPermission, revokeToolPermission } from "./tool-grant.js";
+import {
+  grantableProviderSchema,
+  toolGrantRequestSchema,
+  toolGrantRevokeSchema,
+} from "../domain/tool-grant.js";
+import type { RunRecord } from "../domain/run.js";
 import {
   applyNative,
   nativeCandidates,
@@ -96,6 +109,17 @@ const validateDefaultBinding = async (
   const verifiedPath = configuredPath ? await realpath(configuredPath).catch(() => null) : null;
   if (verifiedPath !== connection.executable)
     throw new ProjectError("Verify the current custom executable before saving its default.", 422);
+};
+
+/** Digest of the run's current candidate, or null when its workspace no longer resolves. */
+const currentCandidate = async (project: string, run: RunRecord): Promise<string | null> => {
+  try {
+    const resolved = await resolveRunWorkspace(project, run, { legacy: "prefix" });
+    return await fileDigest(resolved.path, resolved.digestMode);
+  } catch (error) {
+    if (error instanceof ProjectError && error.status === 404) return null;
+    throw error;
+  }
 };
 
 const serveAsset = async (response: ServerResponse, pathname: string, uiDirectory: string) => {
@@ -258,6 +282,76 @@ export const startLocalServer = async (options: {
         );
         return json(response, 201, { runId: run.snapshot.id, run });
       }
+      if (pathname === "/api/project/tool-grants" && request.method === "POST") {
+        // Granting widens agent trust, so it requires a browser Origin from the Code Factory UI.
+        if (!request.headers.origin || !allowedOrigins.includes(request.headers.origin))
+          return json(response, 403, {
+            error: "Tool permission can only be granted from the Code Factory UI.",
+          });
+        const parsed = toolGrantRequestSchema.safeParse(await readBody(request));
+        if (!parsed.success)
+          return json(response, 400, {
+            error: parsed.error.issues[0]?.message ?? "Invalid tool permission request.",
+          });
+        const project = await grantToolPermission(
+          projectDirectory,
+          parsed.data.provider,
+          parsed.data.revision,
+        );
+        return json(response, 200, { project, revision: await projectRevision(projectDirectory) });
+      }
+      const revokePath = /^\/api\/project\/tool-grants\/([a-z-]+)$/.exec(pathname);
+      if (revokePath?.[1] && request.method === "DELETE") {
+        const provider = grantableProviderSchema.safeParse(revokePath[1]);
+        if (!provider.success)
+          return json(response, 400, { error: "Unknown tool permission provider." });
+        const parsed = toolGrantRevokeSchema.safeParse(await readBody(request));
+        if (!parsed.success) return json(response, 400, { error: "Send the project revision." });
+        const project = await revokeToolPermission(
+          projectDirectory,
+          provider.data,
+          parsed.data.revision,
+        );
+        return json(response, 200, { project, revision: await projectRevision(projectDirectory) });
+      }
+      const workspacePath = /^\/api\/runs\/([0-9a-f-]{36})\/workspace$/i.exec(pathname);
+      if (workspacePath?.[1] && request.method === "GET") {
+        const run = await readRun(projectDirectory, workspacePath[1]);
+        if (!run) return json(response, 404, { error: "Run not found." });
+        return json(response, 200, {
+          workspace: await describeRunWorkspace(projectDirectory, run),
+        });
+      }
+      const promotePath = /^\/api\/runs\/([0-9a-f-]{36})\/promote$/i.exec(pathname);
+      if (promotePath?.[1] && request.method === "POST") {
+        try {
+          return json(
+            response,
+            200,
+            await promoteRun(projectDirectory, promotePath[1], await readBody(request)),
+          );
+        } catch (error) {
+          if (error instanceof PromotionError)
+            return json(response, error.status, {
+              error: error.message,
+              ...(error.suggestedName ? { suggestedName: error.suggestedName } : {}),
+            });
+          throw error;
+        }
+      }
+      const removePath = /^\/api\/runs\/([0-9a-f-]{36})\/worktree\/remove$/i.exec(pathname);
+      if (removePath?.[1] && request.method === "POST") {
+        const runId = removePath[1];
+        // Hold the run's active slot so a retry cannot start while Git removes the worktree.
+        const run = await withIdleRunSlot(projectDirectory, runId, () =>
+          removeRunWorktree(projectDirectory, runId),
+        );
+        if (!run)
+          return json(response, 409, {
+            error: "Finish or cancel the run before removing its worktree.",
+          });
+        return json(response, 200, { run });
+      }
       const executePath = /^\/api\/runs\/([0-9a-f-]{36})\/execute$/i.exec(pathname);
       if (executePath?.[1] && request.method === "POST") {
         const run = await readRun(projectDirectory, executePath[1]);
@@ -298,6 +392,7 @@ export const startLocalServer = async (options: {
           return json(response, 200, { run });
         try {
           prepareStepRetry(run, stepId, attemptId);
+          await resolveRunWorkspace(projectDirectory, run, { legacy: "prefix" });
         } catch (error) {
           return json(response, 409, {
             error: error instanceof Error ? error.message : "Retry unavailable.",
@@ -358,13 +453,15 @@ export const startLocalServer = async (options: {
       if (evidencePath?.[1] && (request.method === "GET" || request.method === "POST")) {
         const run = await readRun(projectDirectory, evidencePath[1]);
         if (!run) return json(response, 404, { error: "Run not found." });
-        const candidateId = await fileDigest(await workspaceFor(projectDirectory, run));
+        const candidateId = await currentCandidate(projectDirectory, run);
         if (request.method === "GET")
           return json(response, 200, { summary: summarizeEvidence(run, candidateId) });
         try {
           let acceptedCandidate = candidateId;
           const accepted = await mutateRun(projectDirectory, evidencePath[1], async (current) => {
-            acceptedCandidate = await fileDigest(await workspaceFor(projectDirectory, current));
+            acceptedCandidate = await currentCandidate(projectDirectory, current);
+            if (!acceptedCandidate)
+              throw new ProjectError("Current source candidate is unavailable.", 409);
             return acceptEvidence(current, acceptedCandidate);
           });
           return json(response, 200, {

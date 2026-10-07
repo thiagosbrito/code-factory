@@ -5,6 +5,7 @@ import { evidenceSummarySchema } from "../domain/acceptance.js";
 import { eventSchema } from "../domain/evidence.js";
 import { projectConfigSchema } from "../domain/project.js";
 import { retrievedTicketSchema } from "../domain/ticket.js";
+import { runWorkspaceSchema } from "../domain/run-branch.js";
 
 const capabilitySchema = z.enum(["supported", "unsupported", "unknown"]);
 export const agentConnectionSchema = z.object({
@@ -74,11 +75,22 @@ export const savedProjectResponseSchema = z.object({
   project: projectConfigSchema,
   revision: z.string(),
 });
+export type SavedProjectResponse = z.infer<typeof savedProjectResponseSchema>;
+export const workspaceResponseSchema = z.object({ workspace: runWorkspaceSchema });
+export const promoteResponseSchema = z.object({
+  run: runRecordSchema,
+  warning: z.string().optional(),
+});
+export const promoteErrorSchema = z.object({
+  error: z.string(),
+  suggestedName: z.string().optional(),
+});
 
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly body: unknown = undefined,
   ) {
     super(message);
   }
@@ -96,7 +108,7 @@ export const api = async <T>(
       data && typeof data === "object" && "error" in data && typeof data.error === "string"
         ? data.error
         : `Request failed (${response.status}).`;
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, data);
   }
   return parse(data);
 };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
 import type { ProviderId } from "../domain/loop.js";
+import { formatCommandLine, parseCommandLine } from "../domain/project.js";
 import { bindingError, connectionViewModel } from "./connection";
 import { api, savedProjectResponseSchema, type ProjectResponse } from "./project-api";
 
@@ -34,6 +35,10 @@ export const useSetupController = ({
   const [customExecutable, setCustomExecutable] = useState(
     state.project?.customAgent?.executable ?? "",
   );
+  const savedSetupCommand = state.project?.setupCommand
+    ? formatCommandLine(state.project.setupCommand)
+    : "";
+  const [setupCommand, setSetupCommand] = useState(savedSetupCommand);
   const [bindingChanged, setBindingChanged] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState("");
@@ -98,6 +103,12 @@ export const useSetupController = ({
       setError("Enter an absolute custom executable path.");
       return;
     }
+    const parsedSetup = parseCommandLine(setupCommand);
+    if (!parsedSetup.ok) {
+      setError(parsedSetup.error);
+      return;
+    }
+    const setupChanged = setupCommand !== savedSetupCommand;
     setBusy(true);
     setError("");
     try {
@@ -110,6 +121,10 @@ export const useSetupController = ({
           ...(bindingChanged ? { defaultBinding: draftBinding } : {}),
           ...(customExecutable.trim()
             ? { customAgent: { executable: customExecutable.trim(), protocol: "codex-app-server" } }
+            : {}),
+          // Omitted keeps the saved command; null clears it.
+          ...(setupChanged
+            ? { setupCommand: parsedSetup.argv.length ? parsedSetup.argv : null }
             : {}),
         }),
       });
@@ -155,6 +170,8 @@ export const useSetupController = ({
     }
   };
   return {
+    setupCommand,
+    setSetupCommand,
     name,
     setName,
     selected,

@@ -4,7 +4,12 @@ import { Factory } from "./Factory";
 import { ErrorView } from "./ErrorView";
 import type { Screen } from "./FactorySidebar";
 import { Setup } from "./Setup";
-import { api, type FactoryResponse, type ProjectResponse } from "./project-api";
+import {
+  api,
+  type FactoryResponse,
+  type ProjectResponse,
+  type SavedProjectResponse,
+} from "./project-api";
 import {
   projectResponseSchema,
   factoryResponseSchema,
@@ -48,6 +53,9 @@ export const App = () => {
   }, []);
   if (error) return <ErrorView message={error} onRetry={() => void load()} />;
   if (!project) return <output className="block p-8">Loading local project…</output>;
+  // App owns the one project state; grant and revoke responses update it everywhere.
+  const onProjectChanged = (next: SavedProjectResponse) =>
+    setProject((previous) => (previous ? { ...previous, ...next } : previous));
   if ((!project.project && !demo) || editing)
     return (
       <Setup
@@ -77,6 +85,7 @@ export const App = () => {
           setEditing(false);
         }}
         onDemo={() => setDemo(true)}
+        onProjectChanged={onProjectChanged}
         {...(project.project ? { onCancel: () => setEditing(false) } : {})}
       />
     );
@@ -91,6 +100,7 @@ export const App = () => {
       onDemo={() => setDemo(true)}
       onExitDemo={() => setDemo(false)}
       onEditSetup={() => setEditing(true)}
+      onProjectChanged={onProjectChanged}
     />
   );
 };

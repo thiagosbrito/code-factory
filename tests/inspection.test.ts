@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,9 +18,14 @@ afterEach(async () =>
   Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))),
 );
 const fixture = async () => {
-  const root = await mkdtemp(join(tmpdir(), "factory-inspection-"));
-  roots.push(root);
+  // Run worktrees live beside the repository, so the repo sits inside a disposable parent.
+  const parent = await mkdtemp(join(tmpdir(), "factory-inspection-"));
+  roots.push(parent);
+  const root = join(parent, "repo");
+  await mkdir(root);
   execFileSync("git", ["init", "-q", root]);
+  execFileSync("git", ["-C", root, "config", "user.name", "Test"]);
+  execFileSync("git", ["-C", root, "config", "user.email", "test@example.com"]);
   await writeFile(join(root, "existing.txt"), "original\n");
   execFileSync("git", ["-C", root, "add", "."]);
   execFileSync("git", [
@@ -35,7 +40,8 @@ const fixture = async () => {
     "Initial",
   ]);
   await writeFile(join(root, "existing.txt"), "pre-existing\n");
-  const baseline = await captureGitBaseline(root);
+  const runId = randomUUID();
+  const baseline = await captureGitBaseline(root, { runId, ticketId: "" });
   const workspace = join(root, baseline.workspace!);
   const loop = parseLoop({
     schemaVersion: 2,
@@ -56,6 +62,7 @@ const fixture = async () => {
       { description: "Task" },
       { provider: "mock", model: "default" },
       baseline,
+      runId,
     ),
   );
   return { root, workspace, run };

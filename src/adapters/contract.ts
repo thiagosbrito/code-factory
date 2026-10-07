@@ -1,4 +1,5 @@
 import type { ExecutionBinding, ProviderId } from "../domain/loop.js";
+import type { ToolGrantInEffect } from "../domain/tool-grant.js";
 
 export type CapabilitySupport = "supported" | "unsupported" | "unknown";
 export interface AgentCapabilities {
@@ -29,6 +30,8 @@ export interface StepExecutionInput {
   allowedOutcomes?: string[];
   binding: ExecutionBinding;
   projectDirectory: string;
+  /** Set only when the project holds a user grant for this attempt's provider. */
+  toolGrant?: ToolGrantInEffect;
 }
 export interface StepSession {
   runId: string;

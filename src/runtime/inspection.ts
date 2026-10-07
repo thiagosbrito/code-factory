@@ -1,30 +1,63 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { copyFile, lstat, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { RunRecord } from "../domain/run.js";
 import { projectRelativePathSchema } from "../domain/evidence.js";
 import { ProjectError } from "./project.js";
+import { resolveRunWorkspace } from "./workspace.js";
 
 const exec = promisify(execFile);
-const git = async (workspace: string, ...args: string[]) =>
-  (await exec("git", ["-C", workspace, ...args], { encoding: "utf8", maxBuffer: 8_000_000 }))
-    .stdout;
-
-const workspaceFor = async (project: string, run: RunRecord) => {
-  const relative = run.snapshot.baseline.workspace;
-  if (!relative || !/^\.code-factory\/workspaces\/[0-9a-f-]{36}$/i.test(relative))
-    throw new ProjectError("This run has no available isolated workspace.", 404);
-  const projectRoot = await realpath(project);
-  const root = await realpath(resolve(project, ".code-factory/workspaces"));
-  if (!root.startsWith(`${projectRoot}${sep}`))
-    throw new ProjectError("Workspace boundary violated.", 403);
-  const workspace = await realpath(resolve(project, relative));
-  if (!workspace.startsWith(`${root}${sep}`))
-    throw new ProjectError("Workspace boundary violated.", 403);
-  return workspace;
+/**
+ * Inspection only reads, but porcelain `git diff` against the working tree refreshes and rewrites
+ * the index under `index.lock` even with `--no-optional-locks` (Git 2.50). While the UI polls,
+ * that would race a step commit in the same worktree. Diffs therefore run against a private copy
+ * of the index, so any refresh lands in the copy. Other read commands never write the index.
+ */
+// A workspace's index path never changes, so resolve it once instead of spawning Git per diff.
+const indexPaths = new Map<string, Promise<string>>();
+const indexPathOf = (workspace: string): Promise<string> => {
+  const cached = indexPaths.get(workspace);
+  if (cached) return cached;
+  const pending = exec("git", ["-C", workspace, "rev-parse", "--git-path", "index"], {
+    encoding: "utf8",
+  }).then((result) => resolve(workspace, result.stdout.trim()));
+  // A failed lookup is not cached, so a later call can succeed once the workspace exists.
+  pending.catch(() => indexPaths.delete(workspace));
+  indexPaths.set(workspace, pending);
+  return pending;
 };
+
+const git = async (workspace: string, ...args: string[]): Promise<string> => {
+  const run = (env: NodeJS.ProcessEnv) =>
+    exec("git", ["-C", workspace, "--no-optional-locks", ...args], {
+      encoding: "utf8",
+      maxBuffer: 8_000_000,
+      env,
+    }).then((result) => result.stdout);
+  if (args[0] !== "diff") return run(process.env);
+  const index = await indexPathOf(workspace);
+  const directory = await mkdtemp(join(tmpdir(), "code-factory-index-"));
+  try {
+    const copy = join(directory, "index");
+    const copied = await copyFile(index, copy).then(
+      () => true,
+      (error: unknown) => {
+        // No index file yet: there is nothing a refresh could race, so use Git's default.
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+        throw error;
+      },
+    );
+    return await run(copied ? { ...process.env, GIT_INDEX_FILE: copy } : process.env);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+};
+
+const workspaceFor = async (project: string, run: RunRecord) =>
+  (await resolveRunWorkspace(project, run, { legacy: "uuid" })).path;
 
 const safeFile = async (workspace: string, path: string) => {
   if (
@@ -170,6 +203,7 @@ const diffForChange = async (
         [
           "-C",
           workspace,
+          "--no-optional-locks",
           "diff",
           "--no-ext-diff",
           "--no-textconv",

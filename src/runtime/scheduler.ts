@@ -1,12 +1,12 @@
-import { createHash } from "node:crypto";
-import { cp, lstat, mkdtemp, readFile, readdir, readlink, realpath, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   CancellationUnconfirmedError,
   type AgentAdapter,
   type AdapterEvent,
+  type StepExecutionInput,
 } from "../adapters/contract.js";
 import {
   attachAttemptSession,
@@ -32,9 +32,22 @@ import {
   retrievedIssueEnd,
   retrievedIssueStart,
 } from "../domain/ticket.js";
+import { formatCommandLine } from "../domain/project.js";
+import {
+  appendRunEvent,
+  appendScopedEvent,
+  SETUP_COMPLETED,
+  SETUP_OUTPUT,
+  SETUP_STARTED,
+} from "../domain/run-branch.js";
+import { describeToolGrant, TOOL_PERMISSION } from "../domain/tool-grant.js";
 import { mutateRun, readRun } from "./storage.js";
 import { acknowledgeGuidance, deliverQueuedGuidance, expireQueuedGuidance } from "./guidance.js";
 import { snapshotFileDiffs } from "./inspection.js";
+import { ProjectError } from "./project.js";
+import { commitStepChanges, createReviewCopy, listUncommittedPaths } from "./run-branch.js";
+import { resolveToolGrant } from "./tool-grant.js";
+import { fileDigest, resolveRunWorkspace, type ResolvedWorkspace } from "./workspace.js";
 
 type FileSnapshot = Awaited<ReturnType<typeof snapshotFileDiffs>>[number];
 
@@ -95,6 +108,7 @@ const appendFileReceipts = (
 };
 
 type Resolver = (provider: string) => AgentAdapter | null;
+const SETUP_TIMEOUT_MS = 900_000;
 const isActiveStatus = (status: string): boolean =>
   status === "running" || status === "waiting-input" || status === "paused";
 const active = new Map<
@@ -102,40 +116,10 @@ const active = new Map<
   { work: Promise<RunRecord>; controller: AbortController; retry?: string }
 >();
 
-export const workspaceFor = async (project: string, record: RunRecord): Promise<string> => {
-  const relative = record.snapshot.baseline.workspace;
-  if (!relative || !relative.startsWith(".code-factory/workspaces/"))
-    throw new Error("Run has no isolated execution workspace.");
-  const root = await realpath(join(project, ".code-factory", "workspaces"));
-  const workspace = await realpath(resolve(project, relative));
-  if (!workspace.startsWith(`${root}${sep}`))
-    throw new Error("Run workspace escapes project storage.");
-  return workspace;
-};
+export { fileDigest };
 
-export const fileDigest = async (directory: string): Promise<string> => {
-  const hash = createHash("sha256");
-  const visit = async (folder: string, prefix: string): Promise<void> => {
-    for (const entry of (await readdir(folder, { withFileTypes: true })).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    )) {
-      if (entry.name === ".git" || entry.name === ".code-factory") continue;
-      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-      const path = join(folder, entry.name);
-      const stats = await lstat(path);
-      if (stats.isSymbolicLink()) {
-        hash.update(`link:${relative}:${await readlink(path)}`);
-      } else if (stats.isDirectory()) {
-        await visit(path, relative);
-      } else if (stats.isFile()) {
-        hash.update(`file:${relative}:`);
-        hash.update(await readFile(path));
-      }
-    }
-  };
-  await visit(directory, "");
-  return hash.digest("hex");
-};
+export const workspaceFor = async (project: string, record: RunRecord): Promise<string> =>
+  (await resolveRunWorkspace(project, record, { legacy: "prefix" })).path;
 
 const issueLookupInstruction = (ticketId: string): string =>
   [
@@ -187,6 +171,16 @@ const issueContext = (record: RunRecord, stepId: string, ticketId: string): stri
   return `Issue ${ticketId} details were not captured by the first step. Do not fetch the issue again; work from the task and inputs below.`;
 };
 
+/** Agent steps outside review in a worktree run get one Code Factory commit per success. */
+const writesRunBranch = (record: RunRecord, stepId: string): boolean => {
+  const definition = record.snapshot.loop.steps.find((step) => step.id === stepId);
+  return (
+    Boolean(record.snapshot.baseline.branch) &&
+    definition?.kind === "agent" &&
+    definition.stage !== "review"
+  );
+};
+
 const stepInputs = (record: RunRecord, stepId: string) => {
   const sourceIds = record.snapshot.loop.dependencies
     .filter((edge) => edge.to === stepId)
@@ -229,6 +223,8 @@ const stepInputs = (record: RunRecord, stepId: string) => {
     task.ticket?.attachments.length &&
       `Ticket attachments:\n${task.ticket.attachments.map((item) => `${item.title}: ${item.url}`).join("\n")}`,
     task.ticketId && issueContext(record, stepId, task.ticketId),
+    writesRunBranch(record, stepId) &&
+      `You are working in a Git worktree on branch ${record.snapshot.baseline.branch ?? ""}. Do not commit; Code Factory commits your changes after this step succeeds.`,
     ...sources.map(
       (source) =>
         `Input from ${source.stepId} (outcome: ${source.outcome ?? "none"}, candidate: ${source.candidateId ?? "none"}):\n${source.output ?? ""}`,
@@ -292,20 +288,32 @@ const terminateCheckTree = async (child: ChildProcess): Promise<boolean> => {
   return waitForProcessGroupExit(child.pid, 2_000);
 };
 
+type CommandInvocation = { shell: string } | { argv: readonly string[] };
+type CommandResult = StepResult & {
+  spawnFailed?: boolean;
+  spawnErrorCode?: string;
+  timedOut?: boolean;
+  output?: string;
+};
+
 const checkCommand = async (
-  command: string,
+  invocation: CommandInvocation,
   cwd: string,
   signal: AbortSignal,
   onOutput: (text: string) => Promise<void>,
-): Promise<StepResult> =>
+  timeoutMs = 300_000,
+): Promise<CommandResult> =>
   new Promise((resolveCheck) => {
     if (signal.aborted) return resolveCheck({ status: "canceled" });
-    const child = spawn(command, {
+    const options = {
       cwd,
-      shell: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
-    });
+    };
+    const child =
+      "shell" in invocation
+        ? spawn(invocation.shell, { ...options, shell: true })
+        : spawn(invocation.argv[0] ?? "", invocation.argv.slice(1), { ...options, shell: false });
     let output = "";
     let buffered = "";
     let retained = 0;
@@ -352,28 +360,26 @@ const checkCommand = async (
       stopReason ??= reason;
       termination ??= terminateCheckTree(child);
     };
-    const timeout = setTimeout(() => stop("timeout"), 300_000);
+    const timeout = setTimeout(() => stop("timeout"), timeoutMs);
     const abort = () => stop("abort");
     signal.addEventListener("abort", abort, { once: true });
     child.on("error", (error) => {
       clearTimeout(timeout);
       signal.removeEventListener("abort", abort);
       flush();
+      const failed: CommandResult = {
+        status: "failed",
+        outcome: "failed",
+        summary: error.message,
+        exitCode: null,
+        spawnFailed: true,
+        ...("code" in error && typeof error.code === "string"
+          ? { spawnErrorCode: error.code }
+          : {}),
+      };
       void pending.then(
-        () =>
-          resolveCheck({
-            status: "failed",
-            outcome: "failed",
-            summary: error.message,
-            exitCode: null,
-          }),
-        () =>
-          resolveCheck({
-            status: "failed",
-            outcome: "failed",
-            summary: error.message,
-            exitCode: null,
-          }),
+        () => resolveCheck(failed),
+        () => resolveCheck(failed),
       );
     });
     child.on("close", (code) => {
@@ -394,9 +400,11 @@ const checkCommand = async (
             summary: !stopped
               ? "Check process-tree termination could not be confirmed."
               : stopReason === "timeout"
-                ? `${output}\nCheck timed out after 300000ms.`.trim()
+                ? `${output}\nCheck timed out after ${timeoutMs}ms.`.trim()
                 : output,
             exitCode: code,
+            timedOut: stopReason === "timeout",
+            output,
           }),
         () => resolveCheck({ status: "failed", summary: "Check output could not be persisted." }),
       );
@@ -422,6 +430,26 @@ export const executeRun = async (
     return await work;
   } finally {
     if (active.get(key)?.work === work) active.delete(key);
+  }
+};
+
+/**
+ * Run maintenance `work` (worktree removal) while holding the run's active slot, so no run, retry
+ * or recovery can start until it settles. Returns null without running when the slot is taken.
+ */
+export const withIdleRunSlot = async (
+  project: string,
+  runId: string,
+  work: () => Promise<RunRecord>,
+): Promise<RunRecord | null> => {
+  const key = `${project}:${runId}`;
+  if (active.has(key)) return null;
+  const pending = work();
+  active.set(key, { work: pending, controller: new AbortController() });
+  try {
+    return await pending;
+  } finally {
+    if (active.get(key)?.work === pending) active.delete(key);
   }
 };
 
@@ -475,9 +503,10 @@ const executeOnce = async (
   const initial = await readRun(project, runId);
   if (!initial) throw new Error("Run not found.");
   let record: RunRecord = initial;
-  const workspace = await workspaceFor(project, record);
   let pendingCommit: Promise<void> = Promise.resolve();
-  const commit = async (change: (current: RunRecord) => RunRecord): Promise<RunRecord> => {
+  const commit = async (
+    change: (current: RunRecord) => RunRecord | Promise<RunRecord>,
+  ): Promise<RunRecord> => {
     const work = pendingCommit.then(async () => {
       record = await mutateRun(project, runId, change);
     });
@@ -485,6 +514,37 @@ const executeOnce = async (
     await work;
     return record;
   };
+  let resolved: ResolvedWorkspace;
+  try {
+    resolved = await resolveRunWorkspace(project, record, { legacy: "prefix" });
+  } catch (error) {
+    // A removed or missing run worktree is reported, never re-created (FR6.2).
+    const recoverable =
+      error instanceof ProjectError &&
+      error.status === 404 &&
+      Boolean(record.snapshot.baseline.branch) &&
+      (["pending", "running"].includes(record.status) ||
+        record.steps.some((step) => isActiveStatus(step.status)));
+    if (!recoverable) throw error;
+    const reason = error instanceof Error ? error.message : String(error);
+    const activeSteps = record.steps.filter((step) => isActiveStatus(step.status));
+    if (activeSteps.length) {
+      for (const step of activeSteps)
+        await commit((current) =>
+          interruptStep(current, step.stepId, reason, "recovery-unavailable"),
+        );
+      return record;
+    }
+    return commit((current) =>
+      runRecordSchema.parse({
+        ...appendRunEvent(current, "lifecycle", "worktree-missing", reason, "unknown"),
+        status: "unavailable",
+      }),
+    );
+  }
+  const workspace = resolved.path;
+  const mode = resolved.digestMode;
+  const isWorktreeRun = resolved.kind === "worktree";
   const runStep = async (stepId: string): Promise<void> => {
     const definition = record.snapshot.loop.steps.find((step) => step.id === stepId);
     if (!definition) throw new Error(`Unknown step ${stepId}.`);
@@ -492,13 +552,22 @@ const executeOnce = async (
     const reviewRoot = readonly ? await mkdtemp(join(tmpdir(), "factory-review-")) : undefined;
     const executionDirectory = reviewRoot ? join(reviewRoot, "candidate") : workspace;
     try {
-      if (reviewRoot)
-        await cp(workspace, executionDirectory, {
-          recursive: true,
-        });
       const step = record.steps.find((item) => item.stepId === stepId);
       const attempt = step?.attempts.at(-1);
       if (!step || !attempt) throw new Error("Claimed attempt missing.");
+      // A copy failure is a failed attempt, not an interrupted run.
+      let copyFailure: string | undefined;
+      if (reviewRoot)
+        copyFailure = await (
+          isWorktreeRun
+            ? createReviewCopy(workspace, executionDirectory, step.candidateId ?? "")
+            : cp(workspace, executionDirectory, { recursive: true })
+        ).then(
+          () => undefined,
+          (error: unknown) =>
+            `Could not prepare the frozen review copy: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      if (copyFailure) console.error("Review copy failed", runId, stepId, copyFailure);
       const recovering = initial.steps.some(
         (item) =>
           item.stepId === stepId &&
@@ -506,9 +575,11 @@ const executeOnce = async (
           isActiveStatus(item.status),
       );
       const inputs = stepInputs(record, stepId);
-      const inspectable = /^\.code-factory\/workspaces\/[0-9a-f-]{36}$/i.test(
-        record.snapshot.baseline.workspace ?? "",
-      );
+      const inspectable =
+        isWorktreeRun ||
+        /^\.code-factory\/workspaces\/[0-9a-f-]{36}$/i.test(
+          record.snapshot.baseline.workspace ?? "",
+        );
       const beforeFiles =
         !readonly && !recovering && inspectable
           ? await snapshotFileDiffs(project, record).catch(() => null)
@@ -530,6 +601,8 @@ const executeOnce = async (
             outcome: completed.state === "succeeded" ? "passed" : "failed",
             ...(completed.detail ? { summary: completed.detail } : {}),
           };
+        } else if (copyFailure) {
+          result = { status: "failed", outcome: "failed", summary: copyFailure };
         } else {
           await commit((current) =>
             appendLocalEvent(
@@ -543,7 +616,7 @@ const executeOnce = async (
             ),
           );
           result = await checkCommand(
-            definition.instruction,
+            { shell: definition.instruction },
             executionDirectory,
             signal,
             async (text) => {
@@ -553,7 +626,7 @@ const executeOnce = async (
             },
           );
         }
-        staleCheck = (await fileDigest(workspace)) !== step.candidateId;
+        staleCheck = (await fileDigest(workspace, mode)) !== step.candidateId;
         if (staleCheck)
           result = {
             status: "failed",
@@ -594,6 +667,8 @@ const executeOnce = async (
               : {}),
             ...(priorCompletion.detail ? { summary: priorCompletion.detail } : {}),
           };
+        } else if (copyFailure) {
+          result = { status: "failed", summary: copyFailure };
         } else if (!adapter || !binding) {
           result = { status: "unavailable" };
           if (recovering) throw new Error("The selected adapter is not connected for recovery.");
@@ -604,7 +679,7 @@ const executeOnce = async (
               .find((item) => item.stepId === stepId)
               ?.branches.map((branch) => branch.outcome) ??
             (definition.stage === "review" ? ["pass", "changes-requested", "blocked"] : undefined);
-          const input = {
+          const input: StepExecutionInput = {
             runId,
             stepId,
             attempt: attempt.number,
@@ -622,6 +697,26 @@ const executeOnce = async (
             binding,
             projectDirectory: executionDirectory,
           };
+          // A grant is read per fresh attempt, so grant and revoke apply at the next attempt.
+          if (!recovering && binding.provider !== "mock") {
+            const permission = await resolveToolGrant(project, binding.provider);
+            if (permission.grant) input.toolGrant = permission.grant;
+            await commit((current) =>
+              appendLocalEvent(
+                current,
+                stepId,
+                attempt.id,
+                "lifecycle",
+                TOOL_PERMISSION,
+                describeToolGrant(
+                  binding.provider,
+                  permission.grant,
+                  executionDirectory,
+                  permission.note,
+                ),
+              ),
+            );
+          }
           let cancellationUnconfirmed = false;
           try {
             let completed = false;
@@ -688,8 +783,9 @@ const executeOnce = async (
       }
       if (
         readonly &&
+        !copyFailure &&
         result.status === "succeeded" &&
-        (await fileDigest(executionDirectory)) !== step.candidateId
+        (await fileDigest(executionDirectory, mode)) !== step.candidateId
       )
         result = { status: "failed", summary: "Reviewer changed the frozen candidate." };
       const blockedSummary = result.summary;
@@ -723,10 +819,40 @@ const executeOnce = async (
               ? "Review requested changes without actionable findings."
               : `Undeclared review verdict: ${result.outcome ?? "none"}`,
         };
+      // Commit after every result re-validation and before the digest, so hook edits (formatters)
+      // belong to the recorded candidate and a failed result never reaches the branch.
+      if (result.status === "succeeded" && isWorktreeRun && writesRunBranch(record, stepId)) {
+        const outcome = await commitStepChanges(workspace, record, stepId, attempt);
+        if (outcome.kind === "committed")
+          await commit((current) =>
+            appendLocalEvent(
+              current,
+              stepId,
+              attempt.id,
+              "lifecycle",
+              "commit-created",
+              `${outcome.sha} ${outcome.subject}`,
+            ),
+          );
+        if (outcome.kind === "failed") {
+          await commit((current) =>
+            appendLocalEvent(
+              current,
+              stepId,
+              attempt.id,
+              "check",
+              "commit-failed",
+              `Exit ${outcome.exitCode ?? "none"}\n${outcome.output}`,
+              "failed",
+            ),
+          );
+          result = { status: "failed", summary: outcome.summary };
+        }
+      }
       const candidateId =
         definition.kind === "check" && step.candidateId
           ? step.candidateId
-          : await fileDigest(workspace);
+          : await fileDigest(workspace, mode);
       await commit((current) => completeStep(current, stepId, { ...result, candidateId }));
       if (beforeFiles) {
         const afterFiles = await snapshotFileDiffs(project, record).catch(() => null);
@@ -787,11 +913,63 @@ const executeOnce = async (
     }
   };
 
+  const setupCommand = record.snapshot.setupCommand;
+  const setupDone = record.evidence.some(
+    (item) =>
+      item.kind === "event" &&
+      !item.stepId &&
+      item.title === SETUP_COMPLETED &&
+      item.state === "succeeded",
+  );
+  if (!retry && setupCommand && !setupDone && !record.steps.some((step) => step.attempts.length)) {
+    if (record.status === "pending")
+      await commit((current) =>
+        runRecordSchema.parse({ ...current, revision: current.revision + 1, status: "running" }),
+      );
+    await commit((current) =>
+      appendRunEvent(current, "check", SETUP_STARTED, formatCommandLine(setupCommand)),
+    );
+    const outcome = await checkCommand(
+      { argv: setupCommand },
+      workspace,
+      signal,
+      async (text) => {
+        await commit((current) => appendRunEvent(current, "check", SETUP_OUTPUT, text));
+      },
+      SETUP_TIMEOUT_MS,
+    );
+    const output = outcome.output ?? "";
+    const state =
+      outcome.status === "succeeded"
+        ? "succeeded"
+        : outcome.status === "canceled"
+          ? "canceled"
+          : "failed";
+    const spawnFailed = outcome.spawnFailed === true;
+    let detail = spawnFailed
+      ? `Could not start ${setupCommand[0] ?? ""}: ${outcome.spawnErrorCode ?? outcome.summary ?? "unknown error"}`
+      : state === "canceled"
+        ? `Canceled\n${output}`
+        : outcome.timedOut
+          ? `Timed out after ${SETUP_TIMEOUT_MS / 1000} s\n${output}`
+          : `Exit ${outcome.exitCode ?? "none"}\n${output}`;
+    if (state === "succeeded" && isWorktreeRun) {
+      const changed = await listUncommittedPaths(workspace).catch(() => []);
+      if (changed.length)
+        detail += `\nChanged tracked files: ${changed.slice(0, 50).join(", ")}${changed.length > 50 ? ` and ${changed.length - 50} more` : ""}`;
+    }
+    record = await commit((current) => {
+      const next = appendRunEvent(current, "check", SETUP_COMPLETED, detail.trimEnd(), state);
+      return state === "succeeded" ? next : runRecordSchema.parse({ ...next, status: state });
+    });
+    if (state !== "succeeded") return record;
+  }
+
   if (retry) {
     record = await commit((current) =>
       prepareStepRetry(current, retry.stepId, retry.expectedAttemptId),
     );
-    const candidateId = await fileDigest(workspace);
+    const candidateId = await fileDigest(workspace, mode);
     const inputs = stepInputs(record, retry.stepId);
     const inputHash = hashInputs(candidateId, [inputs.context, JSON.stringify(inputs.identities)]);
     record = await commit((current) => claimStep(current, retry.stepId, candidateId, inputHash));
@@ -823,7 +1001,7 @@ const executeOnce = async (
     }
     const ready = readySteps(record);
     if (!ready.length) return commit(settleRun);
-    const candidateId = await fileDigest(workspace);
+    const candidateId = await fileDigest(workspace, mode);
     const selected = ready.some((step) => step.stage !== "review")
       ? ready.filter((step) => step.stage !== "review").slice(0, 1)
       : ready;
@@ -930,33 +1108,7 @@ const appendLocalEvent = (
   title: string,
   detail?: string,
   state?: string,
-): RunRecord => {
-  const sequence =
-    Math.max(
-      -1,
-      ...record.evidence.filter((item) => item.kind === "event").map((item) => item.sequence),
-    ) + 1;
-  return runRecordSchema.parse({
-    ...record,
-    revision: record.revision + 1,
-    evidence: [
-      ...record.evidence,
-      {
-        id: crypto.randomUUID(),
-        runId: record.snapshot.id,
-        stepId,
-        attemptId,
-        createdAt: new Date().toISOString(),
-        kind: "event",
-        type,
-        title,
-        ...(detail ? { detail } : {}),
-        ...(state ? { state } : {}),
-        sequence,
-      },
-    ],
-  });
-};
+): RunRecord => appendScopedEvent(record, { stepId, attemptId }, type, title, detail, state);
 
 const interruptStep = (
   record: RunRecord,

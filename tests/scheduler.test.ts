@@ -22,7 +22,11 @@ import {
   readySteps,
   settleRun,
   prepareStepRetry,
+  retryBlocker,
 } from "../src/domain/scheduler.js";
+import type { StepExecutionInput } from "../src/adapters/contract.js";
+import { initializeProject, projectRevision } from "../src/runtime/project.js";
+import { grantToolPermission, revokeToolPermission } from "../src/runtime/tool-grant.js";
 
 const step = (id: string, stage: "implementation" | "review" = "review", groupId?: string) => ({
   id,
@@ -1172,6 +1176,213 @@ describe("portable scheduler", () => {
         expect.objectContaining({ findings: ["Fix the result file before approval."] }),
       ]);
       expect(await readFile(join(workspace, "result.txt"), "utf8")).toBe("round 2");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+const reviewerIds = ["r1", "r2", "r3", "r4", "r5", "r6"];
+const blockedLoop = (input: Record<string, unknown> = {}) =>
+  parseLoop({
+    schemaVersion: 2,
+    id: "reviews",
+    name: "Reviews",
+    version: 1,
+    status: "published",
+    steps: [
+      step("build", "implementation"),
+      ...reviewerIds.map((id) => step(id, "review", "panel")),
+      { ...step("adjudicate", "implementation"), name: "Adjudicate" },
+    ],
+    dependencies: [
+      ...reviewerIds.map((id) => ({ from: "build", to: id })),
+      ...reviewerIds.map((id) => ({ from: id, to: "adjudicate" })),
+    ],
+    groups: [{ id: "panel", name: "Panel", kind: "parallel", stepIds: reviewerIds }],
+    joins: [{ stepId: "adjudicate", mode: "all", from: reviewerIds }],
+    decisions: [],
+    policy: { maxAttemptsPerStep: 2, maxImplementationRounds: 1 },
+    ...input,
+  });
+const legacyRun = async (root: string, loop = blockedLoop(), provider = "mock") => {
+  await mkdir(join(root, ".code-factory", "workspaces", "candidate"), { recursive: true });
+  const record = createRunRecord(
+    createRunSnapshot(
+      loop,
+      { description: "Task" },
+      { provider: provider as "mock", model: "default" },
+      {
+        id: "baseline",
+        kind: "git",
+        revision: "abc",
+        workspace: ".code-factory/workspaces/candidate",
+        capturedAt: new Date().toISOString(),
+      },
+    ),
+  );
+  await createRun(root, record);
+  return record;
+};
+
+describe("blocked review recovery", () => {
+  it("holds adjudication behind a blocked reviewer, then runs it after that reviewer is retried", async () => {
+    const root = await mkdtemp(join(tmpdir(), "factory-blocked-"));
+    try {
+      const record = await legacyRun(root);
+      const outputs: Record<string, string[]> = {
+        build: ["built"],
+        adjudicate: ["adjudicated"],
+        ...Object.fromEntries(reviewerIds.slice(0, 5).map((id) => [id, ["pass"]])),
+        r6: ["blocked\nCannot run yarn test: shell refused.", "pass"],
+      };
+      const seen: ScriptedInstructions = {};
+      const blocked = await executeRun(root, record.snapshot.id, () =>
+        scriptedAdapter(outputs, seen),
+      );
+      expect(blocked.status).toBe("blocked");
+      expect(readySteps(blocked)).toEqual([]);
+      expect(blocked.steps.find((item) => item.stepId === "adjudicate")?.status).toBe("pending");
+      const attempt = blocked.steps.find((item) => item.stepId === "r6")?.attempts.at(-1);
+      if (!attempt) throw new Error("Missing reviewer attempt");
+      expect(retryBlocker(blocked, "r6")).toBeNull();
+      expect(retryBlocker(blocked, "r1")).toBe(
+        "Only a failed step in a failed run can be retried.",
+      );
+      const retried = await retryStep(root, record.snapshot.id, "r6", attempt.id, () =>
+        scriptedAdapter(outputs, seen),
+      );
+      expect(retried.status).toBe("succeeded");
+      expect(retried.steps.find((item) => item.stepId === "adjudicate")?.status).toBe("succeeded");
+      expect(
+        retried.evidence.some(
+          (item) => item.kind === "event" && item.title === "selected-step-retry",
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the run blocked while another reviewer still holds a blocked verdict, and respects the budget", () => {
+    let record = createRunRecord(
+      createRunSnapshot(
+        blockedLoop(),
+        { description: "Task" },
+        { provider: "mock", model: "default" },
+      ),
+    );
+    record = pass(claim(record, "build"), "build");
+    for (const id of reviewerIds) record = claim(record, id);
+    for (const id of reviewerIds)
+      record = pass(record, id, id === "r5" || id === "r6" ? "blocked" : "pass");
+    expect(record.status).toBe("blocked");
+    const retryReviewer = (current: RunRecord, id: string, outcome: string) => {
+      const attemptId = current.steps.find((item) => item.stepId === id)?.attempts.at(-1)?.id ?? "";
+      return pass(claim(prepareStepRetry(current, id, attemptId), id), id, outcome);
+    };
+    record = retryReviewer(record, "r5", "pass");
+    expect(record.status).toBe("blocked");
+    expect(readySteps(record)).toEqual([]);
+    expect(record.steps.find((item) => item.stepId === "adjudicate")?.status).toBe("pending");
+    expect(retryBlocker(record, "r6")).toBeNull();
+    record = retryReviewer(record, "r6", "blocked");
+    expect(retryBlocker(record, "r6")).toBe("Attempt limit reached for this step.");
+    expect(() =>
+      prepareStepRetry(
+        record,
+        "r6",
+        record.steps.find((item) => item.stepId === "r6")?.attempts.at(-1)?.id ?? "",
+      ),
+    ).toThrow("Attempt limit reached for this step.");
+  });
+
+  it("allows a second blocker's retry to release adjudication", () => {
+    let record = createRunRecord(
+      createRunSnapshot(
+        blockedLoop(),
+        { description: "Task" },
+        { provider: "mock", model: "default" },
+      ),
+    );
+    record = pass(claim(record, "build"), "build");
+    for (const id of reviewerIds) record = claim(record, id);
+    for (const id of reviewerIds)
+      record = pass(record, id, id === "r5" || id === "r6" ? "blocked" : "pass");
+    for (const id of ["r5", "r6"]) {
+      const attemptId = record.steps.find((item) => item.stepId === id)?.attempts.at(-1)?.id ?? "";
+      record = pass(claim(prepareStepRetry(record, id, attemptId), id), id, "pass");
+    }
+    expect(record.status).toBe("running");
+    expect(readySteps(record).map((item) => item.id)).toEqual(["adjudicate"]);
+  });
+});
+
+describe("agent tool permission per attempt", () => {
+  const recording = (inputs: StepExecutionInput[]) => ({
+    ...mockAdapter,
+    provider: "kiro" as const,
+    async *execute(input: StepExecutionInput, signal: AbortSignal): AsyncIterable<AdapterEvent> {
+      inputs.push(input);
+      yield* mockAdapter.execute(input, signal);
+    },
+  });
+  const singleStep = parseLoop({
+    schemaVersion: 2,
+    id: "single",
+    name: "Single",
+    version: 1,
+    status: "published",
+    steps: [step("build", "implementation")],
+    dependencies: [],
+    groups: [],
+    joins: [],
+    decisions: [],
+    policy: { maxAttemptsPerStep: 2, maxImplementationRounds: 1 },
+  });
+  const permissionEvent = (run: RunRecord) =>
+    run.evidence
+      .filter((item) => item.kind === "event" && item.title === "Tool permission")
+      .map((item) => (item.kind === "event" ? item.detail : ""));
+
+  it("uses the default without a grant, applies a stored grant, and returns to the default after revoke", async () => {
+    const root = await mkdtemp(join(tmpdir(), "factory-grant-"));
+    try {
+      await initializeProject(root);
+      const inputs: StepExecutionInput[] = [];
+      const first = await legacyRun(root, singleStep, "kiro");
+      const defaulted = await executeRun(root, first.snapshot.id, () => recording(inputs));
+      expect(inputs[0]?.toolGrant).toBeUndefined();
+      expect(permissionEvent(defaulted)).toEqual([
+        "Kiro default: trusted tools fs_read, fs_write. Shell (execute_bash) is not trusted.",
+      ]);
+      await grantToolPermission(
+        root,
+        "kiro",
+        await projectRevision(root),
+        new Date("2026-10-07T10:00:00.000Z"),
+      );
+      const second = await legacyRun(root, singleStep, "kiro");
+      const granted = await executeRun(root, second.snapshot.id, () => recording(inputs));
+      expect(inputs[1]?.toolGrant).toEqual({
+        provider: "kiro",
+        scope: ["execute_bash"],
+        grantedAt: "2026-10-07T10:00:00.000Z",
+      });
+      expect(permissionEvent(granted)).toEqual([
+        "Kiro project grant from 2026-10-07T10:00:00.000Z: trusted tools fs_read, fs_write, execute_bash.",
+      ]);
+      await revokeToolPermission(root, "kiro", await projectRevision(root));
+      const third = await legacyRun(root, singleStep, "kiro");
+      await executeRun(root, third.snapshot.id, () => recording(inputs));
+      expect(inputs[2]?.toolGrant).toBeUndefined();
+      await writeFile(join(root, ".code-factory", "project.json"), "{ not json");
+      const fourth = await legacyRun(root, singleStep, "kiro");
+      const broken = await executeRun(root, fourth.snapshot.id, () => recording(inputs));
+      expect(inputs[3]?.toolGrant).toBeUndefined();
+      expect(permissionEvent(broken)[0]).toMatch(
+        /^Kiro default: .* Tool permission unavailable: Invalid project configuration/,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

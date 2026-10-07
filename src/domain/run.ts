@@ -2,6 +2,7 @@ import { z } from "zod";
 import { executionBindingSchema, parseLoop, loopSchema, type ExecutionBinding } from "./loop.js";
 import { evidenceSchema } from "./evidence.js";
 import { ticketIdSchema } from "./ticket.js";
+import { setupCommandSchema, type SetupCommand } from "./project.js";
 
 export const taskSchema = z
   .strictObject({
@@ -29,6 +30,7 @@ export const baselineSchema = z
     revision: z.string().min(1).optional(),
     sourceRevision: z.string().min(1).optional(),
     workspace: z.string().min(1).optional(),
+    branch: z.string().min(1).max(255).optional(),
     changes: z.array(z.string()).optional(),
     capturedAt: z.iso.datetime(),
   })
@@ -46,6 +48,7 @@ export const runSnapshotSchema = z.strictObject({
   projectDefault: executionBindingSchema,
   bindings: z.record(z.string(), executionBindingSchema),
   baseline: baselineSchema,
+  setupCommand: setupCommandSchema.optional(),
 });
 export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
 export const attemptSchema = z.strictObject({
@@ -110,6 +113,14 @@ const baseRunRecordSchema = z.strictObject({
   rounds: z.array(implementationRoundSchema).min(1),
   steps: z.array(stepRunSchema),
   evidence: z.array(evidenceSchema),
+  promotion: z
+    .strictObject({
+      branch: z.string().min(1).max(255),
+      commit: z.string().regex(/^[0-9a-f]{40,64}$/),
+      createdAt: z.iso.datetime(),
+    })
+    .optional(),
+  worktree: z.strictObject({ removedAt: z.iso.datetime() }).optional(),
 });
 
 type RunRecordShape = z.infer<typeof baseRunRecordSchema>;
@@ -312,6 +323,7 @@ export const createRunSnapshot = (
   defaultBinding: ExecutionBinding,
   baselineInput?: Baseline,
   id: string = crypto.randomUUID(),
+  setupCommand?: SetupCommand,
 ): RunSnapshot => {
   const loop = parseLoop(loopInput);
   if (loop.status !== "published") throw new Error("Publish the loop before creating a run.");
@@ -334,6 +346,7 @@ export const createRunSnapshot = (
       projectDefault: binding,
       bindings: Object.fromEntries(loop.steps.map((step) => [step.id, step.binding ?? binding])),
       baseline,
+      ...(setupCommand ? { setupCommand } : {}),
     }),
   );
 };
@@ -358,6 +371,31 @@ export const createRunRecord = (snapshot: RunSnapshot): RunRecord => {
 export const hasRetryBudget = (record: RunRecord, step: RunRecord["steps"][number]): boolean =>
   step.attempts.filter((attempt) => attempt.implementationRound === record.implementationRound)
     .length < record.snapshot.loop.policy.maxAttemptsPerStep;
+/** A review step holding a `blocked` verdict (persisted as succeeded with outcome blocked). */
+export const isHeldReviewBlock = (record: RunRecord, step: RunRecord["steps"][number]): boolean =>
+  step.status === "succeeded" &&
+  step.outcome === "blocked" &&
+  record.snapshot.loop.steps.find((item) => item.id === step.stepId)?.stage === "review";
+
+/**
+ * Single retry eligibility rule for domain, server and UI: a failed step of a failed run, or a
+ * review step holding a `blocked` verdict while the run is blocked. Returns why not, or null.
+ */
+export const RETRY_NOT_ELIGIBLE = "Only a failed step in a failed run can be retried.";
+export const RETRY_LIMIT_REACHED = "Attempt limit reached for this step.";
+export const retryBlocker = (record: RunRecord, stepId: string): string | null => {
+  const step = record.steps.find((item) => item.stepId === stepId);
+  if (!step || !record.snapshot.loop.steps.some((item) => item.id === stepId))
+    return "Unknown retry target.";
+  const eligible =
+    (record.status === "failed" && step.status === "failed") ||
+    (record.status === "blocked" && isHeldReviewBlock(record, step));
+  if (!eligible) return RETRY_NOT_ELIGIBLE;
+  if (record.steps.some((item) => ["running", "waiting-input", "paused"].includes(item.status)))
+    return "Active work must finish before retry.";
+  if (!hasRetryBudget(record, step)) return RETRY_LIMIT_REACHED;
+  return null;
+};
 /** A retry increments the attempt only. Repair scheduling explicitly advances the round. */
 export const startAttempt = (record: RunRecord, stepId: string): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);

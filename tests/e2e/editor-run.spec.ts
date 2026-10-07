@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -19,6 +19,7 @@ type Harness = {
   projectDirectory: string;
   releaseReviews: () => void;
   setFailFirstReview: (value: boolean) => void;
+  setBlockFirstTestReview: (value: boolean) => void;
   setRequestInput: (value: boolean) => void;
   inputReplies: Record<string, { answers: string[] }>[];
   steered: string[];
@@ -40,9 +41,17 @@ const detectedCodex: AgentConnection = {
 
 const test = base.extend<{ harness: Harness }>({
   harness: async ({ browserName: _browserName }, use) => {
-    const projectDirectory = await mkdtemp(join(tmpdir(), "code-factory-e2e-"));
+    // Run worktrees are created beside the repository, so the repo lives in a disposable parent.
+    const parentDirectory = await mkdtemp(join(tmpdir(), "code-factory-e2e-"));
+    const projectDirectory = join(parentDirectory, "repo");
+    await mkdir(projectDirectory);
     await writeFile(join(projectDirectory, "README.md"), "# Fixture project\n");
     execFileSync("git", ["init", "-q"], { cwd: projectDirectory });
+    // Test-only local identity for Code Factory's run-branch commits.
+    execFileSync("git", ["config", "user.name", "Fixture"], { cwd: projectDirectory });
+    execFileSync("git", ["config", "user.email", "fixture@example.test"], {
+      cwd: projectDirectory,
+    });
     execFileSync("git", ["add", "README.md"], { cwd: projectDirectory });
     execFileSync(
       "git",
@@ -63,6 +72,7 @@ const test = base.extend<{ harness: Harness }>({
     });
     const steered: string[] = [];
     let failFirstReview = false;
+    let blockFirstTestReview = false;
     let requestInput = false;
     const inputReplies: Record<string, { answers: string[] }>[] = [];
     const pendingInput = new Map<string, () => void>();
@@ -170,6 +180,16 @@ const test = base.extend<{ harness: Harness }>({
             failFirstReview &&
             (input.stepId === "quality-review" || input.stepId === "review") &&
             input.attempt === 1;
+          // A reviewer that could not run its checks returns the `blocked` verdict once.
+          if (blockFirstTestReview && input.stepId === "test-review" && input.attempt === 1) {
+            yield {
+              type: "completed",
+              outcome: "succeeded",
+              output: "blocked\nCannot run pnpm test: shell refused.",
+              ...session,
+            };
+            return;
+          }
           const acknowledgment = guidanceBySession
             .get(session.sessionId)
             ?.match(/GUIDANCE-ACK:[\w-]+/)?.[0];
@@ -244,6 +264,9 @@ const test = base.extend<{ harness: Harness }>({
         setFailFirstReview: (value) => {
           failFirstReview = value;
         },
+        setBlockFirstTestReview: (value) => {
+          blockFirstTestReview = value;
+        },
         setRequestInput: (value) => {
           requestInput = value;
         },
@@ -260,10 +283,20 @@ const test = base.extend<{ harness: Harness }>({
       await new Promise<void>((resolve, reject) =>
         runtime.server.close((error) => (error ? reject(error) : resolve())),
       );
-      await rm(projectDirectory, { recursive: true, force: true });
+      await rm(parentDirectory, { recursive: true, force: true });
     }
   },
 });
+
+/** Codex steps ask for tool permission once per page session; these journeys keep the default. */
+const executeWithDefaultTools = async (page: import("@playwright/test").Page) => {
+  await page.getByRole("button", { name: "Execute run" }).click();
+  const prompt = page.getByRole("dialog", {
+    name: "Allow Codex to run commands outside its sandbox?",
+  });
+  await prompt.getByRole("button", { name: "Keep commands sandboxed" }).click();
+  await expect(prompt).toHaveCount(0);
+};
 
 const finishSetup = async (page: import("@playwright/test").Page, origin: string) => {
   await page.goto(origin);
@@ -368,7 +401,7 @@ test("canceling parallel review persists a canceled run after reload", async ({
   await page.getByRole("button", { name: /New run/i }).click();
   await page.getByLabel(/Task description/).fill("Cancel during parallel review");
   await page.getByRole("button", { name: "Start run" }).click();
-  await page.getByRole("button", { name: "Execute run" }).click();
+  await executeWithDefaultTools(page);
   await expect(page.getByRole("button", { name: /Code quality review, running/ })).toBeVisible();
   await page.getByRole("button", { name: "Cancel run" }).click();
   await expect
@@ -401,7 +434,7 @@ test("reloading during parallel review reconnects without duplicating attempts",
   await page.getByRole("button", { name: /New run/i }).click();
   await page.getByLabel(/Task description/).fill("Reload during parallel review");
   await page.getByRole("button", { name: "Start run" }).click();
-  await page.getByRole("button", { name: "Execute run" }).click();
+  await executeWithDefaultTools(page);
   await expect(page.getByRole("button", { name: /Code quality review, running/ })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
@@ -441,7 +474,7 @@ test("a blocking agent question survives reload and accepts one answer", async (
   await page.getByRole("button", { name: /New run/i }).click();
   await page.getByLabel(/Task description/).fill("Answer the implementation question");
   await page.getByRole("button", { name: "Start run" }).click();
-  await page.getByRole("button", { name: "Execute run" }).click();
+  await executeWithDefaultTools(page);
 
   const prompt = page.getByRole("region", { name: "Agent input request" });
   await expect(prompt.getByRole("heading", { name: "Agent waiting for input" })).toBeVisible();
@@ -511,7 +544,7 @@ test("verified model selection, loop controls, and run intake work as one keyboa
   await expect(page.getByText("Complete browser acceptance")).toBeVisible();
   await page.getByRole("button", { name: "Start run" }).click();
   await expect(page.getByRole("heading", { name: "Complete browser acceptance" })).toBeVisible();
-  await page.getByRole("button", { name: "Execute run" }).click();
+  await executeWithDefaultTools(page);
 
   await expect(page.getByRole("button", { name: /Code quality review, running/ })).toBeVisible();
   await expect(
@@ -590,7 +623,7 @@ test("a failed review can be retried from its selected latest attempt", async ({
   await page.getByRole("button", { name: /New run/i }).click();
   await page.getByLabel(/Task description/).fill("Exercise selected retry");
   await page.getByRole("button", { name: "Start run" }).click();
-  await page.getByRole("button", { name: "Execute run" }).click();
+  await executeWithDefaultTools(page);
 
   const failedReview = page.getByRole("button", { name: /Review, failed, 1 attempts/ });
   await expect(failedReview).toBeVisible();
@@ -612,6 +645,142 @@ test("a failed review can be retried from its selected latest attempt", async ({
   await page.getByRole("button", { name: "← All runs" }).click();
   await page.getByRole("button", { name: /Exercise selected retry/ }).click();
   await expect(page.getByText(/Human acceptance:/)).toContainText("accepted");
+});
+
+test("a granted run commits on its run branch and is promoted to a named branch after acceptance", async ({
+  page,
+  harness,
+}) => {
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: harness.projectDirectory, encoding: "utf8" }).trim();
+  const userHead = git("rev-parse", "HEAD");
+  const userBranch = git("symbolic-ref", "HEAD");
+  await finishSetup(page, harness.origin);
+  await page.getByRole("button", { name: "Loops" }).click();
+  await page.getByRole("button", { name: "Use starter template" }).click();
+  await page
+    .getByLabel("Starter templates")
+    .getByRole("button", { name: "Create draft" })
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Publish v1" }).click();
+  await page.getByRole("button", { name: "Runs" }).click();
+  await page.getByRole("button", { name: /New run/i }).click();
+  await page.getByLabel(/Task description/).fill("Promote the run branch");
+  await page.getByRole("button", { name: "Start run" }).click();
+
+  const execute = page.getByRole("button", { name: "Execute run" });
+  await execute.click();
+  const prompt = page.getByRole("dialog", {
+    name: "Allow Codex to run commands outside its sandbox?",
+  });
+  await expect(prompt).toContainText("network access and writes outside the worktree");
+  await expect(prompt.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await prompt.getByRole("button", { name: "Allow and run" }).click();
+  await expect(prompt).toHaveCount(0);
+  const config = JSON.parse(
+    await readFile(join(harness.projectDirectory, ".code-factory", "project.json"), "utf8"),
+  ) as { toolGrants?: { codex?: { scope: string[] } } };
+  expect(config.toolGrants?.codex?.scope).toEqual(["commandExecution"]);
+
+  const runBranch = page.getByRole("region", { name: "Run branch" });
+  await expect(runBranch).toContainText(/code-factory\/[0-9a-f]{8}/);
+  await expect
+    .poll(async () => {
+      const body = (await (await page.request.get(`${harness.origin}/api/runs`)).json()) as {
+        runs: { status: string }[];
+      };
+      return body.runs[0]?.status;
+    })
+    .toBe("succeeded");
+  const runs = (await (await page.request.get(`${harness.origin}/api/runs`)).json()) as {
+    runs: { snapshot: { id: string; baseline: { branch: string } } }[];
+  };
+  const branch = runs.runs[0]?.snapshot.baseline.branch ?? "";
+  expect(git("log", "-1", "--format=%B", branch)).toContain("Code-Factory-Step: implement");
+  expect(git("worktree", "list")).toContain("repo-code-factory");
+
+  const create = runBranch.getByRole("button", { name: "Create ticket branch" });
+  await expect(create).toBeDisabled();
+  await expect(runBranch).toContainText("Accept the evidence before creating a ticket branch.");
+  await page.getByRole("button", { name: "Accept evidence" }).click();
+  await expect(page.getByText(/Human acceptance:/)).toContainText("accepted");
+  await expect(create).toBeEnabled();
+  await create.click();
+  const dialog = page.getByRole("dialog", { name: "Create ticket branch" });
+  const name = dialog.getByRole("textbox", { name: "Branch name" });
+  await expect(name).toBeFocused();
+  await expect(name).toHaveValue("");
+  await name.fill("demo-run");
+  await dialog.getByRole("button", { name: "Create branch" }).click();
+  await expect(runBranch).toContainText("Ticket branch demo-run");
+  // The trigger is gone after success, so focus lands on the result instead of the page body.
+  await expect(runBranch.getByText(/^Ticket branch demo-run at/)).toBeFocused();
+  expect(git("rev-list", "demo-run")).toBe(git("rev-list", branch));
+  expect(git("rev-parse", "HEAD")).toBe(userHead);
+  expect(git("symbolic-ref", "HEAD")).toBe(userBranch);
+
+  // Revoke from Setup: the grant leaves project.json and focus moves to the new Allow… button.
+  await page
+    .getByRole("navigation", { name: "Factory" })
+    .getByRole("button", { name: "Settings" })
+    .click();
+  await page.getByRole("button", { name: "Edit project setup" }).click();
+  await page.getByRole("button", { name: "Revoke Codex command permission" }).click();
+  const allow = page.getByRole("button", { name: "Allow Codex command permission…" });
+  await expect(allow).toBeFocused();
+  const revoked = JSON.parse(
+    await readFile(join(harness.projectDirectory, ".code-factory", "project.json"), "utf8"),
+  ) as { toolGrants?: unknown };
+  expect(revoked.toolGrants).toBeUndefined();
+});
+
+test("a blocked review stops the run, and retrying it from the banner reaches adjudication", async ({
+  page,
+  harness,
+}) => {
+  harness.setBlockFirstTestReview(true);
+  await finishSetup(page, harness.origin);
+  await page.getByRole("button", { name: "Loops" }).click();
+  await page.getByRole("button", { name: "Use starter template" }).click();
+  await page
+    .getByLabel("Starter templates")
+    .getByRole("button", { name: "Create draft" })
+    .nth(1)
+    .click();
+  await page.getByRole("button", { name: "Publish v1" }).click();
+  await page.getByRole("button", { name: "Runs" }).click();
+  await page.getByRole("button", { name: /New run/i }).click();
+  await page.getByLabel(/Task description/).fill("Recover a blocked review");
+  await page.getByRole("button", { name: "Start run" }).click();
+  await executeWithDefaultTools(page);
+  harness.releaseReviews();
+  const status = async () => {
+    const body = (await (await page.request.get(`${harness.origin}/api/runs`)).json()) as {
+      runs: { status: string }[];
+    };
+    return body.runs[0]?.status;
+  };
+  await expect.poll(status).toBe("blocked");
+
+  const banner = page.getByRole("region", { name: "Test quality review blocked the run" });
+  await expect(banner).toContainText("Cannot run pnpm test: shell refused.");
+  await expect(
+    page.getByRole("button", { name: /^Verify and adjudicate, Not reached/ }),
+  ).toBeVisible();
+  await banner.getByRole("button", { name: "Retry Test quality review" }).click();
+  // The banner unmounts once the run resumes; focus stays on the run title.
+  await expect(
+    page.getByRole("heading", { level: 2, name: "Recover a blocked review" }),
+  ).toBeFocused();
+  await expect.poll(status).toBe("succeeded");
+  await expect(banner).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /^Verify and adjudicate, succeeded/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /^Test quality review, succeeded, 2 attempts/ }),
+  ).toBeVisible();
 });
 
 test("select controls remain usable at mobile width and with reduced motion", async ({

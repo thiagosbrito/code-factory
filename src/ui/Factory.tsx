@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import type { FactoryResponse, ProjectResponse } from "./project-api";
+import type { FactoryResponse, ProjectResponse, SavedProjectResponse } from "./project-api";
+import { ToolGrantDialog } from "./ToolGrantDialog";
 import { FactoryEmptyState } from "./FactoryEmptyState";
 import { FactorySidebar, screenLabels, type Screen } from "./FactorySidebar";
 import { bindingError, connectionViewModel } from "./connection";
@@ -22,7 +23,9 @@ export const Factory = ({
   onDemo,
   onExitDemo,
   onEditSetup,
+  onProjectChanged,
 }: {
+  onProjectChanged?: (next: SavedProjectResponse) => void;
   project: ProjectResponse;
   agents: AgentConnection[];
   counts: FactoryResponse;
@@ -60,7 +63,13 @@ export const Factory = ({
     historyError,
     reload,
     selectedRunId,
-  } = useFactoryRuns(demo);
+    workspace,
+    promote,
+    removeWorktree,
+    toolGrantPrompt,
+    answerToolGrant,
+    toolGrantReturnFocus,
+  } = useFactoryRuns(demo, onProjectChanged ? { onProjectChanged } : {});
   const canStart = Boolean(
     project.project?.defaultBinding && !bindingError(project.project.defaultBinding, agents),
   );
@@ -190,7 +199,12 @@ export const Factory = ({
             onExecute={() => void execute(selectedRun.snapshot.id)}
             onCancel={() => void cancel(selectedRun.snapshot.id)}
             agents={agents}
-            onRetry={(stepId, attemptId) => void retry(selectedRun.snapshot.id, stepId, attemptId)}
+            onRetry={(stepId, attemptId, focusTarget) =>
+              void retry(selectedRun.snapshot.id, stepId, attemptId, focusTarget ?? undefined)
+            }
+            workspace={workspace}
+            onPromote={(name) => promote(selectedRun.snapshot.id, name)}
+            onRemoveWorktree={() => removeWorktree(selectedRun.snapshot.id)}
             onSendGuidance={(input) => sendGuidance(selectedRun.snapshot.id, input)}
             onReplyToInput={(input) => replyToInput(selectedRun.snapshot.id, input)}
             onBack={() => {
@@ -272,6 +286,13 @@ export const Factory = ({
             onStarted={onStarted}
           />
         )}
+        <ToolGrantDialog
+          mode="run"
+          prompt={toolGrantPrompt}
+          onAnswer={(choice) => void answerToolGrant(choice)}
+          returnFocus={toolGrantReturnFocus}
+          fallbackFocus={headingRef}
+        />
       </main>
     </div>
   );

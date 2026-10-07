@@ -82,6 +82,10 @@
   background: #fff2d9;
   color: #855c16;
 }
+.run-status-not-reached {
+  background: #ececea;
+  color: #4a4a46;
+}
 .run-status-failed,
 .run-status-rejected,
 .run-status-unavailable,

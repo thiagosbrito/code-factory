@@ -141,23 +141,37 @@ const saveProjectSetupAtRoot = async (
   root: string,
   input: z.infer<typeof projectSetupSchema>,
 ): Promise<ProjectConfig> => {
-  const path = await configPath(root);
   const current = await readProjectConfig(root);
   if (input.revision !== (await projectRevision(root)))
     throw new ProjectError("Project setup changed on disk. Reload and try again.", 409);
+  const keep = <K extends "customAgent" | "setupCommand">(
+    key: K,
+    value: ProjectConfig[K] | null | undefined,
+  ): Partial<ProjectConfig> => {
+    const next = value === undefined ? current?.[key] : value;
+    return next ? { [key]: next } : {};
+  };
   const config = projectConfigSchema.parse({
     schemaVersion: 1,
     name: input.name,
     defaultBinding:
       input.defaultBinding === undefined ? (current?.defaultBinding ?? null) : input.defaultBinding,
-    ...(input.customAgent === undefined
-      ? current?.customAgent
-        ? { customAgent: current.customAgent }
-        : {}
-      : input.customAgent
-        ? { customAgent: input.customAgent }
-        : {}),
+    ...keep("customAgent", input.customAgent),
+    ...keep("setupCommand", input.setupCommand),
+    // Grants change only through the tool-grant routes; a setup save never drops one.
+    ...(current?.toolGrants ? { toolGrants: current.toolGrants } : {}),
   });
+  return writeConfigAtRoot(root, input.revision, current, config);
+};
+
+/** Locked, revision-checked write: exclusive create when absent, temp file plus rename otherwise. */
+const writeConfigAtRoot = async (
+  root: string,
+  revision: string | null,
+  current: ProjectConfig | null,
+  config: ProjectConfig,
+): Promise<ProjectConfig> => {
+  const path = await configPath(root);
   const folder = join(root, ".code-factory");
   try {
     if (!current) {
@@ -173,7 +187,7 @@ const saveProjectSetupAtRoot = async (
       const temporary = join(folder, `.project-${randomUUID()}.tmp`);
       try {
         await writeFile(temporary, `${JSON.stringify(config, null, 2)}\n`, { flag: "wx" });
-        if (input.revision !== (await projectRevision(root)))
+        if (revision !== (await projectRevision(root)))
           throw new ProjectError("Project setup changed on disk. Reload and try again.", 409);
         await rename(temporary, path);
       } finally {
@@ -193,18 +207,39 @@ const saveProjectSetupAtRoot = async (
   return config;
 };
 
+const serialized = async <T>(root: string, work: () => Promise<T>): Promise<T> => {
+  const prior = setupWrites.get(root) ?? Promise.resolve();
+  const next = prior.catch(() => undefined).then(work);
+  setupWrites.set(root, next);
+  try {
+    return await next;
+  } finally {
+    if (setupWrites.get(root) === next) setupWrites.delete(root);
+  }
+};
+
 /** Serialize local setup saves so concurrent requests cannot overwrite one another. */
 export const saveProjectSetup = async (
   directory: string,
   input: z.infer<typeof projectSetupSchema>,
 ): Promise<ProjectConfig> => {
   const root = await validateProjectDirectory(directory);
-  const prior = setupWrites.get(root) ?? Promise.resolve();
-  const work = prior.catch(() => undefined).then(() => saveProjectSetupAtRoot(root, input));
-  setupWrites.set(root, work);
-  try {
-    return await work;
-  } finally {
-    if (setupWrites.get(root) === work) setupWrites.delete(root);
-  }
+  return serialized(root, () => saveProjectSetupAtRoot(root, input));
+};
+
+/** Revision-checked update of an existing configuration, serialized with setup saves. */
+export const updateProjectConfig = async (
+  directory: string,
+  revision: string | null,
+  update: (current: ProjectConfig | null) => ProjectConfig,
+): Promise<ProjectConfig> => {
+  const root = await validateProjectDirectory(directory);
+  return serialized(root, async () => {
+    const current = await readProjectConfig(root);
+    if (revision !== (await projectRevision(root)))
+      throw new ProjectError("Project setup changed on disk. Reload and try again.", 409);
+    const next = projectConfigSchema.parse(update(current));
+    if (current && JSON.stringify(next) === JSON.stringify(current)) return current;
+    return writeConfigAtRoot(root, revision, current, next);
+  });
 };

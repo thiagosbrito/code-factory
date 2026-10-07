@@ -1,7 +1,8 @@
 import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import { Brand } from "./Brand";
-import type { ProjectResponse } from "./project-api";
+import type { ProjectResponse, SavedProjectResponse } from "./project-api";
+import { ToolPermissionsSection } from "./ToolPermissionsSection";
 import { AgentSetupSection } from "./AgentSetupSection";
 import { ModelSetupSection } from "./ModelSetupSection";
 import { ProjectSetupSection } from "./ProjectSetupSection";
@@ -16,7 +17,9 @@ export const Setup = ({
   onSaved,
   onDemo,
   onCancel,
+  onProjectChanged = () => undefined,
 }: {
+  onProjectChanged?: (next: SavedProjectResponse) => void;
   state: ProjectResponse;
   agents: AgentConnection[];
   agentError: string;
@@ -32,6 +35,8 @@ export const Setup = ({
   onCancel?: () => void;
 }) => {
   const {
+    setupCommand,
+    setSetupCommand,
     name,
     setName,
     selected,
@@ -92,6 +97,11 @@ export const Setup = ({
               setName(value);
               setError("");
             }}
+            setupCommand={setupCommand}
+            onSetupCommandChange={(value) => {
+              setSetupCommand(value);
+              setError("");
+            }}
           />
           <AgentSetupSection
             displayedAgents={displayedAgents}
@@ -105,6 +115,9 @@ export const Setup = ({
             onVerify={verify}
             onRefresh={refreshAgents}
           />
+          {state.project && (
+            <ToolPermissionsSection state={state} onProjectChanged={onProjectChanged} />
+          )}
           <ModelSetupSection
             active={active}
             model={model}

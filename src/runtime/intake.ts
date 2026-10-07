@@ -1,8 +1,12 @@
 import { z } from "zod";
-import { rm } from "node:fs/promises";
-import { join } from "node:path";
-import { createRunRecord, createRunSnapshot, type RunRecord } from "../domain/run.js";
+import {
+  createRunRecord,
+  createRunSnapshot,
+  type Baseline,
+  type RunRecord,
+} from "../domain/run.js";
 import { captureGitBaseline } from "./baseline.js";
+import { discardRunWorktree, WorktreeExistsError } from "./run-branch.js";
 import { ProjectError, readProjectConfig } from "./project.js";
 import { createRun, readPublishedVersion, readRun } from "./storage.js";
 import { ticketIdSchema, type TicketTracker } from "./tracker.js";
@@ -88,12 +92,27 @@ const startOnce = async (
       throw new ProjectError(`Effort ${binding.effort} is unavailable.`, 422);
   }
   const ticket = input.ticketId && tracker ? await tracker.retrieve(input.ticketId) : undefined;
-  const baseline = await captureGitBaseline(project).catch((error: unknown) => {
+  // Same value as defaultTicketBranch(task) for the task passed to createRunSnapshot below.
+  const ticketId = ticket?.id ?? input.ticketId?.toUpperCase() ?? "";
+  let baseline: Baseline;
+  try {
+    baseline = await captureGitBaseline(project, { runId: input.requestId, ticketId });
+  } catch (error) {
+    if (error instanceof WorktreeExistsError) {
+      const winner = await readRun(project, input.requestId);
+      if (winner && matchesRequest(winner, input)) return winner;
+      throw new ProjectError(
+        winner
+          ? "This request ID already belongs to another run."
+          : "This request ID is already starting another run.",
+        409,
+      );
+    }
     throw new ProjectError(
       `Cannot capture Git baseline: ${error instanceof Error ? error.message : String(error)}`,
       422,
     );
-  });
+  }
   try {
     const record = createRunRecord(
       createRunSnapshot(
@@ -109,16 +128,22 @@ const startOnce = async (
         config.defaultBinding,
         baseline,
         input.requestId,
+        config.setupCommand,
       ),
     );
     return await createRun(project, record);
   } catch (error) {
-    if (baseline.workspace)
-      await rm(join(project, baseline.workspace), { recursive: true, force: true });
+    await discardRunWorktree(project, baseline);
     if (error instanceof Error && "code" in error && error.code === "EEXIST") {
       const winner = await readRun(project, input.requestId);
       if (winner && matchesRequest(winner, input)) return winner;
       throw new ProjectError("This request ID already belongs to another run.", 409);
+    }
+    if (baseline.branch) {
+      const message = `${error instanceof Error ? error.message : String(error)} Branch ${baseline.branch} was kept.`;
+      console.error(message);
+      if (error instanceof ProjectError) throw new ProjectError(message, error.status);
+      throw new Error(message, { cause: error });
     }
     throw error;
   }

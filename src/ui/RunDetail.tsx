@@ -6,7 +6,17 @@ import { Button } from "@/components/ui/button";
 import { RunGraph } from "./RunGraph";
 import { RunInspector } from "./RunInspector";
 import { RunInputPrompt } from "./RunInputPrompt";
-import { runStatusLabel, runTitle, trackerConnectionStep, type RunScope } from "./run-view-model";
+import { RunStopBanner } from "./RunStopBanner";
+import { RunWorkspacePanel } from "./RunWorkspacePanel";
+import type { PromoteFailure } from "./PromoteRunDialog";
+import type { RunWorkspace } from "../domain/run-branch.js";
+import {
+  runStatusLabel,
+  runStopCause,
+  runTitle,
+  trackerConnectionStep,
+  type RunScope,
+} from "./run-view-model";
 
 export const RunDetail = ({
   run,
@@ -23,7 +33,13 @@ export const RunDetail = ({
   onBack,
   onSendGuidance = async () => undefined,
   onReplyToInput = async () => undefined,
+  workspace = null,
+  onPromote = async () => ({ error: "Promotion is unavailable." }),
+  onRemoveWorktree = async () => "Worktree removal is unavailable.",
 }: {
+  workspace?: RunWorkspace | null;
+  onPromote?: (name: string) => Promise<PromoteFailure | { warning?: string }>;
+  onRemoveWorktree?: () => Promise<string | null>;
   run: RunRecord;
   summary: EvidenceSummary | null;
   accepting: boolean;
@@ -33,7 +49,7 @@ export const RunDetail = ({
   executing: boolean;
   onExecute: () => void;
   onCancel: () => void;
-  onRetry?: (stepId: string, attemptId: string) => void;
+  onRetry?: (stepId: string, attemptId: string, focusTarget?: HTMLElement | null) => void;
   agents?: AgentConnection[];
   onBack: () => void;
   onSendGuidance?: (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
@@ -47,6 +63,7 @@ export const RunDetail = ({
   const [scope, setScope] = useState<RunScope | null>(null);
   const [initialTab, setInitialTab] = useState<"Activity" | "Files" | "Artifacts">("Activity");
   const trigger = useRef<HTMLElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const open = (next: RunScope, tab: "Activity" | "Files" | "Artifacts" = "Activity") => {
     trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setInitialTab(tab);
@@ -75,6 +92,8 @@ export const RunDetail = ({
         : connectionProvider;
   const connectionAttempt = connectionStep?.attempts.at(-1);
   const connectionRetryAvailable = connectionStep ? hasRetryBudget(run, connectionStep) : false;
+  // At most one banner: the tracker-connection banner already explains a failed issue lookup.
+  const stopCause = connectionStep ? undefined : runStopCause(run);
   return (
     <div className="mt-7 space-y-5">
       <Button variant="outline" size="sm" onClick={onBack}>
@@ -87,7 +106,9 @@ export const RunDetail = ({
         </p>
         <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold">{runTitle(run)}</h2>
+            <h2 ref={titleRef} tabIndex={-1} className="text-2xl font-semibold">
+              {runTitle(run)}
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {run.snapshot.loop.name} v{run.snapshot.loop.version} · round{" "}
               {run.implementationRound}
@@ -184,6 +205,36 @@ export const RunDetail = ({
             </Button>
           </div>
         </section>
+      )}
+      {stopCause && (
+        <RunStopBanner
+          run={run}
+          cause={stopCause}
+          connected={connected}
+          executing={executing}
+          onRetry={
+            onRetry &&
+            ((stepId, attemptId) => {
+              // The banner unmounts once the run resumes; keep focus on the run title instead.
+              titleRef.current?.focus();
+              onRetry(stepId, attemptId, titleRef.current);
+            })
+          }
+          onInspect={(stepId) => {
+            const step = run.steps.find((item) => item.stepId === stepId);
+            open({ kind: "step", stepId, attemptId: step?.attempts.at(-1)?.id ?? null });
+          }}
+        />
+      )}
+      {workspace && (
+        <RunWorkspacePanel
+          workspace={workspace}
+          summary={summary}
+          connected={connected}
+          busy={executing}
+          onPromote={onPromote}
+          onRemove={onRemoveWorktree}
+        />
       )}
       <RunInputPrompt run={run} agents={agents} connected={connected} onReply={onReplyToInput} />
       <section className="grid gap-2 sm:grid-cols-4" aria-label="Run summary">

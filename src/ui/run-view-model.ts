@@ -2,6 +2,7 @@ import type { RunRecord } from "../domain/run.js";
 import type { Evidence } from "../domain/evidence.js";
 import type { EvidenceSummary } from "../domain/acceptance.js";
 import { isIssueBlockedOutput } from "../domain/ticket.js";
+import { SETUP_COMPLETED } from "../domain/run-branch.js";
 
 export type RunStep = RunRecord["steps"][number];
 export type StepDefinition = RunRecord["snapshot"]["loop"]["steps"][number];
@@ -43,6 +44,101 @@ export const runStatusLabel = (run: RunRecord, connectionStep: RunStep | undefin
 
 export const runStatus = (run: RunRecord): string =>
   runStatusLabel(run, trackerConnectionStep(run));
+
+const STOPPED = new Set(["blocked", "failed", "canceled", "rejected"]);
+export const NOT_REACHED = "Not reached";
+
+/** Derived only: a pending step of a stopped run reads "Not reached"; persisted state is unchanged. */
+export const stepDisplayStatus = (run: RunRecord, step: RunStep | undefined): string => {
+  const status = step?.status ?? "pending";
+  return status === "pending" && STOPPED.has(run.status) ? NOT_REACHED : status;
+};
+
+export type RunStopCause = {
+  kind: "setup" | "review-blocked" | "step-failed" | "canceled";
+  stepId?: string;
+  name: string;
+  summary: string;
+};
+
+const latestEventDetail = (
+  run: RunRecord,
+  stepId: string,
+  attemptId: string | undefined,
+  titles: string[],
+): string | undefined => {
+  const event = [...run.evidence]
+    .reverse()
+    .find(
+      (item) =>
+        item.kind === "event" &&
+        item.stepId === stepId &&
+        item.attemptId === attemptId &&
+        titles.includes(item.title),
+    );
+  return event?.kind === "event" ? event.detail : undefined;
+};
+
+/** Names what stopped a blocked, failed or canceled run. A tracker-connection banner wins. */
+export const runStopCause = (run: RunRecord): RunStopCause | undefined => {
+  if (trackerConnectionStep(run)) return undefined;
+  const nameOf = (stepId: string) =>
+    run.snapshot.loop.steps.find((item) => item.id === stepId)?.name || stepId;
+  if (run.status === "blocked") {
+    const step = run.steps.find(
+      (item) =>
+        item.status === "succeeded" &&
+        item.outcome === "blocked" &&
+        run.snapshot.loop.steps.find((d) => d.id === item.stepId)?.stage === "review",
+    );
+    if (!step) return undefined;
+    const attemptId = step.attempts.at(-1)?.id;
+    const review = [...run.evidence]
+      .reverse()
+      .find(
+        (item) =>
+          item.kind === "review" && item.attemptId === attemptId && item.verdict === "blocked",
+      );
+    const findings = review?.kind === "review" ? review.findings.join("\n") : "";
+    return {
+      kind: "review-blocked",
+      stepId: step.stepId,
+      name: nameOf(step.stepId),
+      summary: findings || latestEventDetail(run, step.stepId, attemptId, ["completed"]) || "",
+    };
+  }
+  if (run.status !== "failed" && run.status !== "canceled") return undefined;
+  const setup = [...run.evidence]
+    .reverse()
+    .find(
+      (item) =>
+        item.kind === "event" &&
+        !item.stepId &&
+        item.title === SETUP_COMPLETED &&
+        (item.state === "failed" || item.state === "canceled"),
+    );
+  if (setup?.kind === "event")
+    return { kind: "setup", name: "Setup command", summary: setup.detail ?? "" };
+  const step = run.steps.find((item) => item.attempts.at(-1)?.status === "failed");
+  if (step) {
+    const attemptId = step.attempts.at(-1)?.id;
+    return {
+      kind: "step-failed",
+      stepId: step.stepId,
+      name: nameOf(step.stepId),
+      summary: (
+        latestEventDetail(run, step.stepId, attemptId, [
+          "commit-failed",
+          "completed",
+          "execution-interrupted",
+        ]) ?? ""
+      ).slice(0, 600),
+    };
+  }
+  return run.status === "canceled"
+    ? { kind: "canceled", name: "Run", summary: "The run was canceled." }
+    : undefined;
+};
 
 export const scopeEvidence = (run: RunRecord, scope: RunScope): Evidence[] =>
   run.evidence.filter((item) =>
