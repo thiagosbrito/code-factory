@@ -2,6 +2,7 @@ import type { AgentConnection } from "../adapters/contract.js";
 import type { ProviderId } from "../domain/loop.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { connectionViewModel } from "./connection";
 import { AgentCandidates } from "./AgentCandidates";
 import { AgentCapabilities } from "./AgentCapabilities";
@@ -54,12 +55,9 @@ export const AgentSetupSection = ({
           </label>
           <label htmlFor="custom-protocol" className="grid gap-2 text-sm font-medium">
             Protocol
-            <select
-              id="custom-protocol"
-              className="h-10 rounded-md border border-input bg-canvas px-3"
-            >
+            <NativeSelect id="custom-protocol">
               <option value="codex-app-server">Codex app-server</option>
-            </select>
+            </NativeSelect>
           </label>
           <small className="text-muted-foreground">
             Verification launches this executable only when you choose Verify. It must identify as

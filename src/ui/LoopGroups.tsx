@@ -2,10 +2,9 @@ import { useState } from "react";
 import type { LoopDefinition } from "../domain/loop.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { setParallelGroup, setRepeatGroup } from "./loop-editor-model";
 import { LoopGroupList } from "./LoopGroupList";
-
-const field = "mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm";
 
 export const LoopGroups = ({
   loop,
@@ -61,10 +60,11 @@ export const LoopGroups = ({
       >
         Create parallel group
       </Button>
-      <label className="mt-4 block text-xs">
+      <label htmlFor="repeat-limit" className="mt-4 block text-xs">
         Repeat limit
-        <input
-          className={field}
+        <Input
+          id="repeat-limit"
+          className="mt-1"
           type="number"
           min="1"
           max="10"
@@ -72,9 +72,9 @@ export const LoopGroups = ({
           onChange={(event) => setRepeatLimit(Number(event.target.value))}
         />
       </label>
-      <select
+      <NativeSelect
         aria-label="Repeat decision step"
-        className={field}
+        className="mt-2"
         value={exitStep}
         onChange={(event) => setExitStep(event.target.value)}
       >
@@ -84,16 +84,16 @@ export const LoopGroups = ({
             {step.name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <Input
         aria-label="Exit outcome"
         className="mt-2"
         value={exitOutcome}
         onChange={(event) => setExitOutcome(event.target.value)}
       />
-      <select
+      <NativeSelect
         aria-label="Exit target"
-        className={field}
+        className="mt-2"
         value={exitTarget}
         onChange={(event) => setExitTarget(event.target.value)}
       >
@@ -103,16 +103,16 @@ export const LoopGroups = ({
             {step.name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <Input
         aria-label="Continue outcome"
         className="mt-2"
         value={continueOutcome}
         onChange={(event) => setContinueOutcome(event.target.value)}
       />
-      <select
+      <NativeSelect
         aria-label="Continuation target"
-        className={field}
+        className="mt-2"
         value={continueTarget}
         onChange={(event) => setContinueTarget(event.target.value)}
       >
@@ -122,7 +122,7 @@ export const LoopGroups = ({
             {step.name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <Button
         className="mt-2 w-full"
         variant="outline"

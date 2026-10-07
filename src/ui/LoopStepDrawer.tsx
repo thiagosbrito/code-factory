@@ -4,14 +4,13 @@ import type { AgentConnection } from "../adapters/contract.js";
 import { parseLoop, type LoopDefinition } from "../domain/loop.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { ProjectResponse } from "./project-api";
 import { StepBindingSelectors } from "./StepBindingSelectors";
 import { LoopJoinSection, LoopDecisionSection } from "./LoopGraphSections";
 import { deleteStep, moveVisual, stageOf, type EditorStep } from "./loop-editor-model";
 
 const label = "block w-full text-sm font-medium";
-const field = "mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm";
-
 export const LoopStepDrawer = ({
   loop,
   selected,
@@ -102,18 +101,20 @@ export const LoopStepDrawer = ({
                   onChange={(event) => updateStep({ role: event.target.value })}
                 />
               </div>
-              <label className={`${label} mt-4`}>
+              <label htmlFor="step-instructions" className={`${label} mt-4`}>
                 Instructions
-                <textarea
-                  className={`${field} min-h-32`}
+                <Textarea
+                  id="step-instructions"
+                  className="mt-1 min-h-32"
                   value={selected.instruction}
                   onChange={(event) => updateStep({ instruction: event.target.value })}
                 />
               </label>
-              <label className={`${label} mt-4`}>
+              <label htmlFor="step-outputs" className={`${label} mt-4`}>
                 Expected outputs (one per line)
-                <textarea
-                  className={`${field} min-h-20`}
+                <Textarea
+                  id="step-outputs"
+                  className="mt-1 min-h-20"
                   value={selected.expectedOutputs.join("\n")}
                   onChange={(event) =>
                     updateStep({

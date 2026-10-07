@@ -9,6 +9,7 @@ import {
 } from "../domain/starter-templates.js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { api, type ProjectResponse } from "./project-api";
 import { loopEntriesResponseSchema, loopResponseSchema } from "./project-api";
 import { LoopEditor } from "./LoopEditor";
@@ -226,9 +227,9 @@ export const Loops = ({
         <label htmlFor="loop-json" className="mt-3 block text-sm">
           Paste a portable loop document
         </label>
-        <textarea
+        <Textarea
           id="loop-json"
-          className="mt-1 min-h-36 w-full rounded-md border p-2 font-mono text-xs"
+          className="mt-1 min-h-36 font-mono text-xs"
           value={importText}
           onChange={(event) => {
             setImportText(event.target.value);

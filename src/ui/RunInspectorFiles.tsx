@@ -8,6 +8,8 @@ import {
   type InspectedFiles,
 } from "./inspection-api";
 import { evidenceFreshness, type RunScope } from "./run-view-model";
+import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 
 export const RunInspectorFiles = ({ run, scope }: { run: RunRecord; scope: RunScope }) => {
   const [data, setData] = useState<InspectedFiles | null>(null);
@@ -101,16 +103,16 @@ export const RunInspectorFiles = ({ run, scope }: { run: RunRecord; scope: RunSc
         no matching file receipt exists.
       </p>
       <div className="flex gap-2">
-        <input
+        <Input
           aria-label="Search paths"
           placeholder="Search paths"
-          className="min-w-0 flex-1 rounded border px-2 py-1"
+          className="min-w-0 flex-1"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <select
+        <NativeSelect
           aria-label="Change type"
-          className="rounded border px-2"
+          className="w-40"
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
         >
@@ -120,7 +122,7 @@ export const RunInspectorFiles = ({ run, scope }: { run: RunRecord; scope: RunSc
               {type}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       {!available.length && (
         <p className="rounded border p-4 text-muted-foreground">

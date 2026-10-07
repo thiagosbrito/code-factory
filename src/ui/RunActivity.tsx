@@ -3,6 +3,7 @@ import type { RunRecord } from "../domain/run.js";
 import type { PublicEvent } from "../runtime/events.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 
 type Filter = "all" | "message" | "tool" | "check" | "error";
 const filters: { value: Filter; label: string }[] = [
@@ -77,8 +78,8 @@ export const RunActivity = ({ run, connected }: { run: RunRecord; connected: boo
       <div className="mt-4 flex flex-wrap gap-2">
         <label className="text-xs text-muted-foreground">
           Step
-          <select
-            className="ml-2 rounded-md border bg-background px-2 py-1 text-foreground"
+          <NativeSelect
+            className="mt-1 min-w-40 text-foreground"
             value={stepId}
             onChange={(event) => {
               setStepId(event.target.value);
@@ -91,13 +92,13 @@ export const RunActivity = ({ run, connected }: { run: RunRecord; connected: boo
                 {item.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         {step && (
           <label className="text-xs text-muted-foreground">
             Attempt
-            <select
-              className="ml-2 rounded-md border bg-background px-2 py-1 text-foreground"
+            <NativeSelect
+              className="mt-1 min-w-32 text-foreground"
               value={attemptId}
               onChange={(event) => setAttemptId(event.target.value)}
             >
@@ -107,7 +108,7 @@ export const RunActivity = ({ run, connected }: { run: RunRecord; connected: boo
                   Attempt {attempt.number}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
         )}
       </div>
