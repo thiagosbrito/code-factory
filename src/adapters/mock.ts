@@ -4,7 +4,13 @@ import type { AgentAdapter, AdapterEvent, StepExecutionInput } from "./contract.
 /** Deterministic protocol fixture; it does not edit files or call an AI provider. */
 export const mockAdapter: AgentAdapter = {
   provider: "mock",
-  capabilities: { streaming: "supported", steering: "unsupported", resume: "unsupported" },
+  capabilities: {
+    streaming: "supported",
+    steering: "unsupported",
+    resume: "unsupported",
+    pause: "unsupported",
+    waitingInput: "unsupported",
+  },
   async inspect() {
     return {
       provider: "mock",

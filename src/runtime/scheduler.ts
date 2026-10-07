@@ -2,9 +2,18 @@ import { createHash } from "node:crypto";
 import { cp, lstat, mkdtemp, readFile, readdir, readlink, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
-import type { AgentAdapter, AdapterEvent } from "../adapters/contract.js";
-import { attachAttemptSession, runRecordSchema, type RunRecord } from "../domain/run.js";
+import { spawn, type ChildProcess } from "node:child_process";
+import {
+  CancellationUnconfirmedError,
+  type AgentAdapter,
+  type AdapterEvent,
+} from "../adapters/contract.js";
+import {
+  attachAttemptSession,
+  runRecordSchema,
+  setAttemptControlState,
+  type RunRecord,
+} from "../domain/run.js";
 import {
   claimStep,
   completeStep,
@@ -79,6 +88,8 @@ const appendFileReceipts = (
 };
 
 type Resolver = (provider: string) => AgentAdapter | null;
+const isActiveStatus = (status: string): boolean =>
+  status === "running" || status === "waiting-input" || status === "paused";
 const active = new Map<
   string,
   { work: Promise<RunRecord>; controller: AbortController; retry?: string }
@@ -182,6 +193,47 @@ const reviewResult = (output: string): Pick<StepResult, "outcome" | "findings"> 
   };
 };
 
+const processGroupExists = (pid: number): boolean => {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return !(error instanceof Error && "code" in error && error.code === "ESRCH");
+  }
+};
+
+const waitForProcessGroupExit = async (pid: number, timeoutMs: number): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupExists(pid) && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  return !processGroupExists(pid);
+};
+
+const terminateCheckTree = async (child: ChildProcess): Promise<boolean> => {
+  if (!child.pid) return false;
+  if (process.platform === "win32")
+    return new Promise((resolve) => {
+      const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      killer.once("error", () => resolve(child.exitCode !== null));
+      killer.once("close", (code) => resolve(code === 0 || child.exitCode !== null));
+    });
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "ESRCH";
+  }
+  if (await waitForProcessGroupExit(child.pid, 2_000)) return true;
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) return false;
+  }
+  return waitForProcessGroupExit(child.pid, 2_000);
+};
+
 const checkCommand = async (
   command: string,
   cwd: string,
@@ -190,7 +242,12 @@ const checkCommand = async (
 ): Promise<StepResult> =>
   new Promise((resolveCheck) => {
     if (signal.aborted) return resolveCheck({ status: "canceled" });
-    const child = spawn(command, { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, {
+      cwd,
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
     let output = "";
     let buffered = "";
     let retained = 0;
@@ -231,8 +288,14 @@ const checkCommand = async (
     child.stderr.on("data", (chunk: Buffer) => {
       capture(chunk);
     });
-    const timeout = setTimeout(() => child.kill("SIGTERM"), 300_000);
-    const abort = () => child.kill("SIGTERM");
+    let stopReason: "abort" | "timeout" | undefined;
+    let termination: Promise<boolean> | undefined;
+    const stop = (reason: "abort" | "timeout") => {
+      stopReason ??= reason;
+      termination ??= terminateCheckTree(child);
+    };
+    const timeout = setTimeout(() => stop("timeout"), 300_000);
+    const abort = () => stop("abort");
     signal.addEventListener("abort", abort, { once: true });
     child.on("error", (error) => {
       clearTimeout(timeout);
@@ -259,12 +322,22 @@ const checkCommand = async (
       clearTimeout(timeout);
       signal.removeEventListener("abort", abort);
       flush();
-      void pending.then(
-        () =>
+      void Promise.all([pending, termination ?? Promise.resolve(true)]).then(
+        ([, stopped]) =>
           resolveCheck({
-            status: signal.aborted ? "canceled" : code === 0 ? "succeeded" : "failed",
+            status: !stopped
+              ? "unavailable"
+              : stopReason === "abort"
+                ? "canceled"
+                : code === 0 && !stopReason
+                  ? "succeeded"
+                  : "failed",
             outcome: code === 0 ? "passed" : "failed",
-            summary: output,
+            summary: !stopped
+              ? "Check process-tree termination could not be confirmed."
+              : stopReason === "timeout"
+                ? `${output}\nCheck timed out after 300000ms.`.trim()
+                : output,
             exitCode: code,
           }),
         () => resolveCheck({ status: "failed", summary: "Check output could not be persisted." }),
@@ -367,7 +440,7 @@ const executeOnce = async (
         (item) =>
           item.stepId === stepId &&
           item.attempts.at(-1)?.id === attempt.id &&
-          item.status === "running",
+          isActiveStatus(item.status),
       );
       const inputs = stepInputs(record, stepId);
       const inspectable = /^\.code-factory\/workspaces\/[0-9a-f-]{36}$/i.test(
@@ -486,6 +559,7 @@ const executeOnce = async (
             binding,
             projectDirectory: executionDirectory,
           };
+          let cancellationUnconfirmed = false;
           try {
             let completed = false;
             if (
@@ -530,18 +604,25 @@ const executeOnce = async (
                     : { outcome: event.output.trim() }),
                   summary: event.output,
                 };
-              await commit((current) => appendEvent(current, stepId, attempt.id, event));
+              if (event.type === "input-request")
+                await commit((current) => recordInputRequest(current, stepId, attempt.id, event));
+              else await commit((current) => appendEvent(current, stepId, attempt.id, event));
               if (event.type === "started")
                 record = await deliverQueuedGuidance(project, record, stepId, attempt.id, adapter);
             }
             if (!completed) throw new Error("Adapter stream ended without a verified completion.");
           } catch (error) {
-            if (!signal.aborted) throw error;
-            result = { status: "canceled" };
+            if (error instanceof CancellationUnconfirmedError) {
+              cancellationUnconfirmed = true;
+              result = { status: "unavailable", summary: error.message };
+            } else {
+              if (!signal.aborted) throw error;
+              result = { status: "canceled" };
+            }
           }
+          if (signal.aborted && !cancellationUnconfirmed) result = { status: "canceled" };
         }
       }
-      if (signal.aborted) result = { status: "canceled" };
       if (
         readonly &&
         result.status === "succeeded" &&
@@ -608,15 +689,15 @@ const executeOnce = async (
           ),
         );
     } catch (error) {
-      if (record.steps.find((step) => step.stepId === stepId)?.status === "running")
+      if (isActiveStatus(record.steps.find((step) => step.stepId === stepId)?.status ?? ""))
         await commit((current) =>
-          initial.steps.some((item) => item.stepId === stepId && item.status === "running") ||
+          initial.steps.some((item) => item.stepId === stepId && isActiveStatus(item.status)) ||
           (definition.kind !== "check" && !signal.aborted)
             ? interruptStep(
                 current,
                 stepId,
                 error instanceof Error ? error.message : String(error),
-                initial.steps.some((item) => item.stepId === stepId && item.status === "running")
+                initial.steps.some((item) => item.stepId === stepId && isActiveStatus(item.status))
                   ? "recovery-unavailable"
                   : "execution-interrupted",
               )
@@ -647,12 +728,13 @@ const executeOnce = async (
     if (record.status !== "running") return record;
   }
 
-  const interrupted = record.steps.filter((step) => step.status === "running");
+  const interrupted = record.steps.filter((step) => isActiveStatus(step.status));
   if (interrupted.length) {
     await Promise.all(interrupted.map((step) => runStep(step.stepId)));
     if (record.status === "unavailable") return record;
   }
   for (;;) {
+    if (record.status === "unavailable") return record;
     if (signal.aborted)
       return commit((current) =>
         runRecordSchema.parse({ ...current, revision: current.revision + 1, status: "canceled" }),
@@ -737,6 +819,38 @@ const appendEvent = (
     : next;
 };
 
+const recordInputRequest = (
+  record: RunRecord,
+  stepId: string,
+  attemptId: string,
+  event: Extract<AdapterEvent, { type: "input-request" }>,
+): RunRecord => {
+  if (!event.isBlocking) throw new Error("Only blocking native requests can wait for input.");
+  const waiting = setAttemptControlState(record, stepId, attemptId, "waiting-input");
+  return runRecordSchema.parse({
+    ...waiting,
+    revision: waiting.revision,
+    evidence: [
+      ...waiting.evidence,
+      {
+        id: crypto.randomUUID(),
+        runId: waiting.snapshot.id,
+        stepId,
+        attemptId,
+        createdAt: new Date().toISOString(),
+        kind: "input-request",
+        sessionId: event.sessionId,
+        turnId: event.turnId,
+        itemId: event.itemId,
+        requestId: event.requestId,
+        questions: event.questions,
+        isBlocking: true,
+        autoResolutionMs: event.autoResolutionMs,
+      },
+    ],
+  });
+};
+
 const appendLocalEvent = (
   record: RunRecord,
   stepId: string,
@@ -781,7 +895,7 @@ const interruptStep = (
 ): RunRecord => {
   const step = record.steps.find((item) => item.stepId === stepId);
   const attempt = step?.attempts.at(-1);
-  if (!attempt || attempt.status !== "running") return record;
+  if (!attempt || !isActiveStatus(attempt.status)) return record;
   const interrupted = runRecordSchema.parse({
     ...record,
     revision: record.revision + 1,

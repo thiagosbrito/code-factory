@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-06",
+  "provider": "codex app-server 0.160.0",
+  "environment": "unrestricted disposable Git repository",
+  "collaborationMode": "plan",
+  "initialize": { "experimentalApi": true, "succeeded": true },
+  "threadId": "01a1103c-b218-7341-87f1-57f3bc918be8",
+  "turnId": "01a1103c-b29b-7f51-973b-a8cc12d6ba37",
+  "serverRequest": {
+    "method": "item/tool/requestUserInput",
+    "id": 0,
+    "itemId": "call_8fQ2HVfishlrX09GcycuMgKN",
+    "isBlocking": true,
+    "autoResolutionMs": null,
+    "questionId": "reply_style"
+  },
+  "clientReply": {
+    "id": 0,
+    "questionId": "reply_style",
+    "answers": ["Use the concise answer."]
+  },
+  "turnCompleted": true,
+  "finalMessage": "You chose a concise final reply.",
+  "scope": "Protocol proof only. Code Factory production turns use Default mode, where this tool is unavailable.",
+  "notYetVerified": ["timeout", "cancellation", "restart", "stale attempt"]
+}

@@ -1,6 +1,12 @@
 import type { AgentConnection, CapabilitySupport } from "../adapters/contract.js";
 
-const capabilityLabels = { streaming: "Streaming", steering: "Guidance", resume: "Recovery" };
+const capabilityLabels = {
+  streaming: "Streaming",
+  steering: "Guidance",
+  resume: "Recovery",
+  pause: "Pause turn",
+  waitingInput: "Input reply",
+};
 
 const capabilityStatus = (
   support: CapabilitySupport,

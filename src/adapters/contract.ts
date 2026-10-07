@@ -5,6 +5,8 @@ export interface AgentCapabilities {
   streaming: CapabilitySupport;
   steering: CapabilitySupport;
   resume: CapabilitySupport;
+  pause: CapabilitySupport;
+  waitingInput: CapabilitySupport;
 }
 export interface AgentConnection {
   provider: ProviderId;
@@ -41,7 +43,26 @@ export type AdapterEvent =
   | ({ type: "tool"; title: string; detail?: string; state?: string } & StepSession)
   | ({ type: "check"; title: string; detail?: string; state?: string } & StepSession)
   | ({ type: "error"; text: string } & StepSession)
+  | ({
+      type: "input-request";
+      requestId: string | number;
+      itemId: string;
+      questions: InputQuestion[];
+      isBlocking: boolean;
+      autoResolutionMs: number | null;
+    } & StepSession)
   | ({ type: "completed"; outcome: "succeeded" | "failed"; output: string } & StepSession);
+
+export interface InputQuestion {
+  id: string;
+  header: string;
+  question: string;
+  options: { label: string; description: string }[];
+}
+
+export class CancellationUnconfirmedError extends Error {
+  override readonly name = "CancellationUnconfirmedError";
+}
 
 /** The factory owns loop scheduling. An adapter executes one assigned step. */
 export interface AgentAdapter {
@@ -51,4 +72,9 @@ export interface AgentAdapter {
   execute(input: StepExecutionInput, signal: AbortSignal): AsyncIterable<AdapterEvent>;
   attach(session: StepSession, signal: AbortSignal): AsyncIterable<AdapterEvent>;
   steer(session: StepSession, guidance: string): Promise<CapabilitySupport>;
+  replyToInput?(
+    session: StepSession,
+    requestId: string | number,
+    answers: Record<string, { answers: string[] }>,
+  ): Promise<void>;
 }

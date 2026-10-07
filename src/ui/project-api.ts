@@ -17,6 +17,8 @@ export const agentConnectionSchema = z.object({
     streaming: capabilitySchema,
     steering: capabilitySchema,
     resume: capabilitySchema,
+    pause: capabilitySchema,
+    waitingInput: capabilitySchema,
   }),
   version: z.string().optional(),
   protocol: z.string().optional(),

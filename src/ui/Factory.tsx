@@ -49,6 +49,7 @@ export const Factory = ({
     cancel,
     retry,
     sendGuidance,
+    replyToInput,
     accept,
     accepting,
     evidenceSummary,
@@ -191,6 +192,7 @@ export const Factory = ({
             agents={agents}
             onRetry={(stepId, attemptId) => void retry(selectedRun.snapshot.id, stepId, attemptId)}
             onSendGuidance={(input) => sendGuidance(selectedRun.snapshot.id, input)}
+            onReplyToInput={(input) => replyToInput(selectedRun.snapshot.id, input)}
             onBack={() => {
               setSelectedRunId("");
               window.history.pushState(null, "", "#runs");

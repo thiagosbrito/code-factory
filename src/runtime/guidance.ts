@@ -49,7 +49,7 @@ export const sendGuidance = async (
     const step = record.steps.find((item) => item.stepId === input.stepId);
     const attempt = step?.attempts.find((item) => item.id === input.attemptId);
     if (!attempt) throw new ProjectError("The selected attempt does not belong to this step.", 404);
-    const terminal = attempt.status !== "running";
+    const terminal = !["running", "waiting-input", "paused"].includes(attempt.status);
     if (!terminal && !adapter)
       throw new ProjectError(
         "Verified agent connection unavailable; guidance was not queued.",
@@ -262,7 +262,7 @@ export const expireQueuedGuidance = (
   const attempt = record.steps
     .find((item) => item.stepId === stepId)
     ?.attempts.find((item) => item.id === attemptId);
-  if (!attempt || attempt.status === "running") return record;
+  if (!attempt || ["running", "waiting-input", "paused"].includes(attempt.status)) return record;
   let next = record;
   const pending = record.evidence
     .filter(isGuidance)

@@ -43,11 +43,12 @@ export const RunExecution = ({
             {executing ? "Executing…" : "Execute run"}
           </Button>
         )}
-        {(executing || run.status === "running") && connected && (
-          <Button variant="outline" onClick={onCancel}>
-            Cancel run
-          </Button>
-        )}
+        {(executing || ["running", "waiting-input", "paused"].includes(run.status)) &&
+          connected && (
+            <Button variant="outline" onClick={onCancel}>
+              Cancel run
+            </Button>
+          )}
       </div>
       <ol className="space-y-2">
         {run.snapshot.loop.steps.map((definition) => {

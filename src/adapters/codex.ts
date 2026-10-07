@@ -3,13 +3,14 @@ import { execFile } from "node:child_process";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { z } from "zod";
-import type {
-  AgentAdapter,
-  AgentCapabilities,
-  AgentConnection,
-  AdapterEvent,
-  StepExecutionInput,
-  StepSession,
+import {
+  CancellationUnconfirmedError,
+  type AgentAdapter,
+  type AgentCapabilities,
+  type AgentConnection,
+  type AdapterEvent,
+  type StepExecutionInput,
+  type StepSession,
 } from "./contract.js";
 
 const rpcMessageSchema = z.object({
@@ -20,12 +21,40 @@ const rpcMessageSchema = z.object({
   error: z.object({ message: z.string().optional() }).optional(),
 });
 type RpcMessage = z.infer<typeof rpcMessageSchema>;
+type RpcListener = (message: RpcMessage) => boolean | void;
+const inputRequestSchema = z.object({
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+  itemId: z.string().min(1),
+  questions: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        header: z.string(),
+        question: z.string().min(1),
+        options: z.array(z.object({ label: z.string(), description: z.string() })).default([]),
+      }),
+    )
+    .min(1),
+  isBlocking: z.boolean(),
+  autoResolutionMs: z.number().int().nonnegative().nullable(),
+});
 export const parseCodexMessage = (line: string): RpcMessage =>
   rpcMessageSchema.parse(JSON.parse(line));
+
+export const claimCodexInputRequest = (
+  listeners: Iterable<RpcListener>,
+  request: RpcMessage,
+): boolean => {
+  let claimed = false;
+  for (const listener of listeners) claimed = listener(request) === true || claimed;
+  return claimed;
+};
 
 type RpcDispatch = {
   response(message: RpcMessage): void;
   notification(message: RpcMessage): void;
+  userInputRequest?(message: RpcMessage): boolean;
   send(message: Record<string, unknown>): void;
   approveFileChange?(request: RpcMessage): boolean;
 };
@@ -47,6 +76,11 @@ export const dispatchCodexMessage = (message: RpcMessage, handlers: RpcDispatch)
         }
       }
       handlers.send({ jsonrpc: "2.0", id: message.id, result: { decision } });
+    } else if (
+      message.method === "item/tool/requestUserInput" &&
+      handlers.userInputRequest?.(message)
+    ) {
+      return;
     } else {
       handlers.send({
         jsonrpc: "2.0",
@@ -63,7 +97,8 @@ export const dispatchCodexMessage = (message: RpcMessage, handlers: RpcDispatch)
 export interface CodexRpc {
   request(method: string, params: Record<string, unknown>): Promise<unknown>;
   notify(method: string, params?: Record<string, unknown>): void;
-  subscribe(listener: (message: RpcMessage) => void): () => void;
+  subscribe(listener: RpcListener): () => void;
+  replyToInput?(id: string | number, answers: Record<string, { answers: string[] }>): void;
   close?(): void;
 }
 
@@ -74,7 +109,7 @@ export class CodexStdioRpc implements CodexRpc {
     number,
     { resolve(value: unknown): void; reject(error: Error): void }
   >();
-  private readonly listeners = new Set<(message: RpcMessage) => void>();
+  private readonly listeners = new Set<RpcListener>();
   private nextId = 1;
 
   constructor(
@@ -101,6 +136,7 @@ export class CodexStdioRpc implements CodexRpc {
         notification: (notification) => {
           for (const listener of this.listeners) listener(notification);
         },
+        userInputRequest: (request) => claimCodexInputRequest(this.listeners, request),
         send: (reply) => this.child.stdin.write(`${JSON.stringify(reply)}\n`),
         ...(options.approveFileChange ? { approveFileChange: options.approveFileChange } : {}),
       });
@@ -129,7 +165,11 @@ export class CodexStdioRpc implements CodexRpc {
     this.child.stdin.write(`${JSON.stringify({ method, params })}\n`);
   }
 
-  subscribe(listener: (message: RpcMessage) => void): () => void {
+  replyToInput(id: string | number, answers: Record<string, { answers: string[] }>): void {
+    this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: { answers } })}\n`);
+  }
+
+  subscribe(listener: RpcListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -165,6 +205,7 @@ export class CodexAdapter implements AgentAdapter {
   readonly provider = "codex" as const;
   readonly capabilities: AgentCapabilities;
   private initialized?: Promise<void>;
+  private readonly pendingInput = new Map<string, { requestId: string | number; itemId: string }>();
 
   constructor(
     private readonly rpc: CodexRpc,
@@ -175,6 +216,8 @@ export class CodexAdapter implements AgentAdapter {
       streaming: "unknown",
       steering: version === "0.160.0" ? "supported" : "unknown",
       resume: "unknown",
+      pause: "unsupported",
+      waitingInput: version === "0.160.0" ? "unsupported" : "unknown",
     };
   }
 
@@ -279,8 +322,13 @@ export class CodexAdapter implements AgentAdapter {
         sessionId,
         turnId: identifier(turn.id),
       };
+      const cancellation = this.interruptOnAbort(session, signal);
       yield { type: "started", ...session };
-      yield* feed.stream(session);
+      try {
+        yield* feed.stream(session);
+      } finally {
+        await cancellation.close();
+      }
     } finally {
       feed.close();
     }
@@ -290,6 +338,7 @@ export class CodexAdapter implements AgentAdapter {
     signal.throwIfAborted();
     await this.initialize();
     const feed = this.events(session, signal);
+    const cancellation = this.interruptOnAbort(session, signal);
     try {
       await this.rpc.request("thread/resume", { threadId: session.sessionId, excludeTurns: true });
       const read = object(
@@ -310,8 +359,34 @@ export class CodexAdapter implements AgentAdapter {
       }
       yield* feed.stream(session, this.turnOutput(turn));
     } finally {
+      await cancellation.close();
       feed.close();
     }
+  }
+
+  private interruptOnAbort(session: StepSession, signal: AbortSignal): { close(): Promise<void> } {
+    let interrupt: Promise<unknown> | undefined;
+    const requestInterrupt = () => {
+      interrupt ??= this.rpc.request("turn/interrupt", {
+        threadId: session.sessionId,
+        turnId: session.turnId,
+      });
+    };
+    signal.addEventListener("abort", requestInterrupt, { once: true });
+    return {
+      close: async () => {
+        signal.removeEventListener("abort", requestInterrupt);
+        if (signal.aborted) requestInterrupt();
+        try {
+          await interrupt;
+        } catch (error) {
+          if (error instanceof Error && /no active turn to interrupt/i.test(error.message)) return;
+          throw new CancellationUnconfirmedError(
+            `Codex did not confirm turn interruption: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      },
+    };
   }
 
   async steer(
@@ -326,6 +401,18 @@ export class CodexAdapter implements AgentAdapter {
       input: textInput(guidance),
     });
     return "supported";
+  }
+
+  async replyToInput(
+    session: StepSession,
+    requestId: string | number,
+    answers: Record<string, { answers: string[] }>,
+  ): Promise<void> {
+    const key = `${session.sessionId}:${session.turnId}:${typeof requestId}:${requestId}`;
+    if (!this.pendingInput.has(key) || !this.rpc.replyToInput)
+      throw new Error("Native input request is no longer pending on this connection.");
+    this.pendingInput.delete(key);
+    this.rpc.replyToInput(requestId, answers);
   }
 
   private turnOutput(turn: Record<string, unknown>): string {
@@ -345,12 +432,20 @@ export class CodexAdapter implements AgentAdapter {
     close(): void;
   } {
     const queue: RpcMessage[] = [];
+    const pendingInput = this.pendingInput;
     let wake: (() => void) | undefined;
     const unsubscribe = this.rpc.subscribe((message) => {
       if (message.method !== "transport/closed" && message.params?.threadId !== seed.sessionId)
-        return;
+        return false;
+      if (
+        message.method === "item/tool/requestUserInput" &&
+        seed.turnId &&
+        message.params?.turnId !== seed.turnId
+      )
+        return false;
       queue.push(message);
       wake?.();
+      return message.method === "item/tool/requestUserInput";
     });
     // An async generator needs function syntax; arrows cannot yield.
     const stream = async function* (
@@ -371,6 +466,23 @@ export class CodexAdapter implements AgentAdapter {
           const message = queue.shift();
           if (!message || (message.params?.turnId && message.params.turnId !== session.turnId))
             continue;
+          if (message.method === "item/tool/requestUserInput") {
+            const request = inputRequestSchema.parse(message.params);
+            if (message.id === undefined || !request.isBlocking)
+              throw new Error("Invalid blocking Codex input request.");
+            const key = `${session.sessionId}:${session.turnId}:${typeof message.id}:${message.id}`;
+            pendingInput.set(key, { requestId: message.id, itemId: request.itemId });
+            yield {
+              type: "input-request",
+              requestId: message.id,
+              itemId: request.itemId,
+              questions: request.questions,
+              isBlocking: true,
+              autoResolutionMs: request.autoResolutionMs,
+              ...session,
+            };
+            continue;
+          }
           if (message.method === "item/agentMessage/delta") {
             const delta = message.params?.delta;
             if (typeof delta === "string") {
@@ -380,6 +492,15 @@ export class CodexAdapter implements AgentAdapter {
           }
           if (message.method === "item/started" || message.method === "item/completed") {
             const item = message.params?.item;
+            if (message.method === "item/completed" && item && typeof item === "object") {
+              const itemId = object(item).id;
+              for (const [key, pending] of pendingInput)
+                if (
+                  key.startsWith(`${session.sessionId}:${session.turnId}:`) &&
+                  pending.itemId === itemId
+                )
+                  pendingInput.delete(key);
+            }
             if (
               item &&
               typeof item === "object" &&
@@ -425,6 +546,8 @@ export class CodexAdapter implements AgentAdapter {
           }
         }
       } finally {
+        for (const key of pendingInput.keys())
+          if (key.startsWith(`${session.sessionId}:${session.turnId}:`)) pendingInput.delete(key);
         unsubscribe();
       }
     };

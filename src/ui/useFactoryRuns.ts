@@ -248,6 +248,24 @@ export const useFactoryRuns = (demo: boolean) => {
       previous.map((item) => (item.snapshot.id === id ? mergeRunSnapshot(item, run) : item)),
     );
   };
+  const replyToInput = async (
+    id: string,
+    input: {
+      stepId: string;
+      attemptId: string;
+      requestEvidenceId: string;
+      answers: Record<string, { answers: string[] }>;
+    },
+  ) => {
+    const { run } = await api(`/api/runs/${id}/input`, runResponseSchema.parse, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    setRuns((previous) =>
+      previous.map((item) => (item.snapshot.id === id ? mergeRunSnapshot(item, run) : item)),
+    );
+  };
   const accept = async (id: string) => {
     setAccepting(true);
     setNotice("");
@@ -282,6 +300,7 @@ export const useFactoryRuns = (demo: boolean) => {
     cancel,
     retry,
     sendGuidance,
+    replyToInput,
     accept,
     accepting,
     evidenceSummary: evidence?.runId === selectedRunId ? evidence.summary : null,

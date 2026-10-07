@@ -72,6 +72,8 @@ const adapter = {
     streaming: "supported" as const,
     steering: "supported" as const,
     resume: "unknown" as const,
+    pause: "unsupported" as const,
+    waitingInput: "unknown" as const,
   },
   steer: steered,
 };
