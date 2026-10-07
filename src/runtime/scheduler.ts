@@ -363,7 +363,7 @@ export const executeRun = async (
   try {
     return await work;
   } finally {
-    active.delete(key);
+    if (active.get(key)?.work === work) active.delete(key);
   }
 };
 
@@ -379,8 +379,13 @@ export const retryStep = async (
   const retry = `${stepId}:${expectedAttemptId}`;
   const existing = active.get(key);
   if (existing) {
-    if (existing.retry !== retry) throw new Error("Another execution is active for this run.");
-    return existing.work;
+    if (existing.retry === retry) return existing.work;
+    if (existing.retry) throw new Error("Another selected retry is active for this run.");
+    // A failed step is persisted before its original execution has finished cleanup.
+    // Wait for that work to settle before claiming the selected retry.
+    await existing.work.catch(() => undefined);
+    if (active.get(key) === existing) active.delete(key);
+    return retryStep(project, runId, stepId, expectedAttemptId, resolveAdapter);
   }
   const controller = new AbortController();
   const work = executeOnce(project, runId, resolveAdapter, controller.signal, {
@@ -391,7 +396,7 @@ export const retryStep = async (
   try {
     return await work;
   } finally {
-    active.delete(key);
+    if (active.get(key)?.work === work) active.delete(key);
   }
 };
 
