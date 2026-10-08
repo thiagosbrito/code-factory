@@ -50,7 +50,12 @@ import { mutateRun, readRun } from "./storage.js";
 import { acknowledgeGuidance, deliverQueuedGuidance, expireQueuedGuidance } from "./guidance.js";
 import { snapshotFileDiffs } from "./inspection.js";
 import { ProjectError } from "./project.js";
-import { commitStepChanges, createReviewCopy, listUncommittedPaths } from "./run-branch.js";
+import {
+  commitStepChanges,
+  createReviewCopy,
+  listRunChangedFiles,
+  listUncommittedPaths,
+} from "./run-branch.js";
 import { resolveToolGrant } from "./tool-grant.js";
 import {
   currentBranch,
@@ -200,16 +205,60 @@ const writesRunBranch = (record: RunRecord, stepId: string): boolean => {
   );
 };
 
-const stepInputs = (record: RunRecord, stepId: string) => {
+/** Changed-file facts for in-project runs, given to check commands as environment variables. */
+const checkEnvironment = (base: string, files: string[]): NodeJS.ProcessEnv => ({
+  ...process.env,
+  CODE_FACTORY_BASE_REVISION: base,
+  // Newline-separated, so `$CODE_FACTORY_CHANGED_FILES` expands to one argument per file in sh.
+  CODE_FACTORY_CHANGED_FILES: files.join("\n"),
+});
+
+/** The same facts for agent steps, so they can scope their own checks to this run's changes. */
+const changedFilesContext = (base: string, files: string[]): string =>
+  files.length
+    ? `This run started at commit ${base}. Files changed by this run so far (${files.length}):\n${files.slice(0, 200).join("\n")}${files.length > 200 ? `\n… and ${files.length - 200} more (git diff --name-only ${base})` : ""}`
+    : `This run started at commit ${base}. No files have changed in this run yet.`;
+
+/** Every step upstream of `stepId` in the declared dependency graph. */
+const ancestorsOf = (record: RunRecord, stepId: string): Set<string> => {
+  const found = new Set<string>();
+  const pending = [stepId];
+  for (let current = pending.pop(); current !== undefined; current = pending.pop())
+    for (const edge of record.snapshot.loop.dependencies)
+      if (edge.to === current && !found.has(edge.from)) {
+        found.add(edge.from);
+        pending.push(edge.from);
+      }
+  return found;
+};
+
+/**
+ * Inputs are the direct dependencies' results. Reviewers and validation steps judge one
+ * candidate, so they also receive every upstream step that succeeded on that same candidate
+ * (for example a checks step two hops back): a read-only reviewer cannot rerun those itself.
+ */
+const stepInputs = (record: RunRecord, stepId: string, candidateId?: string) => {
+  const succeeded = (id: string) =>
+    record.steps.find((step) => step.stepId === id)?.status === "succeeded";
   const sourceIds = record.snapshot.loop.dependencies
     .filter((edge) => edge.to === stepId)
     .map((edge) => edge.from)
-    .filter((id) => record.steps.find((step) => step.stepId === id)?.status === "succeeded");
+    .filter(succeeded);
   const repeat = record.snapshot.loop.groups.find(
     (group) =>
       group.kind === "repeat" && group.continueWhen.to === stepId && record.implementationRound > 1,
   );
   if (repeat?.kind === "repeat") sourceIds.push(repeat.exitWhen.stepId);
+  const definition = record.snapshot.loop.steps.find((step) => step.id === stepId);
+  const candidate = candidateId ?? record.steps.find((step) => step.stepId === stepId)?.candidateId;
+  if (candidate && (definition?.stage === "review" || definition?.stage === "validation"))
+    for (const id of record.snapshot.loop.steps.map((step) => step.id))
+      if (
+        ancestorsOf(record, stepId).has(id) &&
+        succeeded(id) &&
+        record.steps.find((step) => step.stepId === id)?.candidateId === candidate
+      )
+        sourceIds.push(id);
   const sources = [...new Set(sourceIds)].map((id) => {
     const step = record.steps.find((item) => item.stepId === id);
     const attemptId = step?.attempts.at(-1)?.id;
@@ -243,7 +292,7 @@ const stepInputs = (record: RunRecord, stepId: string) => {
       `Ticket attachments:\n${task.ticket.attachments.map((item) => `${item.title}: ${item.url}`).join("\n")}`,
     task.ticketId && issueContext(record, stepId, task.ticketId),
     writesRunBranch(record, stepId) &&
-      `You are working in a Git worktree on branch ${record.snapshot.baseline.branch ?? ""}. Do not commit; Code Factory commits your changes after this step succeeds.`,
+      `You are working in the project on branch ${record.snapshot.baseline.branch ?? ""}. Do not commit or switch branches; Code Factory commits your changes after this step succeeds.`,
     ...sources.map(
       (source) =>
         `Input from ${source.stepId} (outcome: ${source.outcome ?? "none"}, candidate: ${source.candidateId ?? "none"}):\n${source.output ?? ""}`,
@@ -321,6 +370,7 @@ const checkCommand = async (
   signal: AbortSignal,
   onOutput: (text: string) => Promise<void>,
   timeoutMs = 300_000,
+  env?: NodeJS.ProcessEnv,
 ): Promise<CommandResult> =>
   new Promise((resolveCheck) => {
     if (signal.aborted) return resolveCheck({ status: "canceled" });
@@ -328,6 +378,7 @@ const checkCommand = async (
       cwd,
       stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
+      ...(env ? { env } : {}),
     };
     const child =
       "shell" in invocation
@@ -659,6 +710,9 @@ const executeOnce = async (
       }
       const filesBefore =
         verifiesNoChange && !copyFailure ? (await gitTreeState(workspace)).files : null;
+      const base = record.snapshot.baseline.sourceRevision;
+      const runChanges =
+        isProjectRun && base && !copyFailure ? await listRunChangedFiles(workspace, base) : null;
       const inputs = stepInputs(record, stepId);
       const inspectable =
         commitsRunBranch ||
@@ -709,6 +763,8 @@ const executeOnce = async (
                 appendLocalEvent(current, stepId, attempt.id, "check", "Check output", text),
               );
             },
+            undefined,
+            runChanges && base ? checkEnvironment(base, runChanges) : undefined,
           );
         }
         const checkChanges = filesBefore
@@ -792,6 +848,7 @@ const executeOnce = async (
             instruction: [
               definition.instruction,
               inputs.context,
+              runChanges && base && changedFilesContext(base, runChanges),
               allowedOutcomes &&
                 (definition.stage === "review"
                   ? `Put exactly one verdict on the first line: ${allowedOutcomes.join(", ")}. Add concrete findings on subsequent lines when requesting changes.`
@@ -1105,7 +1162,7 @@ const executeOnce = async (
       prepareStepRetry(current, retry.stepId, retry.expectedAttemptId),
     );
     const candidateId = await fileDigest(workspace, mode);
-    const inputs = stepInputs(record, retry.stepId);
+    const inputs = stepInputs(record, retry.stepId, candidateId);
     const inputHash = hashInputs(candidateId, [inputs.context, JSON.stringify(inputs.identities)]);
     record = await commit((current) => claimStep(current, retry.stepId, candidateId, inputHash));
     await runStep(retry.stepId);
@@ -1142,7 +1199,7 @@ const executeOnce = async (
       : ready;
     const launched: string[] = [];
     for (const definition of selected) {
-      const inputs = stepInputs(record, definition.id);
+      const inputs = stepInputs(record, definition.id, candidateId);
       const inputHash = hashInputs(candidateId, [
         inputs.context,
         JSON.stringify(inputs.identities),

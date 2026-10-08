@@ -99,7 +99,7 @@ export const Factory = ({
         demo={demo}
         onExitDemo={onExitDemo}
       />
-      <main className="w-full flex-1 p-6 md:p-10">
+      <main className="min-w-0 flex-1 p-6 md:p-10">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 ref={headingRef} tabIndex={-1} className="text-3xl font-semibold tracking-tight">

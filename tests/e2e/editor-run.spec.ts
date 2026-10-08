@@ -762,6 +762,15 @@ test("a run changes the project folder itself on a new branch, is promoted, and 
   );
   expect(git("worktree", "list").split("\n")).toHaveLength(1);
   expect(git("status", "--porcelain", "--", ".", ":(exclude).code-factory")).toBe("");
+  // Neither the page nor the graph scrolls sideways: the graph opens fitted to its canvas.
+  const overflow = await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLElement>(".run-graph-canvas");
+    return {
+      page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      graph: canvas ? canvas.scrollWidth - canvas.clientWidth : -1,
+    };
+  });
+  expect(overflow).toEqual({ page: 0, graph: 0 });
   const previous = userBranch.replace("refs/heads/", "");
   await expect(runBranch).toContainText(
     `Your project checkout is on this branch (it was on ${previous}).`,

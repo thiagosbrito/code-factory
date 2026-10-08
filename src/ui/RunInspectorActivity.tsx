@@ -104,12 +104,15 @@ export const RunInspectorActivity = ({
       </div>
       <ol
         ref={scroller}
-        className="min-h-0 flex-1 overflow-y-auto p-4"
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4"
         aria-label="Activity events"
         onScroll={(event) => scrollPositions.current.set(key, event.currentTarget.scrollTop)}
       >
         {events.map((item) => (
-          <li key={item.id} className="border-b py-3 text-sm last:border-b-0">
+          <li
+            key={item.id}
+            className="min-w-0 border-b py-3 text-sm [overflow-wrap:anywhere] last:border-b-0"
+          >
             <div className="flex items-center justify-between gap-2">
               <span className={`run-status run-status-${item.type}`}>{item.type}</span>
               <time className="text-xs text-muted-foreground" dateTime={item.createdAt}>
@@ -118,7 +121,7 @@ export const RunInspectorActivity = ({
             </div>
             {showsTitle(item) && <strong className="mt-1 block">{item.title}</strong>}
             {item.detail && (
-              <p className="mt-1 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+              <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
                 {item.detail}
               </p>
             )}
