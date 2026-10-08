@@ -18,6 +18,8 @@ export type EvidenceSummary = {
   acceptance: "accepted" | "invalidated" | "pending";
   requirements: EvidenceRequirement[];
   findings: string[];
+  /** The same findings grouped by the review that raised them, for display as one text each. */
+  reviews?: { stepId: string; name: string; verdict: string; findings: string[] }[] | undefined;
   gaps: string[];
   files: Extract<Receipt, { kind: "file" }>[];
   artifacts: Extract<Receipt, { kind: "artifact" }>[];
@@ -38,6 +40,16 @@ export const evidenceSummarySchema = z.object({
     }),
   ),
   findings: z.array(z.string()),
+  reviews: z
+    .array(
+      z.object({
+        stepId: z.string(),
+        name: z.string(),
+        verdict: z.string(),
+        findings: z.array(z.string()),
+      }),
+    )
+    .optional(),
   gaps: z.array(z.string()),
   files: z.array(fileChangeSchema),
   artifacts: z.array(artifactSchema),
@@ -123,15 +135,22 @@ export const summarizeEvidence = (run: RunRecord, candidateId: string | null): E
   if (requirements.length === 0) gaps.unshift("Loop has no validation checks or reviews.");
   if (run.status !== "succeeded") gaps.unshift("Run has not succeeded.");
   if (!candidateId) gaps.unshift("Current source candidate is unavailable.");
-  const findings = run.evidence
-    .filter(
-      (item): item is Extract<Receipt, { kind: "review" }> =>
-        item.kind === "review" &&
-        run.steps.some(
-          (step) => step.stepId === item.stepId && step.attempts.at(-1)?.id === item.attemptId,
-        ),
-    )
-    .flatMap((item) => item.findings);
+  const reviewReceipts = run.evidence.filter(
+    (item): item is Extract<Receipt, { kind: "review" }> =>
+      item.kind === "review" &&
+      run.steps.some(
+        (step) => step.stepId === item.stepId && step.attempts.at(-1)?.id === item.attemptId,
+      ),
+  );
+  const findings = reviewReceipts.flatMap((item) => item.findings);
+  const reviews = reviewReceipts
+    .filter((item) => item.findings.length)
+    .map((item) => ({
+      stepId: item.stepId,
+      name: run.snapshot.loop.steps.find((step) => step.id === item.stepId)?.name || item.stepId,
+      verdict: item.verdict,
+      findings: item.findings,
+    }));
   const latest = (item: Extract<Receipt, { kind: "file" | "artifact" }>) =>
     run.steps.some(
       (step) => step.stepId === item.stepId && step.attempts.at(-1)?.id === item.attemptId,
@@ -173,6 +192,7 @@ export const summarizeEvidence = (run: RunRecord, candidateId: string | null): E
     acceptance: accepted ? "accepted" : acceptances.length ? "invalidated" : "pending",
     requirements,
     findings,
+    reviews,
     gaps,
     files,
     artifacts,

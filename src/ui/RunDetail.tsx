@@ -1,10 +1,11 @@
 import { useId, useRef, useState } from "react";
-import { hasRetryBudget, type RunRecord } from "../domain/run.js";
+import { hasRetryBudget, retryBlocker, type RunRecord } from "../domain/run.js";
 import type { EvidenceSummary } from "../domain/acceptance.js";
 import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { BranchIcon, DescriptionIcon, EvidenceIcon, PlayIcon, StopIcon } from "./icons";
+import { BranchIcon, DescriptionIcon, EvidenceIcon, PlayIcon, RetryIcon, StopIcon } from "./icons";
+import { Markdown } from "./Markdown";
 import { RunEvidenceSummary } from "./RunEvidenceSummary";
 import { RunGraph } from "./RunGraph";
 import { RunInspector } from "./RunInspector";
@@ -125,12 +126,27 @@ export const RunDetail = ({
   const connectionRetryAvailable = connectionStep ? hasRetryBudget(run, connectionStep) : false;
   // At most one banner: the tracker-connection banner already explains a failed issue lookup.
   const stopCause = connectionStep ? undefined : runStopCause(run);
+  // The stopped step that can be retried now, offered on its node and in the floating bar.
+  const retryStepId = stopCause?.stepId;
+  const retryAttempt = retryStepId
+    ? run.steps.find((item) => item.stepId === retryStepId)?.attempts.at(-1)
+    : undefined;
+  const retryable = Boolean(
+    retryStepId && retryAttempt && onRetry && !retryBlocker(run, retryStepId),
+  );
+  const retryLabel = `Retry ${stopCause?.name ?? retryStepId ?? ""}`;
+  const retryStopped = () => {
+    if (!retryStepId || !retryAttempt) return;
+    // The banner, button and node state change once the run resumes; keep focus on the title.
+    titleRef.current?.focus();
+    onRetry?.(retryStepId, retryAttempt.id, titleRef.current);
+  };
   const canCancel =
     connected &&
     (executing || ["pending", "running", "waiting-input", "paused"].includes(run.status));
   const runControls = (
     <div className="flex items-center gap-1">
-      {(run.status === "pending" || canCancel) && (
+      {(run.status === "pending" || canCancel || retryable) && (
         <div className="flex items-center gap-1 border-r pr-1">
           {run.status === "pending" && (
             <Button
@@ -143,6 +159,18 @@ export const RunDetail = ({
               onClick={onExecute}
             >
               <PlayIcon />
+            </Button>
+          )}
+          {retryable && (
+            <Button
+              size="sm"
+              aria-label={retryLabel}
+              title={retryLabel}
+              className="h-9 w-9 p-0"
+              disabled={!connected || executing}
+              onClick={retryStopped}
+            >
+              <RetryIcon />
             </Button>
           )}
           {canCancel && (
@@ -325,6 +353,16 @@ export const RunDetail = ({
       <RunInputPrompt run={run} agents={agents} connected={connected} onReply={onReplyToInput} />
       <RunGraph
         overlay={runControls}
+        retry={
+          retryable && retryStepId
+            ? {
+                stepId: retryStepId,
+                label: retryLabel,
+                disabled: !connected || executing,
+                onRetry: retryStopped,
+              }
+            : null
+        }
         run={run}
         selectedStepId={scope?.kind === "step" ? scope.stepId : null}
         onSelect={(stepId) => {
@@ -349,14 +387,10 @@ export const RunDetail = ({
                 : "Description-only run"}
           </DialogDescription>
           {run.snapshot.task.ticket?.summary && (
-            <p className="mt-4 whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
-              {run.snapshot.task.ticket.summary}
-            </p>
+            <Markdown className="mt-4">{run.snapshot.task.ticket.summary}</Markdown>
           )}
           {run.snapshot.task.description && (
-            <p className="mt-4 whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
-              {run.snapshot.task.description}
-            </p>
+            <Markdown className="mt-4">{run.snapshot.task.description}</Markdown>
           )}
         </DialogContent>
       </Dialog>

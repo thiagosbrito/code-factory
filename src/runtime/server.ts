@@ -8,7 +8,13 @@ import { ConnectionRegistry, connectionRequestSchema } from "./connections.js";
 import { listLoops, readDraft, readPublishedVersion, saveDraft, publishDraft } from "./storage.js";
 import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
-import { cancelRun, executeRun, retryStep, withIdleRunSlot } from "./scheduler.js";
+import {
+  agentNotConnected,
+  cancelRun,
+  executeRun,
+  retryStep,
+  withIdleRunSlot,
+} from "./scheduler.js";
 import { fileDigest, resolveRunWorkspace } from "./workspace.js";
 import {
   assertProjectRunCanWrite,
@@ -168,6 +174,19 @@ export const startLocalServer = async (options: {
     (process.env.CODE_FACTORY_LINEAR_API_KEY
       ? linearTracker(process.env.CODE_FACTORY_LINEAR_API_KEY)
       : undefined);
+  /**
+   * The first agent provider that unfinished agent steps need but this runtime session has not
+   * connected; checked before execute and retry so a run never starts work it cannot do.
+   */
+  const disconnectedProvider = (run: RunRecord): string | undefined =>
+    run.snapshot.loop.steps
+      .filter(
+        (step) =>
+          step.kind === "agent" &&
+          run.steps.find((item) => item.stepId === step.id)?.status !== "succeeded",
+      )
+      .map((step) => run.snapshot.bindings[step.id]?.provider)
+      .find((provider) => provider !== undefined && !connections.adapter(provider));
   const server = createServer((request, response) => {
     void (async () => {
       const address = server.address();
@@ -384,6 +403,8 @@ export const startLocalServer = async (options: {
         if (!run) return json(response, 404, { error: "Run not found." });
         if (run.status !== "pending" && run.status !== "running")
           return json(response, 409, { error: "Run cannot be started from its current state." });
+        const missing = disconnectedProvider(run);
+        if (missing) return json(response, 409, { error: agentNotConnected(missing) });
         try {
           await assertProjectRunCanWrite(projectDirectory, run, {
             fresh: run.status === "pending" && !run.steps.some((step) => step.attempts.length),
@@ -426,6 +447,8 @@ export const startLocalServer = async (options: {
         )
           return json(response, 200, { run });
         try {
+          const missing = disconnectedProvider(run);
+          if (missing) throw new Error(agentNotConnected(missing));
           prepareStepRetry(run, stepId, attemptId);
           await resolveRunWorkspace(projectDirectory, run, { legacy: "prefix" });
           await assertProjectRunCanWrite(projectDirectory, run, { fresh: false });

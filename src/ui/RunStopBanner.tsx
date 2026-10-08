@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { retryBlocker, type RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
+import { Markdown } from "./Markdown";
 import type { RunStopCause } from "./run-view-model";
 
 const heading = (cause: RunStopCause): string =>
@@ -37,17 +38,20 @@ export const RunStopBanner = ({
   return (
     <section
       aria-labelledby={headingId}
-      className="rounded-lg border border-amber-300 bg-amber-50 p-5"
+      className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3"
     >
-      <h3 id={headingId} className="font-semibold">
-        {heading(cause)}
-      </h3>
-      {cause.summary && <p className="mt-1 whitespace-pre-wrap text-sm">{cause.summary}</p>}
-      {cause.kind === "setup" && (
-        <p className="mt-2 text-sm">Fix the setup command in Setup, then start a new run.</p>
-      )}
+      {/* Compact so the canvas stays in view; the full detail is one click away in the step. */}
+      <div className="min-w-0 flex-1">
+        <h3 id={headingId} className="font-semibold">
+          {heading(cause)}
+        </h3>
+        {cause.summary && <Markdown className="mt-1 line-clamp-3">{cause.summary}</Markdown>}
+        {cause.kind === "setup" && (
+          <p className="mt-1 text-sm">Fix the setup command in Setup, then start a new run.</p>
+        )}
+      </div>
       {stepId && (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           {retryable && (
             <Button
               disabled={!connected || executing}

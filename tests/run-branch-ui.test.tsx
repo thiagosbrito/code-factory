@@ -463,6 +463,24 @@ describe("stopped runs", () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
+  it("offers Retry on the stopped step's node and in the floating bar over the canvas", async () => {
+    const run = blockedRun();
+    const onRetry = vi.fn<Retry>();
+    detail(run, onRetry);
+    const attemptId = run.steps.find((item) => item.stepId === "quality")?.attempts.at(-1)?.id;
+    const graph = screen.getByRole("region", { name: "Execution graph" });
+    const retries = within(graph).getAllByRole("button", { name: "Retry Test quality" });
+    // One pinned to the node's corner, one in the floating bar.
+    expect(retries).toHaveLength(2);
+    for (const button of retries) await userEvent.setup().click(button);
+    expect(onRetry).toHaveBeenCalledTimes(2);
+    expect(onRetry).toHaveBeenLastCalledWith(
+      "quality",
+      attemptId,
+      screen.getByRole("heading", { level: 2 }),
+    );
+  });
+
   it("renders Not reached for pending steps, names the blocking review, and offers Retry", async () => {
     const run = blockedRun();
     expect(run.status).toBe("blocked");
