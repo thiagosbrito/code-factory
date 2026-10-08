@@ -3,6 +3,9 @@ import { hasRetryBudget, type RunRecord } from "../domain/run.js";
 import type { EvidenceSummary } from "../domain/acceptance.js";
 import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { BranchIcon, DescriptionIcon, EvidenceIcon, PlayIcon, StopIcon } from "./icons";
+import { RunEvidenceSummary } from "./RunEvidenceSummary";
 import { RunGraph } from "./RunGraph";
 import { RunInspector } from "./RunInspector";
 import { RunInputPrompt } from "./RunInputPrompt";
@@ -17,6 +20,13 @@ import {
   trackerConnectionStep,
   type RunScope,
 } from "./run-view-model";
+
+type RunPanel = "description" | "branch" | "evidence";
+const RUN_PANELS: { id: RunPanel; label: string; icon: React.ReactNode }[] = [
+  { id: "description", label: "Description", icon: <DescriptionIcon /> },
+  { id: "branch", label: "Run branch", icon: <BranchIcon /> },
+  { id: "evidence", label: "Final evidence summary", icon: <EvidenceIcon /> },
+];
 
 export const RunDetail = ({
   run,
@@ -66,8 +76,16 @@ export const RunDetail = ({
   const [initialTab, setInitialTab] = useState<"Activity" | "Files" | "Artifacts">("Activity");
   const trigger = useRef<HTMLElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
-  const open = (next: RunScope, tab: "Activity" | "Files" | "Artifacts" = "Activity") => {
-    trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const [panel, setPanel] = useState<RunPanel | null>(null);
+  const panelTriggers = useRef<Partial<Record<RunPanel, HTMLButtonElement | null>>>({});
+  const open = (
+    next: RunScope,
+    tab: "Activity" | "Files" | "Artifacts" = "Activity",
+    returnTo: HTMLElement | null = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  ) => {
+    trigger.current = returnTo;
     setInitialTab(tab);
     setScope(next);
   };
@@ -77,9 +95,20 @@ export const RunDetail = ({
   };
   const active = run.steps.filter((step) => step.status === "running").length;
   const complete = run.steps.filter((step) => step.status === "succeeded").length;
-  const files = summary?.files.length ?? 0;
-  const artifacts = summary?.artifacts.length ?? 0;
-  const checks = summary?.requirements.filter((item) => item.state === "met").length ?? 0;
+  /** From the evidence dialog: close it, then open the run inspector, returning focus to its icon. */
+  const handingOff = useRef(false);
+  /** Closing a detail dialog returns focus to its icon, unless it handed off to the inspector. */
+  const returnFocus = (id: RunPanel) => (event: Event) => {
+    event.preventDefault();
+    if (handingOff.current) handingOff.current = false;
+    else panelTriggers.current[id]?.focus();
+  };
+  const openFromEvidence = (tab: "Files" | "Artifacts") => {
+    handingOff.current = true;
+    setPanel(null);
+    open({ kind: "run" }, tab, panelTriggers.current.evidence ?? null);
+  };
+  const acceptable = summary?.validation === "passed" && summary.acceptance !== "accepted";
   const connectionHeadingId = useId();
   // Computed once per render and shared by the status label and the banner.
   const connectionStep = trackerConnectionStep(run);
@@ -96,43 +125,99 @@ export const RunDetail = ({
   const connectionRetryAvailable = connectionStep ? hasRetryBudget(run, connectionStep) : false;
   // At most one banner: the tracker-connection banner already explains a failed issue lookup.
   const stopCause = connectionStep ? undefined : runStopCause(run);
+  const canCancel =
+    connected &&
+    (executing || ["pending", "running", "waiting-input", "paused"].includes(run.status));
+  const runControls = (
+    <div className="flex items-center gap-1">
+      {(run.status === "pending" || canCancel) && (
+        <div className="flex items-center gap-1 border-r pr-1">
+          {run.status === "pending" && (
+            <Button
+              size="sm"
+              aria-label="Execute run"
+              title={executing ? "Executing…" : "Execute run"}
+              aria-busy={executing || undefined}
+              className="h-9 w-9 p-0"
+              disabled={executing || !connected}
+              onClick={onExecute}
+            >
+              <PlayIcon />
+            </Button>
+          )}
+          {canCancel && (
+            <Button
+              size="sm"
+              variant="outline"
+              aria-label="Cancel run"
+              title="Cancel run"
+              className="h-9 w-9 p-0 text-red-700"
+              onClick={onCancel}
+            >
+              <StopIcon />
+            </Button>
+          )}
+        </div>
+      )}
+      <nav aria-label="Run details" className="flex items-center gap-1">
+        {RUN_PANELS.filter((item) => item.id !== "branch" || workspace).map((item) => (
+          <Button
+            key={item.id}
+            ref={(element) => {
+              panelTriggers.current[item.id] = element;
+            }}
+            variant="ghost"
+            size="sm"
+            aria-label={item.label}
+            title={item.label}
+            className="relative h-9 w-9 p-0"
+            onClick={() => setPanel(item.id)}
+          >
+            {item.icon}
+            {item.id === "evidence" && (acceptable || summary?.acceptance === "accepted") && (
+              <span
+                aria-hidden="true"
+                className={`absolute right-1 top-1 h-2 w-2 rounded-full ${acceptable ? "bg-amber-500" : "bg-emerald-600"}`}
+              />
+            )}
+          </Button>
+        ))}
+      </nav>
+    </div>
+  );
   return (
     <div className="mt-7 space-y-5">
-      <Button variant="outline" size="sm" onClick={onBack}>
-        ← All runs
-      </Button>
-      <header className="rounded-lg border bg-white p-5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary">
-          {run.snapshot.task.ticket?.id ?? run.snapshot.task.ticketId ?? "Description only"} · Run{" "}
-          {run.snapshot.id}
-        </p>
-        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 ref={titleRef} tabIndex={-1} className="text-2xl font-semibold">
+      <header className="sticky top-0 z-20 -mx-2 rounded-lg border bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" onClick={onBack}>
+            ← All runs
+          </Button>
+          <div className="min-w-0 flex-1">
+            <h2
+              ref={titleRef}
+              tabIndex={-1}
+              className="truncate text-lg font-semibold"
+              title={runTitle(run)}
+            >
               {runTitle(run)}
             </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {run.snapshot.loop.name} v{run.snapshot.loop.version} · round{" "}
-              {run.implementationRound}
+            <p className="truncate text-xs text-muted-foreground">
+              <span className="font-semibold uppercase tracking-wide text-primary">
+                {run.snapshot.task.ticket?.id ?? run.snapshot.task.ticketId ?? "Description only"}
+              </span>{" "}
+              · {run.snapshot.loop.name} v{run.snapshot.loop.version} · round{" "}
+              {run.implementationRound} · Run {run.snapshot.id}
             </p>
           </div>
-          <div className="flex gap-2">
-            {run.status === "pending" && (
-              <Button disabled={executing || !connected} onClick={onExecute}>
-                {executing ? "Executing…" : "Execute run"}
+          <div className="flex flex-wrap items-center gap-2">
+            {acceptable && (
+              <Button disabled={!connected || accepting} onClick={onAccept}>
+                {accepting ? "Recording acceptance…" : "Accept evidence"}
               </Button>
             )}
-            {(executing ||
-              ["pending", "running", "waiting-input", "paused"].includes(run.status)) &&
-              connected && (
-                <Button variant="outline" onClick={onCancel}>
-                  Cancel run
-                </Button>
-              )}
           </div>
         </div>
-        <p className="mt-3 whitespace-pre-wrap text-sm">{run.snapshot.task.description}</p>
-        <div className="mt-4 flex flex-wrap gap-3 text-xs">
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
           <span className={`run-status run-status-${run.status}`}>
             {runStatusLabel(run, connectionStep)}
           </span>
@@ -140,6 +225,14 @@ export const RunDetail = ({
           <span>
             {complete} of {run.steps.length} complete
           </span>
+          <span>
+            Local validation:{" "}
+            <strong>{summary?.validation === "passed" ? "Passed" : "Incomplete"}</strong>
+            {" · "}Human acceptance: <strong>{summary?.acceptance ?? "Pending"}</strong>
+          </span>
+          {workspace?.branch && (
+            <span className="font-mono text-muted-foreground">{workspace.branch}</span>
+          )}
           <span
             className={connected && streamConnected !== false ? "text-emerald-700" : "text-red-700"}
           >
@@ -229,121 +322,9 @@ export const RunDetail = ({
           }}
         />
       )}
-      {workspace && (
-        <RunWorkspacePanel
-          workspace={workspace}
-          summary={summary}
-          connected={connected}
-          busy={executing}
-          onPromote={onPromote}
-          onRemove={onRemoveWorktree}
-          onReturn={onReturnCheckout}
-        />
-      )}
       <RunInputPrompt run={run} agents={agents} connected={connected} onReply={onReplyToInput} />
-      <section className="grid gap-2 sm:grid-cols-4" aria-label="Run summary">
-        <Button
-          variant="outline"
-          className="h-auto justify-between bg-white p-4"
-          onClick={() => open({ kind: "run" }, "Files")}
-        >
-          Changed files <strong>{files}</strong>
-        </Button>
-        <Button
-          variant="outline"
-          className="h-auto justify-between bg-white p-4"
-          onClick={() => open({ kind: "run" }, "Artifacts")}
-        >
-          Artifacts <strong>{artifacts}</strong>
-        </Button>
-        <div className="rounded-md border bg-white p-4 text-sm">
-          Requirements met <strong className="float-right">{checks}</strong>
-        </div>
-        <div className="rounded-md border bg-white p-4 text-sm">
-          Loop progress{" "}
-          <strong className="float-right">
-            {complete}/{run.steps.length}
-          </strong>
-        </div>
-      </section>
-      <section className="rounded-lg border bg-white p-5" aria-label="Final evidence summary">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="font-semibold">Final evidence summary</h3>
-            <p className="mt-1 text-sm">
-              Local validation:{" "}
-              <strong>{summary?.validation === "passed" ? "Passed" : "Incomplete"}</strong>
-              {" · "}Human acceptance: <strong>{summary?.acceptance ?? "Pending"}</strong>
-            </p>
-          </div>
-          {summary?.validation === "passed" && summary.acceptance !== "accepted" && (
-            <Button disabled={!connected || accepting} onClick={onAccept}>
-              {accepting ? "Recording acceptance…" : "Accept evidence"}
-            </Button>
-          )}
-        </div>
-        {summary?.acceptedAt && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Accepted {new Date(summary.acceptedAt).toLocaleString()}
-          </p>
-        )}
-        {summary?.acceptance === "invalidated" && (
-          <p className="mt-2 text-sm text-amber-800">
-            Earlier acceptance remains in the evidence history. Current inputs require fresh
-            validation and acceptance.
-          </p>
-        )}
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <div>
-            <h4 className="text-sm font-medium">Requirements</h4>
-            <ul className="mt-2 space-y-1 text-sm">
-              {summary?.requirements.map((item) => (
-                <li key={item.stepId}>
-                  <strong>{item.name}</strong>:{" "}
-                  {item.state === "met"
-                    ? "Met"
-                    : item.state === "not-required"
-                      ? "Not required"
-                      : item.reason}
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <h4 className="text-sm font-medium">Validation gaps</h4>
-            {summary?.gaps.length ? (
-              <ul className="mt-2 list-inside list-disc space-y-1 text-sm">
-                {summary.gaps.map((gap) => (
-                  <li key={gap}>{gap}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-sm text-muted-foreground">None</p>
-            )}
-          </div>
-          <div>
-            <h4 className="text-sm font-medium">Review findings</h4>
-            {summary?.findings.length ? (
-              <ul className="mt-2 list-inside list-disc space-y-1 text-sm">
-                {summary.findings.map((finding, index) => (
-                  <li key={index}>{finding}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-sm text-muted-foreground">None</p>
-            )}
-          </div>
-          <div className="flex flex-wrap items-start gap-2">
-            <Button variant="outline" size="sm" onClick={() => open({ kind: "run" }, "Files")}>
-              Changed files ({files})
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => open({ kind: "run" }, "Artifacts")}>
-              Artifacts ({artifacts})
-            </Button>
-          </div>
-        </div>
-      </section>
       <RunGraph
+        overlay={runControls}
         run={run}
         selectedStepId={scope?.kind === "step" ? scope.stepId : null}
         onSelect={(stepId) => {
@@ -357,6 +338,76 @@ export const RunDetail = ({
           Inspect run evidence
         </Button>
       </div>
+      <Dialog open={panel === "description"} onOpenChange={(next) => !next && setPanel(null)}>
+        <DialogContent onCloseAutoFocus={returnFocus("description")}>
+          <DialogTitle className="text-xl font-semibold">Description</DialogTitle>
+          <DialogDescription className="mt-1 text-sm text-muted-foreground">
+            {run.snapshot.task.ticket
+              ? `${run.snapshot.task.ticket.id} · ${run.snapshot.task.ticket.title}`
+              : run.snapshot.task.ticketId
+                ? `Ticket ${run.snapshot.task.ticketId}, read by the agent through its tracker MCP`
+                : "Description-only run"}
+          </DialogDescription>
+          {run.snapshot.task.ticket?.summary && (
+            <p className="mt-4 whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
+              {run.snapshot.task.ticket.summary}
+            </p>
+          )}
+          {run.snapshot.task.description && (
+            <p className="mt-4 whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
+              {run.snapshot.task.description}
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
+      {workspace && (
+        <Dialog open={panel === "branch"} onOpenChange={(next) => !next && setPanel(null)}>
+          <DialogContent className="w-[min(95vw,820px)]" onCloseAutoFocus={returnFocus("branch")}>
+            <DialogTitle className="sr-only">Run branch</DialogTitle>
+            <DialogDescription className="sr-only">
+              Branch, project checkout, commits and branch actions for this run.
+            </DialogDescription>
+            <RunWorkspacePanel
+              bare
+              workspace={workspace}
+              summary={summary}
+              connected={connected}
+              busy={executing}
+              onPromote={onPromote}
+              onRemove={onRemoveWorktree}
+              onReturn={onReturnCheckout}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+      <Dialog open={panel === "evidence"} onOpenChange={(next) => !next && setPanel(null)}>
+        <DialogContent className="w-[min(95vw,960px)]" onCloseAutoFocus={returnFocus("evidence")}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <DialogTitle className="text-xl font-semibold">Final evidence summary</DialogTitle>
+              <DialogDescription className="mt-1 text-sm">
+                Local validation:{" "}
+                <strong>{summary?.validation === "passed" ? "Passed" : "Incomplete"}</strong>
+                {" · "}Human acceptance: <strong>{summary?.acceptance ?? "Pending"}</strong>
+              </DialogDescription>
+            </div>
+            {acceptable && (
+              <Button disabled={!connected || accepting} onClick={onAccept}>
+                {accepting ? "Recording acceptance…" : "Accept evidence"}
+              </Button>
+            )}
+          </div>
+          <div className="mt-5">
+            <RunEvidenceSummary
+              summary={summary}
+              complete={complete}
+              total={run.steps.length}
+              onOpenFiles={() => openFromEvidence("Files")}
+              onOpenArtifacts={() => openFromEvidence("Artifacts")}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
       {scope && (
         <RunInspector
           run={run}

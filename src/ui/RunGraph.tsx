@@ -35,10 +35,13 @@ export const RunGraph = ({
   run,
   selectedStepId,
   onSelect,
+  overlay,
 }: {
   run: RunRecord;
   selectedStepId: string | null;
   onSelect: (id: string) => void;
+  /** Floating controls over the canvas's top-right corner; they never scroll with the graph. */
+  overlay?: React.ReactNode;
 }) => {
   // "fit" follows the canvas width, so the whole graph shows without scrolling until the user
   // zooms by hand; the buttons switch to a fixed zoom and "Fit view" returns to following.
@@ -107,117 +110,128 @@ export const RunGraph = ({
           </Button>
         </div>
       </div>
-      <section
-        ref={canvasRef}
-        className="run-graph-canvas mt-3 overflow-auto rounded-lg border"
-        aria-label="Step graph"
-      >
-        <div className="relative" style={{ width: width * zoom, height: height * zoom }}>
+      <div className="relative mt-3">
+        {overlay && (
+          <div className="absolute right-3 top-3 z-10 rounded-lg border bg-white/95 p-1 shadow-sm backdrop-blur">
+            {overlay}
+          </div>
+        )}
+        <section
+          ref={canvasRef}
+          className="run-graph-canvas overflow-auto rounded-lg border"
+          aria-label="Step graph"
+        >
+          {/* An empty band above the graph keeps the floating controls off the nodes. */}
           <div
-            className="absolute left-0 top-0 origin-top-left"
-            style={{ width, height, transform: `scale(${zoom})` }}
+            className="relative"
+            style={{ width: width * zoom, height: height * zoom, marginTop: overlay ? 56 : 0 }}
           >
-            {run.snapshot.loop.groups.map((group) => {
-              const points = group.stepIds
-                .map((id) => layout.get(id))
-                .filter((point): point is Point => Boolean(point));
-              if (!points.length) return null;
-              const left = Math.min(...points.map((point) => point.x)) - 18;
-              const top = Math.min(...points.map((point) => point.y)) - 34;
-              const right = Math.max(...points.map((point) => point.x)) + nodeWidth + 18;
-              const bottom = Math.max(...points.map((point) => point.y)) + nodeHeight + 18;
-              return (
-                <div
-                  key={group.id}
-                  className="absolute rounded-xl border border-dashed border-primary/40 bg-primary/5"
-                  style={{ left, top, width: right - left, height: bottom - top }}
-                >
-                  <span className="absolute -top-5 left-2 text-xs font-semibold text-primary">
-                    {group.name} · {group.kind}
-                  </span>
-                </div>
-              );
-            })}
-            <svg
-              className="pointer-events-none absolute inset-0"
-              width={width}
-              height={height}
-              aria-hidden="true"
+            <div
+              className="absolute left-0 top-0 origin-top-left"
+              style={{ width, height, transform: `scale(${zoom})` }}
             >
-              <defs>
-                <marker
-                  id="run-graph-arrow"
-                  markerWidth="8"
-                  markerHeight="8"
-                  refX="7"
-                  refY="4"
-                  orient="auto"
-                >
-                  <path d="M0 0 L8 4 L0 8" fill="none" stroke="#8b9690" />
-                </marker>
-              </defs>
-              {run.snapshot.loop.dependencies.map((edge) => {
-                const from = layout.get(edge.from);
-                const to = layout.get(edge.to);
-                if (!from || !to) return null;
-                const x1 = from.x + nodeWidth;
-                const y1 = from.y + nodeHeight / 2;
-                const x2 = to.x;
-                const y2 = to.y + nodeHeight / 2;
+              {run.snapshot.loop.groups.map((group) => {
+                const points = group.stepIds
+                  .map((id) => layout.get(id))
+                  .filter((point): point is Point => Boolean(point));
+                if (!points.length) return null;
+                const left = Math.min(...points.map((point) => point.x)) - 18;
+                const top = Math.min(...points.map((point) => point.y)) - 34;
+                const right = Math.max(...points.map((point) => point.x)) + nodeWidth + 18;
+                const bottom = Math.max(...points.map((point) => point.y)) + nodeHeight + 18;
                 return (
-                  <path
-                    key={`${edge.from}:${edge.to}`}
-                    d={`M${x1} ${y1} C${x1 + 40} ${y1},${x2 - 40} ${y2},${x2 - 8} ${y2}`}
-                    fill="none"
-                    stroke="#8b9690"
-                    strokeWidth="1.5"
-                    markerEnd="url(#run-graph-arrow)"
-                  />
+                  <div
+                    key={group.id}
+                    className="absolute rounded-xl border border-dashed border-primary/40 bg-primary/5"
+                    style={{ left, top, width: right - left, height: bottom - top }}
+                  >
+                    <span className="absolute -top-5 left-2 text-xs font-semibold text-primary">
+                      {group.name} · {group.kind}
+                    </span>
+                  </div>
                 );
               })}
-            </svg>
-            {run.snapshot.loop.steps.map((definition) => {
-              const point = layout.get(definition.id);
-              const step = run.steps.find((item) => item.stepId === definition.id);
-              if (!point) return null;
-              const status = step?.status ?? "pending";
-              const shown = stepDisplayStatus(run, step);
-              return (
-                <button
-                  key={definition.id}
-                  id={`run-node-${definition.id}`}
-                  type="button"
-                  style={{ left: point.x, top: point.y, width: nodeWidth, minHeight: nodeHeight }}
-                  className={`run-graph-node run-graph-node-${status} absolute rounded-lg border bg-white p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
-                  aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts`}
-                  aria-pressed={selectedStepId === definition.id}
-                  onClick={() => onSelect(definition.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-                      event.preventDefault();
-                      moveSelection(definition.id, 1);
-                    }
-                    if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-                      event.preventDefault();
-                      moveSelection(definition.id, -1);
-                    }
-                  }}
-                >
-                  <span
-                    className={`run-status ${shown === NOT_REACHED ? "run-status-not-reached" : `run-status-${status}`}`}
+              <svg
+                className="pointer-events-none absolute inset-0"
+                width={width}
+                height={height}
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker
+                    id="run-graph-arrow"
+                    markerWidth="8"
+                    markerHeight="8"
+                    refX="7"
+                    refY="4"
+                    orient="auto"
                   >
-                    {shown}
-                  </span>
-                  <strong className="mt-2 block text-sm">{definition.name}</strong>
-                  <span className="block text-xs text-muted-foreground">
-                    {definition.role} · {step?.attempts.length ?? 0} attempts
-                  </span>
-                </button>
-              );
-            })}
+                    <path d="M0 0 L8 4 L0 8" fill="none" stroke="#8b9690" />
+                  </marker>
+                </defs>
+                {run.snapshot.loop.dependencies.map((edge) => {
+                  const from = layout.get(edge.from);
+                  const to = layout.get(edge.to);
+                  if (!from || !to) return null;
+                  const x1 = from.x + nodeWidth;
+                  const y1 = from.y + nodeHeight / 2;
+                  const x2 = to.x;
+                  const y2 = to.y + nodeHeight / 2;
+                  return (
+                    <path
+                      key={`${edge.from}:${edge.to}`}
+                      d={`M${x1} ${y1} C${x1 + 40} ${y1},${x2 - 40} ${y2},${x2 - 8} ${y2}`}
+                      fill="none"
+                      stroke="#8b9690"
+                      strokeWidth="1.5"
+                      markerEnd="url(#run-graph-arrow)"
+                    />
+                  );
+                })}
+              </svg>
+              {run.snapshot.loop.steps.map((definition) => {
+                const point = layout.get(definition.id);
+                const step = run.steps.find((item) => item.stepId === definition.id);
+                if (!point) return null;
+                const status = step?.status ?? "pending";
+                const shown = stepDisplayStatus(run, step);
+                return (
+                  <button
+                    key={definition.id}
+                    id={`run-node-${definition.id}`}
+                    type="button"
+                    style={{ left: point.x, top: point.y, width: nodeWidth, minHeight: nodeHeight }}
+                    className={`run-graph-node run-graph-node-${status} absolute rounded-lg border bg-white p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
+                    aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts`}
+                    aria-pressed={selectedStepId === definition.id}
+                    onClick={() => onSelect(definition.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                        event.preventDefault();
+                        moveSelection(definition.id, 1);
+                      }
+                      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                        event.preventDefault();
+                        moveSelection(definition.id, -1);
+                      }
+                    }}
+                  >
+                    <span
+                      className={`run-status ${shown === NOT_REACHED ? "run-status-not-reached" : `run-status-${status}`}`}
+                    >
+                      {shown}
+                    </span>
+                    <strong className="mt-2 block text-sm">{definition.name}</strong>
+                    <span className="block text-xs text-muted-foreground">
+                      {definition.role} · {step?.attempts.length ?? 0} attempts
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
       <p className="mt-2 text-xs text-muted-foreground">
         Use arrow keys to move between nodes. Enter opens the selected step.
       </p>
