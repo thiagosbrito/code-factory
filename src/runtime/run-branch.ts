@@ -1,26 +1,32 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { copyFile, cp, lstat, mkdir, readdir, realpath, rm, rmdir } from "node:fs/promises";
+import { copyFile, cp, lstat, realpath, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Baseline, RunRecord } from "../domain/run.js";
 import { runRecordSchema } from "../domain/run.js";
 import { summarizeEvidence } from "../domain/acceptance.js";
 import {
   appendRunEvent,
-  baselineCommitMessage,
   defaultTicketBranch,
+  isProjectRun,
+  PROJECT_DIRTY,
+  PROJECT_WORKSPACE,
+  READ_ONLY_LEFTOVERS,
+  READ_ONLY_VIOLATION,
   promoteInputSchema,
   promotionBlocker,
   REMOVAL_DIRTY,
-  RUN_BRANCH_PREFIX,
-  shortRunBranch,
+  RETURN_DIRTY,
   stepCommitMessage,
+  type ProjectCheckout,
   type RunWorkspace,
 } from "../domain/run-branch.js";
+import { createKeyedLock } from "./keyed-lock.js";
 import { ProjectError } from "./project.js";
-import { mutateRun, readRun } from "./storage.js";
+import { listRuns, mutateRun, readRun } from "./storage.js";
 import {
+  currentBranch,
   fileDigest,
   gitCommonDir,
   resolveRunWorkspace,
@@ -96,25 +102,9 @@ const tail = (result: GitResult, limit = OUTPUT_LIMIT): string => {
 const isCode = (error: unknown, code: string): boolean =>
   error instanceof Error && "code" in error && error.code === code;
 
-/** Serialize worktree and ref writes per repository against Git's shared locks. */
-const repoLocks = new Map<string, Promise<unknown>>();
-const withLock = async <T>(
-  locks: Map<string, Promise<unknown>>,
-  key: string,
-  work: () => Promise<T>,
-): Promise<T> => {
-  const prior = locks.get(key) ?? Promise.resolve();
-  const next = prior.catch(() => undefined).then(work);
-  locks.set(key, next);
-  try {
-    return await next;
-  } finally {
-    if (locks.get(key) === next) locks.delete(key);
-  }
-};
-const withRepoLock = <T>(project: string, work: () => Promise<T>) =>
-  withLock(repoLocks, project, work);
-const promotionLocks = new Map<string, Promise<unknown>>();
+/** Serialize checkout, worktree and ref writes per repository against Git's shared locks. */
+const withRepoLock = createKeyedLock();
+const withPromotionLock = createKeyedLock();
 
 /**
  * Every read-only status probe passes this global option. Without it `git status` refreshes the
@@ -175,195 +165,273 @@ export const listUncommittedPaths = async (worktree: string): Promise<string[]> 
     .filter((entry) => entry && !entry.startsWith("??"))
     .map((entry) => entry.slice(3));
 
-const rejectEscapingLinks = async (workspace: string): Promise<void> => {
-  const root = await realpath(workspace);
-  const inspect = async (directory: string): Promise<void> => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (directory === workspace && entry.name === ".git") continue;
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) await inspect(path);
-      if (entry.isSymbolicLink()) {
-        const target = await realpath(path).catch(() => null);
-        if (!target || !target.startsWith(`${root}${sep}`))
-          throw new Error(
-            `Workspace link escapes the isolated project: ${relative(workspace, path)}`,
-          );
-      }
-    }
-  };
-  await inspect(workspace);
-};
-
-/** Copy staged, unstaged and untracked paths and apply deletions, excluding `.code-factory`. */
-const overlayUncommittedWork = async (
-  project: string,
-  workspace: string,
-): Promise<{ changed: string[]; deleted: string[] }> => {
-  const modified = await git(project, "ls-files", "-m", "-o", "--exclude-standard", "-z");
-  const staged = await git(project, "diff", "--cached", "--name-only", "--no-renames", "-z");
-  const changed = [
-    ...new Set(
-      `${modified}${staged}`
-        .split("\0")
-        .filter(Boolean)
-        .filter((path) => path !== ".code-factory" && !path.startsWith(".code-factory/")),
-    ),
-  ];
-  const deleted: string[] = [];
-  for (const path of changed) {
-    const source = join(project, path);
-    const destination = join(workspace, path);
-    const info = await lstat(source).catch((error: unknown) => {
-      if (isCode(error, "ENOENT")) return null;
-      throw error;
-    });
-    if (!info) {
-      deleted.push(path);
-      continue;
-    }
-    if (!info.isFile() && !info.isSymbolicLink())
-      throw new Error(`Unsupported changed file: ${path}`);
-    await mkdir(dirname(destination), { recursive: true });
-    await cp(source, destination, { force: true });
-  }
-  for (const path of deleted) await rm(join(workspace, path), { force: true });
-  return { changed: changed.filter((path) => !deleted.includes(path)), deleted };
-};
-
-/** Thrown when another call already claimed this run's worktree path (duplicate requestId). */
-export class WorktreeExistsError extends Error {
-  constructor(path: string) {
-    super(`Run worktree already exists at ${path}.`);
-  }
-}
-
 const branchExists = async (project: string, branch: string): Promise<boolean> =>
   (await runGit(project, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])).code === 0;
 
-const removeWorktreeForcefully = async (project: string, path: string): Promise<void> => {
-  await withRepoLock(project, async () => {
-    const removed = await runGit(project, ["worktree", "remove", "--force", path]);
-    if (removed.code !== 0) await rm(path, { recursive: true, force: true });
-    await runGit(project, ["worktree", "prune"]);
+const validBranchName = async (project: string, name: string): Promise<boolean> => {
+  const result = await runGit(project, ["check-ref-format", "--branch", name]);
+  return result.code === 0 && result.stdout.trim() === name;
+};
+
+/** First free `<name>-<n>` so a refusal can offer a name instead of overwriting a branch. */
+const suggestBranchName = async (project: string, name: string): Promise<string | undefined> => {
+  for (let index = 2; index <= 20; index += 1) {
+    const candidate = `${name}-${index}`;
+    if ((await validBranchName(project, candidate)) && !(await branchExists(project, candidate)))
+      return candidate;
+  }
+  return undefined;
+};
+
+export class BranchNameError extends ProjectError {
+  constructor(
+    message: string,
+    status: number,
+    readonly suggestedName?: string,
+  ) {
+    super(message, status);
+  }
+}
+
+/** Git state files that mean a merge, rebase, cherry-pick, revert or bisect is in progress. */
+const OPERATION_MARKERS = [
+  "MERGE_HEAD",
+  "CHERRY_PICK_HEAD",
+  "REVERT_HEAD",
+  "REBASE_HEAD",
+  "rebase-merge",
+  "rebase-apply",
+  "BISECT_LOG",
+] as const;
+
+const operationInProgress = async (project: string): Promise<boolean> => {
+  for (const marker of OPERATION_MARKERS) {
+    const path = (await git(project, "rev-parse", "--git-path", marker)).trim();
+    const found = await lstat(resolve(project, path)).catch((error: unknown) => {
+      if (isCode(error, "ENOENT")) return null;
+      throw error;
+    });
+    if (found) return true;
+  }
+  return false;
+};
+
+const projectRoot = async (project: string): Promise<string> => {
+  const real = await realpath(project);
+  const top = await runGit(real, ["rev-parse", "--show-toplevel"]);
+  if (top.code !== 0 || (await realpath(top.stdout.trim()).catch(() => null)) !== real)
+    throw new ProjectError("The selected project must be the root of a Git repository.", 422);
+  return real;
+};
+
+/** Uncommitted tracked or non-ignored untracked changes, excluding Code Factory's own data. */
+export const isProjectDirty = async (project: string): Promise<boolean> =>
+  (await git(project, ...promotionStatusArgs)).length > 0;
+
+const ensureCommitIdentity = async (project: string): Promise<void> => {
+  for (const variable of ["GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"]) {
+    const identity = await runGit(project, [...identityArgs, "var", variable]);
+    if (identity.code !== 0)
+      throw new ProjectError(
+        "Configure Git user.name and user.email for this repository. Code Factory never changes Git config.",
+        422,
+      );
+  }
+};
+
+/**
+ * Start an in-project run: refuse a dirty tree or an operation in progress, then create the run
+ * branch at HEAD and switch the checkout to it. `git switch -c` refuses an existing name, so a
+ * branch is never overwritten, and a clean tree means no file changes during the switch.
+ */
+export const createProjectRunBranch = async (
+  project: string,
+  options: { branch: string },
+): Promise<Baseline> => {
+  const real = await projectRoot(project);
+  return withRepoLock(real, async () => {
+    const head = await runGit(real, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+    if (head.code !== 0)
+      throw new ProjectError(
+        "The project has no commits yet. Make a first commit, then start the run.",
+        422,
+      );
+    const revision = head.stdout.trim();
+    if (await operationInProgress(real))
+      throw new ProjectError(
+        "A merge, rebase, cherry-pick, revert or bisect is in progress in the project. Finish or abort it first.",
+        409,
+      );
+    if (await isProjectDirty(real)) throw new ProjectError(PROJECT_DIRTY, 409);
+    await ensureCommitIdentity(real);
+    const name = options.branch;
+    if (!(await validBranchName(real, name)))
+      throw new BranchNameError(`${name} is not a valid branch name.`, 400);
+    if (await branchExists(real, name))
+      throw new BranchNameError(
+        `Branch ${name} already exists. Choose another name; Code Factory never reuses or overwrites a branch.`,
+        409,
+        await suggestBranchName(real, name),
+      );
+    const previousBranch = await currentBranch(real);
+    const switched = await runGit(real, ["switch", "--quiet", "-c", name]);
+    if (switched.code !== 0)
+      throw new ProjectError(
+        `Cannot create branch ${name}: ${switched.spawnError ?? firstLine(`${switched.stderr}\n${switched.stdout}`)}`,
+        409,
+      );
+    return {
+      id: crypto.randomUUID(),
+      kind: "git",
+      revision,
+      sourceRevision: revision,
+      capturedAt: new Date().toISOString(),
+      workspace: PROJECT_WORKSPACE,
+      branch: name,
+      checkout: { previousBranch, previousRevision: revision },
+      changes: [],
+    };
+  });
+};
+
+const switchBack = (
+  project: string,
+  checkout: { previousBranch: string | null; previousRevision: string },
+) =>
+  runGit(
+    project,
+    checkout.previousBranch
+      ? ["switch", "--quiet", checkout.previousBranch]
+      : ["switch", "--quiet", "--detach", checkout.previousRevision],
+  );
+
+/**
+ * Undo a just-created run branch when its record could not be stored: switch back (no force) and
+ * delete the branch only while it still points at its start commit. Failures are logged and leave
+ * the branch in place.
+ */
+export const rollbackProjectRunBranch = async (
+  project: string,
+  baseline: Baseline,
+): Promise<void> => {
+  const { branch, checkout, revision } = baseline;
+  if (!isProjectRun(baseline) || !branch || !checkout || !revision) return;
+  const real = await realpath(project);
+  await withRepoLock(real, async () => {
+    if ((await currentBranch(real)) !== branch) return;
+    const back = await switchBack(real, checkout);
+    if (back.code !== 0) throw new Error(firstLine(`${back.stderr}\n${back.stdout}`));
+    await git(real, "update-ref", "-d", `refs/heads/${branch}`, revision);
   }).catch((error: unknown) => {
     console.error(
-      "Run worktree rollback failed",
-      path,
+      "Run branch rollback failed",
+      branch,
       error instanceof Error ? error.message : String(error),
     );
   });
 };
 
-/**
- * Create `<parent>/<repo>-code-factory/<runId>` as a detached worktree at HEAD, overlay the
- * user's uncommitted work, commit it as the baseline (hooks run), and attach the run branch last
- * so a failed creation never leaves a branch to roll back.
- */
-export const createRunWorktree = async (
-  project: string,
-  options: { runId: string; ticketId: string },
-): Promise<Baseline> => {
-  const real = await realpath(project);
-  const top = (await git(project, "rev-parse", "--show-toplevel")).trim();
-  if (top !== real) throw new Error("The selected project must be the Git repository root.");
-  const revision = (await git(project, "rev-parse", "HEAD")).trim();
-  const before = await git(project, ...promotionStatusArgs);
-  const { root, base } = await worktreeRootFor(project);
-  const rootInfo = await lstat(root).catch((error: unknown) => {
-    if (isCode(error, "ENOENT")) return null;
-    throw error;
-  });
-  if (rootInfo && (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()))
-    throw new Error(`${root} is not a directory Code Factory created.`);
-  try {
-    await mkdir(root, { recursive: true });
-  } catch (error) {
-    throw new Error(
-      `Cannot create the run worktree folder ${root}: ${error instanceof Error && "code" in error ? String(error.code) : String(error)}`,
+const holdsProject = (record: RunRecord): boolean =>
+  isProjectRun(record.snapshot.baseline) && !TERMINAL.has(record.status);
+
+/** Only one in-project run may hold the checkout: refuse while another one is not finished. */
+export const assertSoleProjectWriter = async (project: string, runId?: string): Promise<void> => {
+  const holder = (await listRuns(project)).find(
+    (record) => record.snapshot.id !== runId && holdsProject(record),
+  );
+  if (holder)
+    throw new ProjectError(
+      `Run ${holder.snapshot.id.slice(0, 8)} on branch ${holder.snapshot.baseline.branch ?? ""} is still ${holder.status} in this project. Finish or cancel it before starting another run.`,
+      409,
     );
-  }
-  const path = join(root, options.runId);
-  try {
-    await mkdir(path);
-  } catch (error) {
-    if (isCode(error, "EEXIST")) throw new WorktreeExistsError(path);
-    throw new Error(
-      `Cannot create the run worktree folder ${path}: ${error instanceof Error && "code" in error ? String(error.code) : String(error)}`,
-    );
-  }
-  try {
-    await withRepoLock(real, () =>
-      git(real, "worktree", "add", "--quiet", "--detach", path, revision),
-    );
-    const { changed, deleted } = await overlayUncommittedWork(real, path);
-    if (before !== (await git(project, ...promotionStatusArgs)))
-      throw new Error("Project changed while capturing its baseline. Retry.");
-    await rejectEscapingLinks(path);
-    for (const variable of ["GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"]) {
-      const identity = await runGit(path, [...identityArgs, "var", variable]);
-      if (identity.code !== 0)
-        throw new Error(
-          "Configure Git user.name and user.email for this repository. Code Factory never changes Git config.",
-        );
-    }
-    await git(path, "add", "--all", "--", ".", ":(exclude).code-factory");
-    const staged = await runGit(path, ["diff", "--cached", "--quiet"]);
-    if (staged.code === 1) {
-      const [subject, body] = baselineCommitMessage(options.ticketId, options.runId, new Date());
-      const committed = await runGit(path, [
-        ...identityArgs,
-        "commit",
-        "--quiet",
-        "-m",
-        subject,
-        "-m",
-        body,
-      ]);
-      if (committed.code !== 0)
-        throw new Error(
-          `baseline commit failed (exit ${committed.code ?? "none"}): ${tail(committed, 2000).trim()}`,
-        );
-    } else if (staged.code !== 0) throw new Error("Cannot inspect the baseline changes.");
-    const branch = await withRepoLock(real, async () => {
-      const preferred = shortRunBranch(options.runId);
-      const fallback = `${RUN_BRANCH_PREFIX}${options.runId}`;
-      const name = !(await branchExists(real, preferred))
-        ? preferred
-        : !(await branchExists(real, fallback))
-          ? fallback
-          : null;
-      if (!name) throw new Error("Run branch already exists.");
-      await git(path, "checkout", "--quiet", "-b", name);
-      return name;
-    });
-    return {
-      id: crypto.randomUUID(),
-      kind: "git",
-      revision: (await git(path, "rev-parse", "HEAD")).trim(),
-      sourceRevision: revision,
-      capturedAt: new Date().toISOString(),
-      workspace: worktreeRelativePath(base, options.runId),
-      branch,
-      changes: [...new Set([...changed, ...deleted])].sort(),
-    };
-  } catch (error) {
-    await removeWorktreeForcefully(real, path);
-    throw error;
-  }
 };
 
-/** Roll back a created worktree when the run record could not be stored. Branches are kept. */
-export const discardRunWorktree = async (project: string, baseline: Baseline): Promise<void> => {
-  const workspace = baseline.workspace;
-  if (!workspace) return;
-  if (workspace.startsWith(LEGACY_PREFIX)) {
-    await rm(join(project, workspace), { recursive: true, force: true });
-    return;
-  }
-  const { root, base } = await worktreeRootFor(project);
-  const runId = workspace.split("/").at(-1) ?? "";
-  if (workspace !== worktreeRelativePath(base, runId)) return;
-  await removeWorktreeForcefully(await realpath(project), join(root, runId));
+/**
+ * Before an in-project run executes: it is the only writer, the checkout is on its branch, and a
+ * first execution starts from a clean tree, so the first step commit holds only agent changes.
+ */
+export const assertProjectRunCanWrite = async (
+  project: string,
+  record: RunRecord,
+  options: { fresh: boolean },
+): Promise<void> => {
+  if (!isProjectRun(record.snapshot.baseline)) return;
+  await assertSoleProjectWriter(project, record.snapshot.id);
+  const resolved = await resolveRunWorkspace(project, record, { legacy: "prefix" });
+  if (!(await isProjectDirty(resolved.path))) return;
+  if (options.fresh) throw new ProjectError(PROJECT_DIRTY, 409);
+  if (hasUnresolvedReadOnlyViolation(record)) throw new ProjectError(READ_ONLY_LEFTOVERS, 409);
+};
+
+/**
+ * A reviewer or check changed files, and no attempt has started since: those changes are still
+ * the violation's, so a later writing step must not commit them under its own name.
+ */
+const hasUnresolvedReadOnlyViolation = (record: RunRecord): boolean => {
+  const violation = [...record.evidence]
+    .reverse()
+    .find((item) => item.kind === "event" && item.title === READ_ONLY_VIOLATION);
+  if (!violation) return false;
+  return !record.steps.some((step) =>
+    step.attempts.some((attempt) => attempt.startedAt > violation.createdAt),
+  );
+};
+
+const describeCheckout = async (project: string, record: RunRecord): Promise<ProjectCheckout> => {
+  const branch = record.snapshot.baseline.branch ?? "";
+  const checkout = record.snapshot.baseline.checkout;
+  const previousBranch = checkout?.previousBranch ?? null;
+  const previousRevision = checkout?.previousRevision ?? "";
+  const current = await currentBranch(project);
+  const onRunBranch = current === branch;
+  const target = previousBranch ?? `${previousRevision.slice(0, 7)} (detached)`;
+  const returnBlocker = !TERMINAL.has(record.status)
+    ? `Finish or cancel the run before switching back to ${target}.`
+    : !onRunBranch
+      ? `The project is no longer on ${branch}.`
+      : (await isProjectDirty(project))
+        ? RETURN_DIRTY
+        : previousBranch && !(await branchExists(project, previousBranch))
+          ? `Branch ${previousBranch} no longer exists.`
+          : null;
+  return { current, onRunBranch, previousBranch, previousRevision, returnBlocker };
+};
+
+/**
+ * "Back to <previous branch>": a plain `git switch` (never forced) from the run branch to the
+ * branch the checkout was on when the run started. Refused while the run is active, when the
+ * checkout moved, or with any uncommitted change, so nothing is stashed, reset or overwritten.
+ */
+export const returnToPreviousBranch = async (
+  project: string,
+  runId: string,
+): Promise<RunRecord> => {
+  const real = await realpath(project);
+  const record = await readRun(project, runId);
+  if (!record) throw new ProjectError("Run not found.", 404);
+  const checkout = record.snapshot.baseline.checkout;
+  if (!isProjectRun(record.snapshot.baseline) || !checkout)
+    throw new ProjectError("This run did not switch the project checkout.", 409);
+  const target = await withRepoLock(real, async () => {
+    const state = await describeCheckout(real, record);
+    if (state.returnBlocker) throw new ProjectError(state.returnBlocker, 409);
+    const back = await switchBack(real, checkout);
+    if (back.code !== 0)
+      throw new ProjectError(
+        `Git refused to switch branches: ${back.spawnError ?? firstLine(`${back.stderr}\n${back.stdout}`)}`,
+        409,
+      );
+    return checkout.previousBranch ?? checkout.previousRevision;
+  });
+  return mutateRun(project, runId, (current) =>
+    appendRunEvent(
+      current,
+      "lifecycle",
+      "checkout-returned",
+      `${record.snapshot.baseline.branch ?? ""} → ${target}`,
+      "succeeded",
+    ),
+  );
 };
 
 export type StepCommit =
@@ -399,7 +467,7 @@ export const commitStepChanges = async (
         head.code === 0
           ? ref
           : `detached ${(await runGit(workspace, ["rev-parse", "HEAD"])).stdout.trim() || "unknown"}`;
-      const reason = `The worktree is no longer on branch ${branch} (HEAD is ${shown}). Code Factory did not commit this step.`;
+      const reason = `The checkout is no longer on branch ${branch} (HEAD is ${shown}). Code Factory did not commit this step.`;
       return { kind: "failed", exitCode: null, output: reason, summary: reason };
     }
   } else return commitFailure(head);
@@ -488,6 +556,15 @@ const projectRunPath = async (project: string, record: RunRecord): Promise<strin
   return workspace === worktreeRelativePath(base, runId) ? join(root, runId) : null;
 };
 
+const parseLog = (log: string) =>
+  log
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [sha = "", subject = ""] = line.split("\x1f");
+      return { sha, subject };
+    });
+
 /** Branch, path, state, dirty rules and commit list for the run detail. Never computes a digest. */
 export const describeRunWorkspace = async (
   project: string,
@@ -501,8 +578,36 @@ export const describeRunWorkspace = async (
     dirty: null,
     removalBlocked: null,
     commits: [],
+    checkout: null,
   };
   const relativePath = record.snapshot.baseline.workspace;
+  if (isProjectRun(record.snapshot.baseline)) {
+    const real = await realpath(project);
+    const branch = common.branch ?? "";
+    const tip = await runGit(real, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+    const checkout = await describeCheckout(real, record);
+    const source = record.snapshot.baseline.sourceRevision;
+    const log =
+      tip.code === 0
+        ? await git(
+            real,
+            "log",
+            source ? `${source}..refs/heads/${branch}` : `refs/heads/${branch}`,
+            "--format=%H%x1f%s",
+            "-n",
+            "100",
+          )
+        : "";
+    return {
+      ...common,
+      kind: "project",
+      path: real,
+      state: tip.code === 0 ? "present" : "missing",
+      dirty: checkout.onRunBranch ? await isPromotionDirty(real) : null,
+      commits: parseLog(log),
+      checkout,
+    };
+  }
   if (!relativePath) return { ...common, kind: "none", path: null, state: "missing" };
   if (relativePath.startsWith(LEGACY_PREFIX)) {
     const resolved = await resolveRunWorkspace(project, record, { legacy: "prefix" }).catch(
@@ -538,30 +643,12 @@ export const describeRunWorkspace = async (
     state: "present",
     dirty: await isPromotionDirty(resolved.path),
     removalBlocked: await isRemovalBlockedByChanges(resolved.path),
-    commits: log
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [sha = "", subject = ""] = line.split("\x1f");
-        return { sha, subject };
-      }),
+    commits: parseLog(log),
   };
 };
 
-export class PromotionError extends ProjectError {
-  constructor(
-    message: string,
-    status: number,
-    readonly suggestedName?: string,
-  ) {
-    super(message, status);
-  }
-}
-
-const validBranchName = async (project: string, name: string): Promise<boolean> => {
-  const result = await runGit(project, ["check-ref-format", "--branch", name]);
-  return result.code === 0 && result.stdout.trim() === name;
-};
+/** Promotion refusals carry an optional free name, like a refused run branch. */
+export class PromotionError extends BranchNameError {}
 
 const appendEvent = (
   project: string,
@@ -589,12 +676,15 @@ export const promoteRun = async (
   const name = parsed.data.branch;
   if (!(await validBranchName(project, name)))
     throw new PromotionError(`${name} is not a valid branch name.`, 400);
-  return withLock(promotionLocks, `${project}:${runId}`, async () => {
+  return withPromotionLock(`${project}:${runId}`, async () => {
     const current = await readRun(project, runId);
     if (!current) throw new PromotionError("Run not found.", 404);
     const workspace = await describeRunWorkspace(project, current);
     const present =
-      workspace.kind === "worktree" && workspace.state === "present" && workspace.path
+      (workspace.kind === "worktree" ||
+        (workspace.kind === "project" && workspace.checkout?.onRunBranch)) &&
+      workspace.state === "present" &&
+      workspace.path
         ? workspace.path
         : null;
     // Read the tip before the acceptance checks so a commit landing during them is refused below.
@@ -607,7 +697,7 @@ export const promoteRun = async (
     const branch = current.snapshot.baseline.branch ?? "";
     const head = await runGit(path, ["symbolic-ref", "--quiet", "HEAD"]);
     if (head.code !== 0 || head.stdout.trim() !== `refs/heads/${branch}`)
-      throw new PromotionError(`The worktree is not on branch ${branch}.`, 409);
+      throw new PromotionError(`The run's checkout is not on branch ${branch}.`, 409);
     if ((await git(path, "rev-parse", "HEAD")).trim() !== target)
       throw new PromotionError(
         "The run branch moved while Code Factory checked it. Wait for the run to settle and retry.",
@@ -635,18 +725,11 @@ export const promoteRun = async (
         "--quiet",
         `refs/heads/${name}`,
       ]);
-      if (existing.code === 0 && existing.stdout.trim() !== target) {
-        let suggestion: string | undefined;
-        for (let index = 2; index <= 20 && !suggestion; index += 1) {
-          const candidate = `${name}-${index}`;
-          if (
-            (await validBranchName(project, candidate)) &&
-            !(await branchExists(project, candidate))
-          )
-            suggestion = candidate;
-        }
-        return fail(`Branch ${name} already exists. Choose another name.`, suggestion);
-      }
+      if (existing.code === 0 && existing.stdout.trim() !== target)
+        return fail(
+          `Branch ${name} already exists. Choose another name.`,
+          await suggestBranchName(project, name),
+        );
       if (existing.code !== 0)
         return fail(`Cannot create branch ${name}: ${firstLine(created.stderr)}`);
       // The ref already points at the accepted commit (crash before the record write): adopt it.

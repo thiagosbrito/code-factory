@@ -7,6 +7,8 @@ export type GrantableProvider = z.infer<typeof grantableProviderSchema>;
 // The only scopes that exist. Widening a scope is a code change, never a config edit.
 export const TOOL_GRANT_SCOPE = { kiro: ["execute_bash"], codex: ["commandExecution"] } as const;
 export const KIRO_DEFAULT_TRUSTED_TOOLS = ["fs_read", "fs_write"] as const;
+/** A read-only reviewer trusts reading only, whatever the project grant says. */
+export const KIRO_READ_ONLY_TRUSTED_TOOLS = ["fs_read"] as const;
 export const TOOL_PERMISSION = "Tool permission";
 
 const grantedAt = z.iso.datetime();

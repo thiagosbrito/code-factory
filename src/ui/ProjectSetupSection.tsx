@@ -62,8 +62,8 @@ export const ProjectSetupSection = ({
             placeholder="pnpm install --frozen-lockfile"
           />
           <small id="setup-command-help" className="font-normal text-muted-foreground">
-            Runs once in each new run worktree before the first step, without a shell. Quote
-            arguments that contain spaces.
+            Runs once in the project before each run's first step, without a shell. Quote arguments
+            that contain spaces.
           </small>
         </label>
       </div>

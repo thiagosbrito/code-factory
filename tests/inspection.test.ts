@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
 import { createRunRecord, createRunSnapshot } from "../src/domain/run.js";
-import { captureGitBaseline } from "../src/runtime/baseline.js";
+import { createProjectRunBranch } from "../src/runtime/run-branch.js";
 import { inspectArtifact, inspectDiff, inspectFiles } from "../src/runtime/inspection.js";
 import { startLocalServer } from "../src/runtime/server.js";
 import { createRun } from "../src/runtime/storage.js";
@@ -18,7 +18,7 @@ afterEach(async () =>
   Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))),
 );
 const fixture = async () => {
-  // Run worktrees live beside the repository, so the repo sits inside a disposable parent.
+  // A disposable parent keeps every Git artifact of the test inside one removable folder.
   const parent = await mkdtemp(join(tmpdir(), "factory-inspection-"));
   roots.push(parent);
   const root = join(parent, "repo");
@@ -39,10 +39,9 @@ const fixture = async () => {
     "-qm",
     "Initial",
   ]);
-  await writeFile(join(root, "existing.txt"), "pre-existing\n");
   const runId = randomUUID();
-  const baseline = await captureGitBaseline(root, { runId, ticketId: "" });
-  const workspace = join(root, baseline.workspace!);
+  const baseline = await createProjectRunBranch(root, { branch: "work" });
+  const workspace = root;
   const loop = parseLoop({
     schemaVersion: 2,
     id: "flow",
@@ -68,12 +67,12 @@ const fixture = async () => {
   return { root, workspace, run };
 };
 
-it("separates captured pre-existing changes from task changes and reports uncertain attribution", async () => {
+it("reports task changes in the project with uncertain attribution and no pre-existing changes", async () => {
   const { root, workspace, run } = await fixture();
   await writeFile(join(workspace, "existing.txt"), "task edit\n");
   await writeFile(join(workspace, "new.txt"), "new\n");
   const result = await inspectFiles(root, run);
-  expect(result.preExisting).toMatchObject([{ path: "existing.txt", change: "modified" }]);
+  expect(result.preExisting).toEqual([]);
   expect(result.files).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ path: "existing.txt", attribution: "uncertain" }),
@@ -82,6 +81,14 @@ it("separates captured pre-existing changes from task changes and reports uncert
   );
   expect((await inspectDiff(root, run, "existing.txt")).diff).toContain("+task edit");
   await expect(inspectDiff(root, run, "../existing.txt")).rejects.toThrow("not a task change");
+});
+
+it("explains instead of inspecting another branch's files when the checkout moved", async () => {
+  const { root, run } = await fixture();
+  execFileSync("git", ["-C", root, "switch", "-q", "-"]);
+  await expect(inspectFiles(root, run)).rejects.toThrow(
+    /^The project is on branch .+, not on run branch work\./,
+  );
 });
 
 it("attributes executed writer attempts only while their recorded diff matches the current file", async () => {
@@ -132,7 +139,7 @@ it("attributes executed writer attempts only while their recorded diff matches t
   expect(receipts).toHaveLength(3);
   expect(receipts.map((item) => item.stepId)).toEqual(["first", "first", "second"]);
   const inspected = await inspectFiles(root, completed);
-  expect(inspected.preExisting).toMatchObject([{ path: "existing.txt", change: "modified" }]);
+  expect(inspected.preExisting).toEqual([]);
   expect(inspected.files).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ path: "added.txt", attribution: "recorded", stepId: "first" }),

@@ -66,6 +66,7 @@ export const Factory = ({
     workspace,
     promote,
     removeWorktree,
+    returnCheckout,
     toolGrantPrompt,
     answerToolGrant,
     toolGrantReturnFocus,
@@ -205,6 +206,7 @@ export const Factory = ({
             workspace={workspace}
             onPromote={(name) => promote(selectedRun.snapshot.id, name)}
             onRemoveWorktree={() => removeWorktree(selectedRun.snapshot.id)}
+            onReturnCheckout={() => returnCheckout(selectedRun.snapshot.id)}
             onSendGuidance={(input) => sendGuidance(selectedRun.snapshot.id, input)}
             onReplyToInput={(input) => replyToInput(selectedRun.snapshot.id, input)}
             onBack={() => {

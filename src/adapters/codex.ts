@@ -357,13 +357,14 @@ export class CodexAdapter implements AgentAdapter {
           cwd: input.projectDirectory,
           model: input.binding.model === "agent-default" ? null : input.binding.model,
           approvalPolicy: "on-request",
-          sandbox: "workspace-write",
+          sandbox: input.readOnly ? "read-only" : "workspace-write",
         }),
       ).thread,
     );
     const sessionId = identifier(thread.id);
     this.threadPolicies.set(sessionId, {
-      grant: input.toolGrant?.provider === "codex" ? input.toolGrant : null,
+      // A read-only reviewer never gets the grant, so every command approval request is declined.
+      grant: !input.readOnly && input.toolGrant?.provider === "codex" ? input.toolGrant : null,
       root,
     });
     const feed = this.events(
@@ -377,13 +378,15 @@ export class CodexAdapter implements AgentAdapter {
             threadId: sessionId,
             input: textInput(input.instruction),
             ...(input.binding.effort ? { effort: input.binding.effort } : {}),
-            sandboxPolicy: {
-              type: "workspaceWrite",
-              writableRoots: [input.projectDirectory],
-              networkAccess: false,
-              excludeTmpdirEnvVar: false,
-              excludeSlashTmp: false,
-            },
+            sandboxPolicy: input.readOnly
+              ? { type: "readOnly", networkAccess: false }
+              : {
+                  type: "workspaceWrite",
+                  writableRoots: [input.projectDirectory],
+                  networkAccess: false,
+                  excludeTmpdirEnvVar: false,
+                  excludeSlashTmp: false,
+                },
           }),
         ).turn,
       );

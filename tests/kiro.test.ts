@@ -2,7 +2,7 @@ import { chmod, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { KiroAdapter, createKiroAdapter } from "../src/adapters/kiro.js";
+import { KiroAdapter, createKiroAdapter, probeKiro } from "../src/adapters/kiro.js";
 import type {
   AdapterEvent,
   AgentConnection,
@@ -259,6 +259,65 @@ describe("Kiro v2 stream adapter", () => {
           events.push(event);
       }).rejects.toThrow("without successful completion (7)");
       expect(events.map((event) => event.type)).toEqual(["started"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Kiro connection probes", () => {
+  const script = async (body: string) => {
+    const directory = await mkdtemp(join(tmpdir(), "code-factory-kiro-probe-"));
+    const executable = join(directory, "kiro-cli");
+    await writeFile(executable, `#!/usr/bin/env node\n${body}\n`);
+    await chmod(executable, 0o755);
+    return { directory, executable };
+  };
+
+  it("reports the exit code and Kiro's own message instead of a bare failure", async () => {
+    const { directory, executable } = await script(`
+if (process.argv[2] === '--version') { console.log('kiro-cli 2.28.0'); process.exit(0); }
+console.error('\\u001b[31merror\\u001b[0m: Your SSO session has expired. Run kiro-cli login.');
+process.exit(1);`);
+    try {
+      const adapter = await createKiroAdapter(executable);
+      await expect(adapter.inspect(directory)).rejects.toThrow(
+        "kiro-cli whoami --format json exited with code 1: error: Your SSO session has expired. Run kiro-cli login.",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("closes stdin, so a CLI that waits for input still answers, and names a timeout", async () => {
+    const { directory, executable } = await script(`
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => { console.log('{"accountType":"IamIdentityCenter"}'); });`);
+    try {
+      expect(await probeKiro(executable, ["whoami", "--format", "json"])).toContain(
+        "IamIdentityCenter",
+      );
+      const slow = await script("setTimeout(() => {}, 10_000);");
+      try {
+        await expect(
+          probeKiro(slow.executable, ["whoami", "--format", "json"], { timeoutMs: 200 }),
+        ).rejects.toThrow("kiro-cli whoami --format json did not finish within 0.2 s.");
+      } finally {
+        await rm(slow.directory, { recursive: true, force: true });
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reads the JSON identity line that SSO accounts follow with profile details", async () => {
+    const { directory, executable } = await script(`
+if (process.argv[2] === '--version') { console.log('kiro-cli 2.28.0'); process.exit(0); }
+if (process.argv[2] === 'whoami') { console.log('{"accountType":"IamIdentityCenter","region":"us-west-2"}\\n\\nProfile:\\nKiroProfile-us-east-1'); process.exit(0); }
+console.log('{"models":[{"model_id":"m","model_name":"M"}]}');`);
+    try {
+      const adapter = await createKiroAdapter(executable);
+      expect(await adapter.inspect(directory)).toMatchObject({ authentication: "authenticated" });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

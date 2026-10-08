@@ -444,6 +444,22 @@ export const useFactoryRuns = (
       return { error: "Connection lost. The branch may not have been created; reload the run." };
     }
   };
+  const returnCheckout = async (id: string): Promise<string | null> => {
+    try {
+      const { run } = await api(`/api/runs/${id}/checkout/return`, runResponseSchema.parse, {
+        method: "POST",
+      });
+      setRuns((previous) =>
+        previous.map((item) => (item.snapshot.id === id ? mergeRunSnapshot(item, run) : item)),
+      );
+      await refreshWorkspace(id).catch(() => undefined);
+      return null;
+    } catch (error) {
+      return error instanceof ApiError
+        ? error.message
+        : "Connection lost. The checkout state is unknown; reload the run.";
+    }
+  };
   const removeWorktree = async (id: string): Promise<string | null> => {
     try {
       const { run } = await api(`/api/runs/${id}/worktree/remove`, runResponseSchema.parse, {
@@ -501,6 +517,7 @@ export const useFactoryRuns = (
     workspace: workspace?.runId === selectedRunId ? workspace.workspace : null,
     promote,
     removeWorktree,
+    returnCheckout,
     toolGrantPrompt,
     answerToolGrant,
     toolGrantReturnFocus: () => returnFocusTo.current,

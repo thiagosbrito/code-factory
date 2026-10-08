@@ -191,6 +191,11 @@ describe("adapter mapping", () => {
     }
   });
 
+  it("trusts only fs_read for a read-only reviewer, even with a Kiro grant", () => {
+    for (const grant of [undefined, kiroGrant])
+      expect(kiroChatArgs({ ...input(grant), readOnly: true })).toContain("--trust-tools=fs_read");
+  });
+
   it("accepts a Codex command approval only inside the step directory with a Codex grant", async () => {
     const parent = await temp();
     const root = join(parent, "work");

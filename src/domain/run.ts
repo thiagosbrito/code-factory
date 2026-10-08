@@ -31,6 +31,13 @@ export const baselineSchema = z
     sourceRevision: z.string().min(1).optional(),
     workspace: z.string().min(1).optional(),
     branch: z.string().min(1).max(255).optional(),
+    /** In-project runs only: what the checkout was on before the run switched it to `branch`. */
+    checkout: z
+      .strictObject({
+        previousBranch: z.string().min(1).max(255).nullable(),
+        previousRevision: z.string().min(1),
+      })
+      .optional(),
     changes: z.array(z.string()).optional(),
     capturedAt: z.iso.datetime(),
   })

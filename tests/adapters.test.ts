@@ -314,6 +314,18 @@ describe("portable adapter conformance", () => {
     expect(rpc.calls.filter((call) => call.method === "turn/start")).toHaveLength(1);
   });
 
+  it("runs a read-only reviewer in Codex's read-only sandbox", async () => {
+    const rpc = new FixtureRpc();
+    await collect(new CodexAdapter(rpc, "/bin/codex", "0.160.0"), { ...input, readOnly: true });
+    expect(rpc.calls.find((call) => call.method === "thread/start")?.params.sandbox).toBe(
+      "read-only",
+    );
+    expect(rpc.calls.find((call) => call.method === "turn/start")?.params.sandboxPolicy).toEqual({
+      type: "readOnly",
+      networkAccess: false,
+    });
+  });
+
   it("correlates a blocking native input request and reply on its active turn", async () => {
     const rpc = new FixtureRpc(false, false, true);
     const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");

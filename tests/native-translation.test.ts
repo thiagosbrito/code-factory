@@ -95,6 +95,13 @@ describe("native configuration translation", () => {
     );
   });
 
+  it("names the file it looked for when a native import source is missing", async () => {
+    const root = await project();
+    await expect(previewNative(root, request(draft(), "absent"), "import")).rejects.toThrow(
+      "No Cursor project rule (.mdc) was found at .cursor/rules/absent.mdc in the project.",
+    );
+  });
+
   it("reports lossy loop fields and rejects existing files without changing user content", async () => {
     const root = await project();
     const loop = parseLoop({

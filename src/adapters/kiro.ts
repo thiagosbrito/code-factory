@@ -1,8 +1,6 @@
 import { spawn } from "node:child_process";
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
-import { promisify } from "node:util";
 import { z } from "zod";
 import type {
   AgentAdapter,
@@ -11,11 +9,11 @@ import type {
   StepExecutionInput,
   StepSession,
 } from "./contract.js";
-import { KIRO_DEFAULT_TRUSTED_TOOLS } from "../domain/tool-grant.js";
+import { KIRO_DEFAULT_TRUSTED_TOOLS, KIRO_READ_ONLY_TRUSTED_TOOLS } from "../domain/tool-grant.js";
 
 /**
- * Non-interactive chat arguments. Only the trusted-tool list varies: a project Kiro grant adds
- * its exact scope; trust-all is never emitted.
+ * Non-interactive chat arguments. Only the trusted-tool list varies: a read-only reviewer trusts
+ * fs_read alone, a project Kiro grant adds its exact scope otherwise; trust-all is never emitted.
  */
 export const kiroChatArgs = (input: StepExecutionInput): string[] => [
   "chat",
@@ -24,10 +22,13 @@ export const kiroChatArgs = (input: StepExecutionInput): string[] => [
   "--output-format",
   "stream-json",
   "--no-interactive",
-  `--trust-tools=${[
-    ...KIRO_DEFAULT_TRUSTED_TOOLS,
-    ...(input.toolGrant?.provider === "kiro" ? input.toolGrant.scope : []),
-  ].join(",")}`,
+  `--trust-tools=${(input.readOnly
+    ? [...KIRO_READ_ONLY_TRUSTED_TOOLS]
+    : [
+        ...KIRO_DEFAULT_TRUSTED_TOOLS,
+        ...(input.toolGrant?.provider === "kiro" ? input.toolGrant.scope : []),
+      ]
+  ).join(",")}`,
   ...(input.binding.model === "agent-default" ? [] : ["--model", input.binding.model]),
   input.instruction,
 ];
@@ -60,6 +61,79 @@ const streamEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runError"), data: z.unknown() }),
 ]);
 
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+/** SSO sign-ins can refresh their token over the network during whoami, which takes seconds. */
+const PROBE_TIMEOUT_MS = 30_000;
+const PROBE_OUTPUT_LIMIT = 600;
+
+// oxlint-disable-next-line no-control-regex -- ANSI escape sequences are exactly what is removed.
+const stripAnsi = (text: string): string => text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+
+/**
+ * Run a short Kiro CLI command with stdin closed. A failure names the command and says whether it
+ * timed out, exited with a code or was killed by a signal, followed by Kiro's own output, so
+ * Settings can show the real cause instead of a bare "Command failed".
+ */
+export const probeKiro = (
+  executable: string,
+  args: string[],
+  options: { cwd?: string; timeoutMs?: number } = {},
+): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const command = `kiro-cli ${args.join(" ")}`;
+    const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
+    const child = spawn(executable, args, {
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(
+        new Error(
+          `${command} could not start: ${"code" in error && typeof error.code === "string" ? error.code : error.message}`,
+        ),
+      );
+    });
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      const output = stripAnsi(stderr.trim() || stdout.trim()).slice(-PROBE_OUTPUT_LIMIT);
+      if (timedOut)
+        reject(
+          new Error(
+            `${command} did not finish within ${timeoutMs / 1000} s. Kiro may be refreshing its sign-in or waiting for the network; run \`${command}\` in a terminal to check.${output ? `\n${output}` : ""}`,
+          ),
+        );
+      else if (code !== 0)
+        reject(
+          new Error(
+            `${command} ${code === null ? `was stopped by ${signal ?? "a signal"}` : `exited with code ${code}`}: ${output || "no output"}`,
+          ),
+        );
+      else resolve(stdout);
+    });
+  });
+
 const terminateChild = (child: ReturnType<typeof spawn>): void => {
   if (!child.pid) return;
   try {
@@ -88,24 +162,31 @@ export class KiroAdapter implements AgentAdapter {
     private readonly version: string,
   ) {}
 
-  async inspect(_projectDirectory: string): Promise<AgentConnection> {
-    const { stdout } = await promisify(execFile)(this.executable, ["whoami", "--format", "json"], {
-      timeout: 5000,
-    });
-    const identityLine = stdout.split(/\r?\n/).find((line) => line.trim().startsWith("{"));
-    if (!identityLine) throw new Error("Kiro identity response is empty");
-    const identity = z.object({ accountType: z.string().min(1) }).parse(JSON.parse(identityLine));
-    if (!identity.accountType) throw new Error("Kiro identity response is empty");
-    const catalogResponse = await promisify(execFile)(
+  async inspect(projectDirectory: string): Promise<AgentConnection> {
+    const whoami = await probeKiro(this.executable, ["whoami", "--format", "json"]);
+    // SSO accounts print the JSON identity followed by profile lines, so read the JSON line only.
+    const identityLine = whoami.split(/\r?\n/).find((line) => line.trim().startsWith("{"));
+    const identity = z
+      .object({ accountType: z.string().min(1) })
+      .safeParse(identityLine ? parseJson(identityLine) : undefined);
+    if (!identity.success)
+      throw new Error(
+        `kiro-cli whoami --format json did not print a Kiro identity: ${stripAnsi(whoami.trim()).slice(0, PROBE_OUTPUT_LIMIT) || "no output"}`,
+      );
+    const catalogOutput = await probeKiro(
       this.executable,
       ["chat", "--list-models", "--format", "json"],
-      { timeout: 10000, cwd: _projectDirectory },
+      { cwd: projectDirectory },
     );
     const catalog = z
       .object({
         models: z.array(z.object({ model_id: z.string().min(1), model_name: z.string().min(1) })),
       })
-      .parse(JSON.parse(catalogResponse.stdout));
+      .safeParse(parseJson(catalogOutput));
+    if (!catalog.success)
+      throw new Error(
+        `kiro-cli chat --list-models --format json did not print a model catalog: ${stripAnsi(catalogOutput.trim()).slice(0, PROBE_OUTPUT_LIMIT) || "no output"}`,
+      );
     return {
       provider: this.provider,
       executable: this.executable,
@@ -116,7 +197,7 @@ export class KiroAdapter implements AgentAdapter {
       version: this.version,
       protocol: "kiro-v2-stream-json",
       capabilities: this.capabilities,
-      models: catalog.models.map((model) => ({
+      models: catalog.data.models.map((model) => ({
         id: model.model_id,
         displayName: model.model_name,
       })),
@@ -237,7 +318,7 @@ export class KiroAdapter implements AgentAdapter {
 }
 
 export const createKiroAdapter = async (executable: string): Promise<KiroAdapter> => {
-  const { stdout } = await promisify(execFile)(executable, ["--version"], { timeout: 5000 });
+  const stdout = await probeKiro(executable, ["--version"]);
   const version = /kiro-cli\s+(\d+\.\d+\.\d+)/.exec(stdout)?.[1];
   if (!version) throw new Error("Executable is not a supported Kiro CLI");
   return new KiroAdapter(executable, version);

@@ -86,7 +86,11 @@ export const previewNative = async (
     ).content ?? null;
   const revision = digest(JSON.stringify(loop) + "\0" + (current ?? "<absent>"));
   if (direction === "import") {
-    if (current === null) throw new ProjectError("Native rule was not found.", 404);
+    if (current === null)
+      throw new ProjectError(
+        `No ${translator.label} was found at ${relativePath} in the project.`,
+        404,
+      );
     const translated = translate(() => translator.import(current, loop), relativePath);
     return { ...translated, relativePath, revision, conflicts: [], direction };
   }

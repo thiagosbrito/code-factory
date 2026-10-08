@@ -11,10 +11,12 @@ import { startRun, startRunInputSchema } from "./intake.js";
 import { cancelRun, executeRun, retryStep, withIdleRunSlot } from "./scheduler.js";
 import { fileDigest, resolveRunWorkspace } from "./workspace.js";
 import {
+  assertProjectRunCanWrite,
+  BranchNameError,
   describeRunWorkspace,
   promoteRun,
-  PromotionError,
   removeRunWorktree,
+  returnToPreviousBranch,
 } from "./run-branch.js";
 import { grantToolPermission, revokeToolPermission } from "./tool-grant.js";
 import {
@@ -111,13 +113,17 @@ const validateDefaultBinding = async (
     throw new ProjectError("Verify the current custom executable before saving its default.", 422);
 };
 
-/** Digest of the run's current candidate, or null when its workspace no longer resolves. */
+/**
+ * Digest of the run's current candidate, or null when its workspace no longer resolves (a missing
+ * worktree, or an in-project run whose checkout is on another branch).
+ */
 const currentCandidate = async (project: string, run: RunRecord): Promise<string | null> => {
   try {
     const resolved = await resolveRunWorkspace(project, run, { legacy: "prefix" });
     return await fileDigest(resolved.path, resolved.digestMode);
   } catch (error) {
-    if (error instanceof ProjectError && error.status === 404) return null;
+    if (error instanceof ProjectError && (error.status === 404 || error.status === 409))
+      return null;
     throw error;
   }
 };
@@ -274,13 +280,22 @@ export const startLocalServer = async (options: {
       if (pathname === "/api/runs" && request.method === "POST") {
         const parsed = startRunInputSchema.safeParse(await readBody(request));
         if (!parsed.success) return json(response, 400, { error: parsed.error.issues[0]?.message });
-        const run = await startRun(
-          projectDirectory,
-          parsed.data,
-          await connections.list(),
-          tracker,
-        );
-        return json(response, 201, { runId: run.snapshot.id, run });
+        try {
+          const run = await startRun(
+            projectDirectory,
+            parsed.data,
+            await connections.list(),
+            tracker,
+          );
+          return json(response, 201, { runId: run.snapshot.id, run });
+        } catch (error) {
+          if (error instanceof BranchNameError)
+            return json(response, error.status, {
+              error: error.message,
+              ...(error.suggestedName ? { suggestedName: error.suggestedName } : {}),
+            });
+          throw error;
+        }
       }
       if (pathname === "/api/project/tool-grants" && request.method === "POST") {
         // Granting widens agent trust, so it requires a browser Origin from the Code Factory UI.
@@ -331,13 +346,24 @@ export const startLocalServer = async (options: {
             await promoteRun(projectDirectory, promotePath[1], await readBody(request)),
           );
         } catch (error) {
-          if (error instanceof PromotionError)
+          if (error instanceof BranchNameError)
             return json(response, error.status, {
               error: error.message,
               ...(error.suggestedName ? { suggestedName: error.suggestedName } : {}),
             });
           throw error;
         }
+      }
+      const returnPath = /^\/api\/runs\/([0-9a-f-]{36})\/checkout\/return$/i.exec(pathname);
+      if (returnPath?.[1] && request.method === "POST") {
+        const runId = returnPath[1];
+        // Hold the run's active slot so a retry cannot start while the checkout switches.
+        const run = await withIdleRunSlot(projectDirectory, runId, () =>
+          returnToPreviousBranch(projectDirectory, runId),
+        );
+        if (!run)
+          return json(response, 409, { error: "Finish or cancel the run before switching back." });
+        return json(response, 200, { run });
       }
       const removePath = /^\/api\/runs\/([0-9a-f-]{36})\/worktree\/remove$/i.exec(pathname);
       if (removePath?.[1] && request.method === "POST") {
@@ -358,6 +384,15 @@ export const startLocalServer = async (options: {
         if (!run) return json(response, 404, { error: "Run not found." });
         if (run.status !== "pending" && run.status !== "running")
           return json(response, 409, { error: "Run cannot be started from its current state." });
+        try {
+          await assertProjectRunCanWrite(projectDirectory, run, {
+            fresh: run.status === "pending" && !run.steps.some((step) => step.attempts.length),
+          });
+        } catch (error) {
+          if (error instanceof ProjectError)
+            return json(response, error.status, { error: error.message });
+          throw error;
+        }
         void executeRun(projectDirectory, executePath[1], (provider) =>
           connections.adapter(provider),
         ).catch((error: unknown) =>
@@ -393,6 +428,7 @@ export const startLocalServer = async (options: {
         try {
           prepareStepRetry(run, stepId, attemptId);
           await resolveRunWorkspace(projectDirectory, run, { legacy: "prefix" });
+          await assertProjectRunCanWrite(projectDirectory, run, { fresh: false });
         } catch (error) {
           return json(response, 409, {
             error: error instanceof Error ? error.message : "Retry unavailable.",

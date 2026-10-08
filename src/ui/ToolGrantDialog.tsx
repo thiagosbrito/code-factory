@@ -22,16 +22,16 @@ export const toolGrantText: Record<
     scope:
       "Code Factory will add `execute_bash` to Kiro's trusted tools (`--trust-tools=fs_read,fs_write,execute_bash`) for every Kiro step in this project.",
     implication:
-      "The agent can run any command with your account's permissions, without asking, in any directory it chooses. Commands it runs can change your repository's branches, stash and config, because the run worktree shares them.",
+      "The agent can run any command with your account's permissions, without asking, in any directory it chooses. Commands it runs work in your project checkout and can change its files, branches, stash and config.",
   },
   codex: {
     title: "Allow Codex to run commands outside its sandbox?",
     // Codex still runs in-sandbox commands by default, so "without shell" would misdescribe it.
     decline: "Keep commands sandboxed",
     scope:
-      "Code Factory will accept a Codex command approval request only when the command's working directory is inside the step's worktree or review copy, for every Codex step in this project. Codex's separate network-access prompts and file-change approvals stay declined.",
+      "Code Factory will accept a Codex command approval request only when the command's working directory is inside the run's project folder, for every Codex step in this project. Codex's separate network-access prompts and file-change approvals stay declined.",
     implication:
-      "An approved command runs outside Codex's sandbox with your account's permissions, including network access and writes outside the worktree. It can change your repository's branches, stash and config.",
+      "An approved command runs outside Codex's sandbox with your account's permissions, including network access and writes outside the project. It can change your repository's branches, stash and config.",
   },
 };
 export const TOOL_GRANT_PERSISTENCE =

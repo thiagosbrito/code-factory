@@ -4,7 +4,12 @@ import { lstat, readFile, readdir, readlink, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { RunRecord } from "../domain/run.js";
-import { missingWorktreeMessage, removedWorktreeMessage } from "../domain/run-branch.js";
+import {
+  checkoutMovedMessage,
+  isProjectRun,
+  missingWorktreeMessage,
+  removedWorktreeMessage,
+} from "../domain/run-branch.js";
 import { ProjectError } from "./project.js";
 
 const exec = promisify(execFile);
@@ -21,7 +26,7 @@ const readGit = async (directory: string, ...args: string[]): Promise<string> =>
 export type DigestMode = "walk" | "git";
 export type ResolvedWorkspace = {
   path: string;
-  kind: "worktree" | "clone";
+  kind: "project" | "worktree" | "clone";
   digestMode: DigestMode;
 };
 
@@ -30,6 +35,34 @@ const UUID = /^[0-9a-f-]{36}$/i;
 
 const isCode = (error: unknown, code: string): boolean =>
   error instanceof Error && "code" in error && error.code === code;
+
+/** The checked-out branch, or null on a detached HEAD. */
+export const currentBranch = async (directory: string): Promise<string | null> => {
+  try {
+    return (await readGit(directory, "symbolic-ref", "--quiet", "--short", "HEAD")).trim() || null;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === 1) return null;
+    throw error;
+  }
+};
+
+/**
+ * An in-project run works in the repository root itself, and only while the checkout is on its
+ * run branch: a user who switched away gets a clear 409 instead of a run on the wrong files.
+ */
+const resolveProject = async (project: string, record: RunRecord): Promise<string> => {
+  const real = await realpath(project);
+  const top = await readGit(real, "rev-parse", "--show-toplevel").then(
+    (output) => realpath(output.trim()),
+    () => null,
+  );
+  if (top !== real)
+    throw new ProjectError("The project is no longer the root of a Git repository.", 404);
+  const branch = record.snapshot.baseline.branch ?? "";
+  const current = await currentBranch(real);
+  if (current !== branch) throw new ProjectError(checkoutMovedMessage(branch, current), 409);
+  return real;
+};
 
 /** Legacy clone runs keep today's walk digest so their stored candidate IDs stay valid. */
 export const digestModeFor = (record: RunRecord): DigestMode =>
@@ -97,6 +130,8 @@ export const resolveRunWorkspace = async (
 ): Promise<ResolvedWorkspace> => {
   const relativePath = record.snapshot.baseline.workspace;
   if (!relativePath) throw new ProjectError("This run has no available isolated workspace.", 404);
+  if (isProjectRun(record.snapshot.baseline))
+    return { path: await resolveProject(project, record), kind: "project", digestMode: "git" };
   if (!relativePath.startsWith(LEGACY_PREFIX))
     return { path: await resolveWorktree(project, record), kind: "worktree", digestMode: "git" };
   if (options.legacy === "uuid" && !UUID.test(relativePath.slice(LEGACY_PREFIX.length)))
@@ -137,8 +172,13 @@ const walkDigest = async (directory: string): Promise<string> => {
   return hash.digest("hex");
 };
 
-/** Git mode hashes what would be committed: tracked plus non-ignored untracked files. */
-const gitDigest = async (directory: string): Promise<string> => {
+/**
+ * Git mode hashes what would be committed: tracked plus non-ignored untracked files. The same
+ * pass keeps a per-path hash so a read-only step can report exactly which files it changed.
+ */
+export const gitTreeState = async (
+  directory: string,
+): Promise<{ digest: string; files: Map<string, string> }> => {
   const listed = (
     await readGit(directory, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
   )
@@ -147,6 +187,7 @@ const gitDigest = async (directory: string): Promise<string> => {
     .filter((path) => path !== ".code-factory" && !path.startsWith(".code-factory/"));
   const paths = [...new Set(listed)].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
   const hash = createHash("sha256");
+  const files = new Map<string, string>();
   for (const path of paths) {
     const absolute = join(directory, path);
     const stats = await lstat(absolute).catch((error: unknown) => {
@@ -154,15 +195,24 @@ const gitDigest = async (directory: string): Promise<string> => {
       throw error;
     });
     if (!stats || stats.isDirectory()) continue;
-    if (stats.isSymbolicLink()) hash.update(`link:${path}:${await readlink(absolute)}`);
-    else if (stats.isFile()) {
+    if (stats.isSymbolicLink()) {
+      const entry = `link:${path}:${await readlink(absolute)}`;
+      hash.update(entry);
+      files.set(path, createHash("sha256").update(entry).digest("hex"));
+    } else if (stats.isFile()) {
       // Git records only the executable bit, so a chmod +x is a new candidate too.
-      hash.update(`file:${path}:${stats.mode & 0o111 ? "755" : "644"}:`);
-      hash.update(await readFile(absolute));
+      const header = `file:${path}:${stats.mode & 0o111 ? "755" : "644"}:`;
+      const content = await readFile(absolute);
+      hash.update(header);
+      hash.update(content);
+      files.set(path, createHash("sha256").update(header).update(content).digest("hex"));
     }
   }
-  return hash.digest("hex");
+  return { digest: hash.digest("hex"), files };
 };
+
+const gitDigest = async (directory: string): Promise<string> =>
+  (await gitTreeState(directory)).digest;
 
 export const fileDigest = async (directory: string, mode: DigestMode = "walk"): Promise<string> =>
   mode === "git" ? gitDigest(directory) : walkDigest(directory);
