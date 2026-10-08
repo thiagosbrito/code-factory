@@ -20,6 +20,7 @@ import { parseLoop } from "../src/domain/loop.js";
 import {
   createRunRecord,
   createRunSnapshot,
+  retryBlocker,
   type Baseline,
   type RunRecord,
 } from "../src/domain/run.js";
@@ -550,6 +551,72 @@ describe("in-project run branch", () => {
     expect(git(root, "status", "--porcelain", "--", ".", ":(exclude).code-factory")).toBe("");
   });
 
+  it("reads a decision from the first line and records why an undeclared one fails", async () => {
+    const decide = {
+      id: "adjudicate",
+      name: "Verify and adjudicate",
+      kind: "agent",
+      stage: "validation",
+      role: "Adjudicator",
+      instruction: "Decide",
+    };
+    const rework = { ...tidy, id: "rework", name: "Rework", instruction: "Rework" };
+    const loop = parseLoop({
+      ...loopWith(
+        [implement, decide, tidy, rework],
+        [
+          { from: "implement", to: "adjudicate" },
+          { from: "adjudicate", to: "tidy" },
+          { from: "adjudicate", to: "rework" },
+        ],
+      ),
+      decisions: [
+        {
+          stepId: "adjudicate",
+          branches: [
+            { outcome: "pass", to: "tidy" },
+            { outcome: "repair", to: "rework" },
+          ],
+        },
+      ],
+    });
+    const answering = (answer: string) => ({
+      ...mockAdapter,
+      async *execute(input: StepExecutionInput, signal: AbortSignal): AsyncIterable<AdapterEvent> {
+        if (input.stepId !== "adjudicate") return yield* writer.execute(input, signal);
+        const session = {
+          runId: input.runId,
+          stepId: input.stepId,
+          attempt: input.attempt,
+          sessionId: "s",
+          turnId: "t",
+        };
+        yield { type: "started", ...session };
+        yield { type: "completed", outcome: "succeeded", output: answer, ...session };
+      },
+    });
+    const accepted = await repository();
+    const passing = await createProjectRun(accepted.root, loop);
+    const done = await executeRun(accepted.root, passing.snapshot.id, () =>
+      answering("**pass**\n\nAll six reviews returned pass."),
+    );
+    expect(outcome(done)).toEqual({ status: "succeeded", failures: [] });
+    expect(done.steps.find((step) => step.stepId === "adjudicate")?.outcome).toBe("pass");
+
+    const rejected = await repository();
+    const unclear = await createProjectRun(rejected.root, loop);
+    const failed = await executeRun(rejected.root, unclear.snapshot.id, () =>
+      answering("Looks good to me\nship it"),
+    );
+    expect(failed.status).toBe("failed");
+    const reason = failed.evidence.find(
+      (item) => item.kind === "event" && item.title === "result-rejected",
+    );
+    expect(reason?.kind === "event" && reason.detail).toBe(
+      "Undeclared decision outcome: Looks good to me",
+    );
+  });
+
   it("commits each changing writing step with run, step and attempt trailers and skips no-op steps", async () => {
     const { root } = await repository();
     const run = await createProjectRun(
@@ -953,6 +1020,31 @@ describe("promotion and removal through the local API", () => {
     expect(git(root, "log", "-1", "--format=%s")).toBe(
       "BMAP-9999: Implement (implement) attempt 1",
     );
+  });
+
+  it("refuses to execute without a connected agent and fails a step retryably if it disconnects", async () => {
+    const { root } = await repository();
+    const loop = parseLoop({
+      ...loopWith([implement], []),
+      steps: [{ ...implement, binding: { provider: "kiro", model: "agent-default" } }],
+    });
+    const run = await createProjectRun(root, loop);
+    await withServer(root, async (url) => {
+      const refused = await post(`${url}/api/runs/${run.snapshot.id}/execute`);
+      expect(refused.status).toBe(409);
+      expect((await refused.json()).error).toContain(
+        "kiro is not connected in this Code Factory session",
+      );
+    });
+    expect((await readRun(root, run.snapshot.id))?.status).toBe("pending");
+    // If the agent disconnects after the check, the step fails with its reason and stays retryable.
+    const done = await executeRun(root, run.snapshot.id, () => null);
+    expect(done.status).toBe("failed");
+    const reason = done.evidence.find(
+      (item) => item.kind === "event" && item.title === "agent-not-connected",
+    );
+    expect(reason?.kind === "event" && reason.detail).toContain("Verify it in Settings");
+    expect(retryBlocker(done, "implement")).toBeNull();
   });
 
   it("needs no promotion when the run branch already carries the ticket name", async () => {

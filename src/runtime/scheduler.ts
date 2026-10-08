@@ -46,6 +46,7 @@ import {
   SETUP_STARTED,
 } from "../domain/run-branch.js";
 import { describeToolGrant, TOOL_PERMISSION } from "../domain/tool-grant.js";
+import { declaredOutcome, firstLineOutcome } from "../domain/outcome.js";
 import { mutateRun, readRun } from "./storage.js";
 import { acknowledgeGuidance, deliverQueuedGuidance, expireQueuedGuidance } from "./guidance.js";
 import { snapshotFileDiffs } from "./inspection.js";
@@ -313,12 +314,31 @@ const stepInputs = (record: RunRecord, stepId: string, candidateId?: string) => 
 };
 
 const reviewResult = (output: string): Pick<StepResult, "outcome" | "findings"> => {
-  const [verdict, ...lines] = output.trim().split(/\r?\n/);
+  const [, ...lines] = output.trim().split(/\r?\n/);
   return {
-    outcome: verdict?.trim() ?? "",
+    outcome: firstLineOutcome(output),
     findings: lines.map((line) => line.trim()).filter(Boolean),
   };
 };
+
+/**
+ * A decision step's outcome is the declared branch named on its first line; other agent steps
+ * keep their whole output as the outcome, as before.
+ */
+const agentOutcome = (record: RunRecord, stepId: string, output: string): string => {
+  const branches = record.snapshot.loop.decisions
+    .find((item) => item.stepId === stepId)
+    ?.branches.map((branch) => branch.outcome);
+  if (!branches) return output.trim();
+  return declaredOutcome(output, branches) ?? output.trim().split(/\r?\n/)[0]?.trim() ?? "";
+};
+
+const AGENT_NOT_CONNECTED = "agent-not-connected";
+export const agentNotConnected = (provider: string): string =>
+  `${provider} is not connected in this Code Factory session (verified connections last until the runtime restarts). Verify it in Settings, then retry this step.`;
+
+/** Evidence title for an agent result that Code Factory rejected after the agent reported success. */
+const RESULT_REJECTED = "result-rejected";
 
 const processGroupExists = (pid: number): boolean => {
   try {
@@ -832,15 +852,28 @@ const executeOnce = async (
             ...(priorCompletion.detail
               ? definition.stage === "review"
                 ? reviewResult(priorCompletion.detail)
-                : { outcome: priorCompletion.detail.trim() }
+                : { outcome: agentOutcome(record, stepId, priorCompletion.detail) }
               : {}),
             ...(priorCompletion.detail ? { summary: priorCompletion.detail } : {}),
           };
         } else if (copyFailure) {
           result = { status: "failed", summary: copyFailure };
         } else if (!adapter || !binding) {
-          result = { status: "unavailable" };
           if (recovering) throw new Error("The selected adapter is not connected for recovery.");
+          // A failed (retryable) step with its reason, never a silent, final "unavailable" run.
+          const detail = agentNotConnected(binding?.provider ?? "The selected agent");
+          result = { status: "failed", summary: detail };
+          await commit((current) =>
+            appendLocalEvent(
+              current,
+              stepId,
+              attempt.id,
+              "check",
+              AGENT_NOT_CONNECTED,
+              detail,
+              "failed",
+            ),
+          );
         } else {
           result = { status: "failed" };
           const allowedOutcomes =
@@ -941,7 +974,7 @@ const executeOnce = async (
                   status: event.outcome,
                   ...(definition.stage === "review"
                     ? reviewResult(event.output)
-                    : { outcome: event.output.trim() }),
+                    : { outcome: agentOutcome(record, stepId, event.output) }),
                   summary: event.output,
                 };
               if (event.type === "input-request")
@@ -987,6 +1020,7 @@ const executeOnce = async (
         (await fileDigest(executionDirectory, mode)) !== step.candidateId
       )
         result = { status: "failed", summary: "Reviewer changed the frozen candidate." };
+      const reported = result;
       const blockedSummary = result.summary;
       if (
         result.status === "succeeded" &&
@@ -1018,6 +1052,13 @@ const executeOnce = async (
               ? "Review requested changes without actionable findings."
               : `Undeclared review verdict: ${result.outcome ?? "none"}`,
         };
+      if (reported.status === "succeeded" && result.status === "failed" && result.summary) {
+        // The agent said it succeeded; record why Code Factory did not accept that result.
+        const detail = result.summary;
+        await commit((current) =>
+          appendLocalEvent(current, stepId, attempt.id, "check", RESULT_REJECTED, detail, "failed"),
+        );
+      }
       // Commit after every result re-validation and before the digest, so hook edits (formatters)
       // belong to the recorded candidate and a failed result never reaches the branch.
       if (result.status === "succeeded" && commitsRunBranch && writesRunBranch(record, stepId)) {

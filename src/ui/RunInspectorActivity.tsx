@@ -4,7 +4,8 @@ import type { Evidence } from "../domain/evidence.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { scopeEvidence, type RunScope } from "./run-view-model";
-import { coalesceActivity, latestSequence, showsTitle } from "./activity-entries";
+import { coalesceActivity, isAgentText, latestSequence, showsTitle } from "./activity-entries";
+import { Markdown } from "./Markdown";
 
 type Filter = "All" | "Messages" | "Tools" | "Checks" | "Errors";
 const filters: Filter[] = ["All", "Messages", "Tools", "Checks", "Errors"];
@@ -120,11 +121,14 @@ export const RunInspectorActivity = ({
               </time>
             </div>
             {showsTitle(item) && <strong className="mt-1 block">{item.title}</strong>}
-            {item.detail && (
-              <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
-                {item.detail}
-              </p>
-            )}
+            {item.detail &&
+              (isAgentText(item) ? (
+                <Markdown className="mt-1 text-xs">{item.detail}</Markdown>
+              ) : (
+                <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
+                  {item.detail}
+                </p>
+              ))}
           </li>
         ))}
         {!events.length && (

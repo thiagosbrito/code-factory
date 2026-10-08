@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
+import { RetryIcon } from "./icons";
 import { NOT_REACHED, stepDisplayStatus } from "./run-view-model";
 
 type Point = { x: number; y: number };
@@ -36,10 +37,13 @@ export const RunGraph = ({
   selectedStepId,
   onSelect,
   overlay,
+  retry,
 }: {
   run: RunRecord;
   selectedStepId: string | null;
   onSelect: (id: string) => void;
+  /** A retry button pinned to the failed node's corner; it keeps its size at any zoom. */
+  retry?: { stepId: string; label: string; disabled: boolean; onRetry: () => void } | null;
   /** Floating controls over the canvas's top-right corner; they never scroll with the graph. */
   overlay?: React.ReactNode;
 }) => {
@@ -63,6 +67,7 @@ export const RunGraph = ({
   }, []);
   const fitZoom = canvasWidth ? Math.max(0.25, Math.min(1, (canvasWidth - 2) / width)) : 1;
   const zoom = manualZoom ?? fitZoom;
+  const retryPoint = retry ? layout.get(retry.stepId) : undefined;
   const setZoom = (next: (value: number) => number) => setManualZoom(next(zoom));
   const moveSelection = (id: string, direction: number) => {
     const ids = run.snapshot.loop.steps.map((step) => step.id);
@@ -229,6 +234,22 @@ export const RunGraph = ({
                 );
               })}
             </div>
+            {retryPoint && retry && (
+              <Button
+                size="sm"
+                aria-label={retry.label}
+                title={retry.label}
+                disabled={retry.disabled}
+                className="absolute z-10 h-8 w-8 rounded-full p-0 shadow-md"
+                style={{
+                  left: (retryPoint.x + nodeWidth) * zoom - 16,
+                  top: retryPoint.y * zoom - 16,
+                }}
+                onClick={retry.onRetry}
+              >
+                <RetryIcon />
+              </Button>
+            )}
           </div>
         </section>
       </div>

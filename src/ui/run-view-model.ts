@@ -126,13 +126,19 @@ export const runStopCause = (run: RunRecord): RunStopCause | undefined => {
       kind: "step-failed",
       stepId: step.stepId,
       name: nameOf(step.stepId),
-      summary: (
-        latestEventDetail(run, step.stepId, attemptId, [
-          "commit-failed",
-          "completed",
-          "execution-interrupted",
-        ]) ?? ""
-      ).slice(0, 600),
+      summary: // The latest of these explains the failure: Code Factory's own reasons are recorded
+        // after the agent's completion, so they win over an agent that reported success.
+        (
+          latestEventDetail(run, step.stepId, attemptId, [
+            "commit-failed",
+            "completed",
+            "Check completed",
+            "execution-interrupted",
+            "result-rejected",
+            "read-only-violation",
+            "checkout-moved",
+          ]) ?? ""
+        ).slice(0, 600),
     };
   }
   return run.status === "canceled"

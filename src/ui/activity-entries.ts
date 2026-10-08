@@ -144,3 +144,10 @@ export const activityPreview = (evidence: readonly Evidence[]): string | undefin
 
 /** The title is only worth showing when it says more than the type label beside it. */
 export const showsTitle = (entry: PublicEvent): boolean => entry.title !== entry.type;
+
+/**
+ * Agent prose (messages and completion summaries) is Markdown; tool, check and lifecycle output
+ * is shown as written, because formatting would change logs and command output.
+ */
+export const isAgentText = (entry: PublicEvent): boolean =>
+  entry.type === "message" || (entry.type === "lifecycle" && entry.title === "completed");

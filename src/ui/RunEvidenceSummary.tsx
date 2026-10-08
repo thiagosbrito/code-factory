@@ -1,5 +1,6 @@
 import type { EvidenceSummary } from "../domain/acceptance.js";
 import { Button } from "@/components/ui/button";
+import { Markdown } from "./Markdown";
 
 /** Counts, requirements, gaps and findings of a run's final evidence, shown in its dialog. */
 export const RunEvidenceSummary = ({
@@ -86,12 +87,25 @@ export const RunEvidenceSummary = ({
         </div>
         <div className="md:col-span-2">
           <h3 className="text-sm font-medium">Review findings</h3>
-          {summary?.findings.length ? (
-            <ul className="mt-2 list-inside list-disc space-y-1 text-sm [overflow-wrap:anywhere]">
-              {summary.findings.map((finding, index) => (
-                <li key={index}>{finding}</li>
+          {summary?.reviews?.length ? (
+            <ul className="mt-2 space-y-3">
+              {summary.reviews.map((review) => (
+                <li key={review.stepId} className="rounded-md border bg-white p-3">
+                  <p className="flex items-center gap-2 text-sm font-semibold">
+                    {review.name}
+                    <span
+                      className={`run-status run-status-${review.verdict === "pass" ? "succeeded" : "blocked"}`}
+                    >
+                      {review.verdict}
+                    </span>
+                  </p>
+                  {/* Findings are stored line by line; each line stays its own block. */}
+                  <Markdown className="mt-2">{review.findings.join("\n\n")}</Markdown>
+                </li>
               ))}
             </ul>
+          ) : summary?.findings.length ? (
+            <Markdown className="mt-2">{summary.findings.join("\n\n")}</Markdown>
           ) : (
             <p className="mt-2 text-sm text-muted-foreground">None</p>
           )}
