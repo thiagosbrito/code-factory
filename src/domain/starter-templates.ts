@@ -1,3 +1,8 @@
+import {
+  changedFilesGateCommand,
+  DEFAULT_COVERAGE_THRESHOLD,
+  type ChangedFilesGate,
+} from "./gates.js";
 import { parseLoop, type LoopDefinition } from "./loop.js";
 
 export type StarterId = "compact" | "staged";
@@ -10,9 +15,9 @@ export const starterTemplates: { id: StarterId; name: string; description: strin
   },
   {
     id: "staged",
-    name: "Staged implementation and six reviews",
+    name: "Gated implementation and six reviews",
     description:
-      "Evidence, planning, implementation, three review pairs, and final adjudication with one repair round.",
+      "Evidence, planning, implementation, lint/type/coverage gates on the changed files, six read-only reviews, and final adjudication with one repair round.",
   },
 ];
 
@@ -36,6 +41,29 @@ const step = (
 });
 
 const edge = (from: string, to: string) => ({ from, to });
+
+/** A check step running one changed-files gate inside the implementation round. */
+const gate = (
+  id: string,
+  name: string,
+  check: ChangedFilesGate,
+  output: string,
+): LoopDefinition["steps"][number] => ({
+  id,
+  name,
+  kind: "check",
+  stage: "validation",
+  role: "Changed-files gate",
+  instruction: changedFilesGateCommand(check),
+  expectedOutputs: [output],
+  groupId: "implementation-round",
+});
+
+const GATE_STEPS = ["gate-lint", "gate-types", "gate-coverage"];
+/** The staged candidate passes every gate, then the diff check, before the reviews start. */
+const GATE_CHAIN = ["candidate", ...GATE_STEPS, "diff-check"];
+const REVIEWER_RULES =
+  " You are read-only and cannot run commands: judge the code and the check receipts in your inputs (lint, types, coverage and diff checks of this candidate). Return blocked only when a receipt you need is missing.";
 
 export const createStarterDraft = (starter: StarterId, id: string): LoopDefinition => {
   if (starter === "compact") {
@@ -81,7 +109,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
   return parseLoop({
     schemaVersion: 2,
     id,
-    name: "Staged implementation and six reviews",
+    name: "Gated implementation and six reviews",
     version: 1,
     status: "draft",
     steps: [
@@ -124,7 +152,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "Implement or repair",
         "implementation",
         "Implementer",
-        "Implement the plan. On a repair round, address the adjudicated findings using the retained candidate and evidence.",
+        `Implement the plan. On a repair round, address the adjudicated findings using the retained candidate and evidence. Before you finish, run the changed-files gates yourself (the command and the run's start commit are given below) and fix what fails: lint and type errors in changed files, and at least ${DEFAULT_COVERAGE_THRESHOLD}% line coverage from meaningful tests for every changed source file.`,
         ["Source changes and change summary"],
         "implementation-round",
       ),
@@ -137,14 +165,13 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         ["Candidate identity and changed files"],
         "implementation-round",
       ),
-      step(
-        "checks",
-        "Inspect candidate and run checks",
-        "validation",
-        "Validator",
-        "Inspect the staged candidate, promote it for validation, run relevant checks, and retain receipts.",
-        ["Check receipts and candidate identity"],
-        "implementation-round",
+      gate("gate-lint", "Lint changed files", "lint", "Lint receipt for the changed files"),
+      gate("gate-types", "Type-check changed files", "types", "Type receipt for the changed files"),
+      gate(
+        "gate-coverage",
+        `Coverage of changed files (${DEFAULT_COVERAGE_THRESHOLD}%)`,
+        "coverage",
+        "Line coverage receipt per changed source file",
       ),
       {
         id: "diff-check",
@@ -161,7 +188,8 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "Code quality review",
         "review",
         "Code quality reviewer",
-        "Review the same candidate for correctness, architecture, readability, and maintainability.",
+        "Review the same candidate for correctness, architecture, readability, and maintainability." +
+          REVIEWER_RULES,
         ["Quality verdict and findings"],
         "implementation-round",
       ),
@@ -170,7 +198,8 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "React and accessibility review",
         "review",
         "React and accessibility reviewer",
-        "Review the same candidate for React behavior, interaction, and accessibility.",
+        "Review the same candidate for React behavior, interaction, and accessibility." +
+          REVIEWER_RULES,
         ["React and accessibility verdict and findings"],
         "implementation-round",
       ),
@@ -179,7 +208,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "Performance review",
         "review",
         "Performance reviewer",
-        "Review the same candidate for performance and resource use.",
+        "Review the same candidate for performance and resource use." + REVIEWER_RULES,
         ["Performance verdict and findings"],
         "implementation-round",
       ),
@@ -188,7 +217,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "Security review",
         "review",
         "Security reviewer",
-        "Review the same candidate for trust boundaries and security risks.",
+        "Review the same candidate for trust boundaries and security risks." + REVIEWER_RULES,
         ["Security verdict and findings"],
         "implementation-round",
       ),
@@ -197,7 +226,8 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "Business acceptance review",
         "review",
         "Acceptance reviewer",
-        "Review the same candidate against the requested business behavior and acceptance criteria.",
+        "Review the same candidate against the requested business behavior and acceptance criteria." +
+          REVIEWER_RULES,
         ["Acceptance verdict and findings"],
         "implementation-round",
       ),
@@ -206,7 +236,8 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "Test quality review",
         "review",
         "Test reviewer",
-        "Review the same candidate for meaningful test coverage and validation evidence.",
+        "Review the same candidate for meaningful test coverage and validation evidence." +
+          REVIEWER_RULES,
         ["Test verdict and findings"],
         "implementation-round",
       ),
@@ -215,7 +246,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "Verify and adjudicate",
         "validation",
         "Adjudicator",
-        "Read all six review verdicts and check receipts for the same candidate. Return pass only when acceptance is met; otherwise return repair with concrete findings. A second repair decision rejects the run with evidence retained.",
+        "Read all six review verdicts and check receipts for the same candidate. Return pass only when acceptance is met; otherwise return repair with concrete findings. A second repair decision rejects the run with evidence retained. The changed-files gates (lint, types, coverage) passed before the reviews ran; weigh the reviewers' findings.",
         ["Pass or repair decision with findings"],
         "implementation-round",
       ),
@@ -235,8 +266,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
       edge("ui-evidence", "plan"),
       edge("plan", "implement"),
       edge("implement", "candidate"),
-      edge("candidate", "checks"),
-      edge("checks", "diff-check"),
+      ...GATE_CHAIN.slice(1).map((to, index) => edge(GATE_CHAIN[index] ?? "", to)),
       ...[
         "quality-review",
         "react-review",
@@ -269,7 +299,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         stepIds: [
           "implement",
           "candidate",
-          "checks",
+          ...GATE_STEPS,
           "diff-check",
           "quality-review",
           "react-review",

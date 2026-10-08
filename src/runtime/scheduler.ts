@@ -57,6 +57,8 @@ import {
   listUncommittedPaths,
 } from "./run-branch.js";
 import { resolveToolGrant } from "./tool-grant.js";
+import { ensureChangedFilesGate } from "./gates.js";
+import { CHANGED_FILES_GATE_PATH } from "../domain/gates.js";
 import {
   currentBranch,
   fileDigest,
@@ -215,9 +217,12 @@ const checkEnvironment = (base: string, files: string[]): NodeJS.ProcessEnv => (
 
 /** The same facts for agent steps, so they can scope their own checks to this run's changes. */
 const changedFilesContext = (base: string, files: string[]): string =>
-  files.length
-    ? `This run started at commit ${base}. Files changed by this run so far (${files.length}):\n${files.slice(0, 200).join("\n")}${files.length > 200 ? `\n… and ${files.length - 200} more (git diff --name-only ${base})` : ""}`
-    : `This run started at commit ${base}. No files have changed in this run yet.`;
+  [
+    files.length
+      ? `This run started at commit ${base}. Files changed by this run so far (${files.length}):\n${files.slice(0, 200).join("\n")}${files.length > 200 ? `\n… and ${files.length - 200} more (git diff --name-only ${base})` : ""}`
+      : `This run started at commit ${base}. No files have changed in this run yet.`,
+    `The changed-files gates run as \`node ${CHANGED_FILES_GATE_PATH} <lint|types|coverage> --base ${base}\` from the project root.`,
+  ].join("\n");
 
 /** Every step upstream of `stepId` in the declared dependency graph. */
 const ancestorsOf = (record: RunRecord, stepId: string): Set<string> => {
@@ -713,6 +718,8 @@ const executeOnce = async (
       const base = record.snapshot.baseline.sourceRevision;
       const runChanges =
         isProjectRun && base && !copyFailure ? await listRunChangedFiles(workspace, base) : null;
+      // Template loops call the gate by path, so a deleted `.code-factory/` cannot break a run.
+      if (isProjectRun && !copyFailure) await ensureChangedFilesGate(workspace);
       const inputs = stepInputs(record, stepId);
       const inspectable =
         commitsRunBranch ||

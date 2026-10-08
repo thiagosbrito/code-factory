@@ -37,8 +37,28 @@ describe("starter templates", () => {
     expect(compact.steps.every((step) => !step.binding)).toBe(true);
     const staged = createStarterDraft("staged", "owned-staged");
     expect(staged.status).toBe("draft");
-    expect(staged.steps).toHaveLength(16);
+    expect(staged.name).toBe("Gated implementation and six reviews");
+    expect(staged.steps).toHaveLength(18);
     expect(staged.steps.filter((step) => step.stage === "review")).toHaveLength(6);
+    expect(staged.steps.find((step) => step.id === "checks")).toBeUndefined();
+    expect(
+      staged.steps
+        .filter((step) => step.id.startsWith("gate-"))
+        .map((step) => [step.id, step.kind, step.instruction]),
+    ).toEqual([
+      ["gate-lint", "check", "node .code-factory/gates/changed-files-gate.mjs lint"],
+      ["gate-types", "check", "node .code-factory/gates/changed-files-gate.mjs types"],
+      ["gate-coverage", "check", "node .code-factory/gates/changed-files-gate.mjs coverage"],
+    ]);
+    // Reviewers are told they are read-only and to rely on the gate receipts.
+    expect(
+      staged.steps
+        .filter((step) => step.stage === "review")
+        .every((step) => step.instruction.includes("You are read-only and cannot run commands")),
+    ).toBe(true);
+    expect(staged.steps.find((step) => step.id === "implement")?.instruction).toContain(
+      "at least 90% line coverage",
+    );
     expect(staged.steps.find((step) => step.id === "diff-check")).toMatchObject({
       kind: "check",
       instruction: "git diff --check HEAD",
@@ -72,7 +92,10 @@ describe("starter templates", () => {
     for (const outcome of ["repair", "pass"]) {
       record = finish(record, "implement");
       record = finish(record, "candidate");
-      record = finish(record, "checks");
+      for (const gate of ["gate-lint", "gate-types", "gate-coverage"]) {
+        expect(ready(record)).toEqual([gate]);
+        record = finish(record, gate);
+      }
       expect(ready(record)).toEqual(["diff-check"]);
       record = finish(record, "diff-check");
       expect(ready(record)).toEqual(reviews);
@@ -100,7 +123,9 @@ describe("starter templates", () => {
       for (const id of [
         "implement",
         "candidate",
-        "checks",
+        "gate-lint",
+        "gate-types",
+        "gate-coverage",
         "diff-check",
         "quality-review",
         "react-review",
@@ -129,7 +154,9 @@ describe("starter templates", () => {
       "plan",
       "implement",
       "candidate",
-      "checks",
+      "gate-lint",
+      "gate-types",
+      "gate-coverage",
       "diff-check",
       "quality-review",
       "react-review",
@@ -182,7 +209,8 @@ describe("starter templates", () => {
       validation: "passed",
       gaps: [],
     });
-    expect(acceptEvidence(complete, "candidate-a").evidence).toHaveLength(8);
+    // Four check receipts (three gates and the diff check), six reviews and the acceptance.
+    expect(acceptEvidence(complete, "candidate-a").evidence).toHaveLength(11);
 
     const missingCheck = runRecordSchema.parse({
       ...complete,

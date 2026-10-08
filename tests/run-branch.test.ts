@@ -525,6 +525,31 @@ describe("in-project run branch", () => {
     expect(instructions.review).toContain("Input from implement");
   });
 
+  it("provides the changed-files gate to check steps even after .code-factory was deleted", async () => {
+    const { root } = await repository();
+    const lint = {
+      id: "gate-lint",
+      name: "Lint changed files",
+      kind: "check",
+      stage: "validation",
+      role: "Changed-files gate",
+      instruction: "node .code-factory/gates/changed-files-gate.mjs lint",
+    };
+    const run = await createProjectRun(
+      root,
+      loopWith([implement, lint], [{ from: "implement", to: "gate-lint" }]),
+    );
+    const done = await executeRun(root, run.snapshot.id, () => writer);
+    expect(outcome(done)).toEqual({ status: "succeeded", failures: [] });
+    const output = done.evidence.find(
+      (item) =>
+        item.kind === "event" && item.stepId === "gate-lint" && item.title === "Check output",
+    );
+    // The writer changed only feature.txt, so the gate found nothing to lint.
+    expect(output?.kind === "event" && output.detail).toContain("No changed JS/TS files to lint.");
+    expect(git(root, "status", "--porcelain", "--", ".", ":(exclude).code-factory")).toBe("");
+  });
+
   it("commits each changing writing step with run, step and attempt trailers and skips no-op steps", async () => {
     const { root } = await repository();
     const run = await createProjectRun(

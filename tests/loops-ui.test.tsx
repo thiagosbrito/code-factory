@@ -269,7 +269,7 @@ describe("loops library UI", () => {
     await waitFor(() => expect(requests.some((request) => request.method === "PUT")).toBe(true));
     const saved = requests.find((request) => request.method === "PUT")!.body!;
     expect(saved.status).toBe("draft");
-    expect(saved.steps).toHaveLength(16);
+    expect(saved.steps).toHaveLength(18);
     expect(saved.steps.filter((step) => step.stage === "review")).toHaveLength(6);
     expect(requests.some((request) => request.method === "POST")).toBe(false);
   });
