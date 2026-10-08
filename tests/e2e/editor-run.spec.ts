@@ -644,9 +644,11 @@ test("verified model selection, loop controls, and run intake work as one keyboa
     .toContain('"validation":"passed"');
   await expect(page.getByText(/Local validation:/)).toContainText("Passed");
   await expect(page.getByRole("button", { name: /Code quality review, succeeded/ })).toBeVisible();
+  // Changed files open from the evidence dialog, which hands off to the run inspector.
+  await page.getByRole("button", { name: "Final evidence summary" }).click();
   await page
+    .getByRole("dialog", { name: "Final evidence summary" })
     .getByRole("button", { name: /Changed files/ })
-    .first()
     .click();
   await expect(page.getByRole("button", { name: /fixture-output\.txt added/ })).toBeVisible();
   await expect(page.getByRole("region", { name: "Selected diff" })).toContainText(
@@ -740,8 +742,10 @@ test("a run changes the project folder itself on a new branch, is promoted, and 
   ) as { toolGrants?: { codex?: { scope: string[] } } };
   expect(config.toolGrants?.codex?.scope).toEqual(["commandExecution"]);
 
-  const runBranch = page.getByRole("region", { name: "Run branch" });
-  await expect(runBranch).toContainText(/code-factory\/[0-9a-f]{8}/);
+  // The run branch shows in the header; its panel opens from the floating icon over the canvas.
+  await expect(page.getByText(/^code-factory\/[0-9a-f]{8}$/)).toBeVisible();
+  const graph = page.getByRole("region", { name: "Execution graph" });
+  const runBranch = page.getByRole("dialog", { name: "Run branch" });
   await expect
     .poll(async () => {
       const body = (await (await page.request.get(`${harness.origin}/api/runs`)).json()) as {
@@ -772,6 +776,7 @@ test("a run changes the project folder itself on a new branch, is promoted, and 
   });
   expect(overflow).toEqual({ page: 0, graph: 0 });
   const previous = userBranch.replace("refs/heads/", "");
+  await graph.getByRole("button", { name: "Run branch" }).click();
   await expect(runBranch).toContainText(
     `Your project checkout is on this branch (it was on ${previous}).`,
   );
@@ -779,8 +784,11 @@ test("a run changes the project folder itself on a new branch, is promoted, and 
   const create = runBranch.getByRole("button", { name: "Create ticket branch" });
   await expect(create).toBeDisabled();
   await expect(runBranch).toContainText("Accept the evidence before creating a ticket branch.");
+  await page.keyboard.press("Escape");
+  await expect(graph.getByRole("button", { name: "Run branch" })).toBeFocused();
   await page.getByRole("button", { name: "Accept evidence" }).click();
   await expect(page.getByText(/Human acceptance:/)).toContainText("accepted");
+  await graph.getByRole("button", { name: "Run branch" }).click();
   await expect(create).toBeEnabled();
   await create.click();
   const dialog = page.getByRole("dialog", { name: "Create ticket branch" });
@@ -802,6 +810,8 @@ test("a run changes the project folder itself on a new branch, is promoted, and 
   expect(git("rev-parse", "HEAD")).toBe(userHead);
   await expect(access(join(harness.projectDirectory, "fixture-output.txt"))).rejects.toThrow();
   expect(git("log", "-1", "--format=%B", branch)).toContain("Code-Factory-Step: implement");
+  await page.keyboard.press("Escape");
+  await expect(runBranch).toHaveCount(0);
 
   // Revoke from Setup: the grant leaves project.json and focus moves to the new Allow… button.
   await page

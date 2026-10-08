@@ -38,6 +38,7 @@ export const RunWorkspacePanel = ({
   onPromote,
   onRemove,
   onReturn,
+  bare = false,
 }: {
   workspace: RunWorkspace;
   summary: EvidenceSummary | null;
@@ -46,6 +47,8 @@ export const RunWorkspacePanel = ({
   onPromote: (name: string) => Promise<PromoteFailure | { warning?: string }>;
   onRemove: () => Promise<string | null>;
   onReturn: () => Promise<string | null>;
+  /** Inside a dialog: no card border or padding of its own. */
+  bare?: boolean;
 }) => {
   const { message, setMessage, copiedKey, copy } = useCopyAnnouncer();
   const [editor, setEditor] = useState<EditorCli>(storedEditor);
@@ -88,7 +91,10 @@ export const RunWorkspacePanel = ({
   const path = workspace.path ?? "";
   const command = openInEditorCommand(editor, path);
   return (
-    <section aria-labelledby={headingId} className="rounded-lg border bg-white p-5">
+    <section
+      aria-labelledby={headingId}
+      className={bare ? "bg-white" : "rounded-lg border bg-white p-5"}
+    >
       <output aria-live="polite" className="sr-only">
         {message}
       </output>

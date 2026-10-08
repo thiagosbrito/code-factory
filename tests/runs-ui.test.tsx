@@ -10,6 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { RunWorkspace } from "../src/domain/run-branch.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
 import { claimStep, completeStep } from "../src/domain/scheduler.js";
@@ -421,10 +422,17 @@ it("shows validation separately from human acceptance and records an explicit cl
       onBack={vi.fn<() => void>()}
     />,
   );
+  // The header keeps validation, acceptance and the Accept action visible over the canvas.
   expect(screen.getByText(/Local validation:/).textContent).toContain("Human acceptance: pending");
-  expect(screen.getByText("Checked edge case")).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "Accept evidence" }));
   expect(onAccept).toHaveBeenCalledOnce();
+  // Requirements and findings live in the evidence dialog behind its icon.
+  expect(screen.queryByText("Checked edge case")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Final evidence summary" }));
+  const dialog = screen.getByRole("dialog", { name: "Final evidence summary" });
+  expect(within(dialog).getByText("Checked edge case")).toBeTruthy();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Accept evidence" }));
+  expect(onAccept).toHaveBeenCalledTimes(2);
   view.rerender(
     <RunDetail
       run={makeRun()}
@@ -440,6 +448,70 @@ it("shows validation separately from human acceptance and records an explicit cl
   );
   expect(screen.queryByRole("button", { name: "Accept evidence" })).toBeNull();
   expect(screen.getByText(/Earlier acceptance remains/)).toBeTruthy();
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Final evidence summary" }),
+  );
+});
+
+it("keeps the canvas in front: details open from icons and run controls float over the graph", async () => {
+  const onExecute = vi.fn<() => void>();
+  const onCancel = vi.fn<() => void>();
+  const workspace: RunWorkspace = {
+    kind: "project",
+    path: "/work/repo",
+    branch: "BMAP-9999",
+    state: "present",
+    dirty: false,
+    removalBlocked: null,
+    commits: [],
+    promotion: null,
+    defaultBranchName: "",
+    setupConfigured: false,
+    checkout: {
+      current: "BMAP-9999",
+      onRunBranch: true,
+      previousBranch: "main",
+      previousRevision: "a".repeat(40),
+      returnBlocker: "Finish or cancel the run before switching back to main.",
+    },
+  };
+  const run: RunRecord = { ...makeRun(), status: "pending" };
+  render(
+    <RunDetail
+      run={run}
+      summary={null}
+      accepting={false}
+      onAccept={vi.fn<() => void>()}
+      connected
+      executing={false}
+      onExecute={onExecute}
+      onCancel={onCancel}
+      onBack={vi.fn<() => void>()}
+      workspace={workspace}
+    />,
+  );
+  const user = userEvent.setup();
+  // The description, branch panel and evidence are not on the page until asked for.
+  expect(screen.queryByText(run.snapshot.task.description)).toBeNull();
+  expect(screen.queryByRole("region", { name: "Run branch" })).toBeNull();
+  const graph = screen.getByRole("region", { name: "Execution graph" });
+  await user.click(within(graph).getByRole("button", { name: "Execute run" }));
+  await user.click(within(graph).getByRole("button", { name: "Cancel run" }));
+  expect(onExecute).toHaveBeenCalledOnce();
+  expect(onCancel).toHaveBeenCalledOnce();
+  await user.click(within(graph).getByRole("button", { name: "Description" }));
+  expect(
+    within(screen.getByRole("dialog", { name: "Description" })).getByText(
+      run.snapshot.task.description,
+    ),
+  ).toBeTruthy();
+  await user.keyboard("{Escape}");
+  await user.click(within(graph).getByRole("button", { name: "Run branch" }));
+  const branch = within(screen.getByRole("dialog", { name: "Run branch" }));
+  expect(branch.getByText("BMAP-9999")).toBeTruthy();
+  expect(branch.getByRole("button", { name: "Back to main" }).hasAttribute("disabled")).toBe(true);
 });
 
 it("keeps a prior acceptance receipt visible but marks it invalidated after source changes", async () => {
