@@ -12,6 +12,7 @@ import {
   isProjectRun,
   PROJECT_DIRTY,
   PROJECT_WORKSPACE,
+  RUN_BRANCH_PREFIX,
   READ_ONLY_LEFTOVERS,
   READ_ONLY_VIOLATION,
   promoteInputSchema,
@@ -222,6 +223,39 @@ const projectRoot = async (project: string): Promise<string> => {
   if (top.code !== 0 || (await realpath(top.stdout.trim()).catch(() => null)) !== real)
     throw new ProjectError("The selected project must be the root of a Git repository.", 422);
   return real;
+};
+
+/**
+ * Files that exist now and differ from the run's start commit: committed run work, uncommitted
+ * edits and new untracked files, without deletions, ignored files or `.code-factory`. Check
+ * commands receive them so lint, type and coverage gates can scope to the run's changes.
+ */
+export const listRunChangedFiles = async (project: string, base: string): Promise<string[]> => {
+  const tracked = await git(
+    project,
+    NO_OPTIONAL_LOCKS,
+    "diff",
+    "--name-only",
+    "--no-renames",
+    "--diff-filter=d",
+    "-z",
+    base,
+    "--",
+    ".",
+    ":(exclude).code-factory",
+  );
+  const untracked = await git(
+    project,
+    NO_OPTIONAL_LOCKS,
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+    "-z",
+    "--",
+    ".",
+    ":(exclude).code-factory",
+  );
+  return [...new Set(`${tracked}${untracked}`.split("\0").filter(Boolean))].sort();
 };
 
 /** Uncommitted tracked or non-ignored untracked changes, excluding Code Factory's own data. */
@@ -478,7 +512,10 @@ export const commitStepChanges = async (
   if (staged.code !== 1) return commitFailure(staged);
   const definition = record.snapshot.loop.steps.find((item) => item.id === stepId);
   const [subject, body] = stepCommitMessage({
-    ticketId: defaultTicketBranch(record.snapshot.task),
+    // Without a ticket, a branch the user named (say BMAP-9999) still labels the commit.
+    ticketId:
+      defaultTicketBranch(record.snapshot.task) ||
+      (branch.startsWith(RUN_BRANCH_PREFIX) ? "" : branch),
     runId: record.snapshot.id,
     stepId,
     stepName: definition?.name || stepId,

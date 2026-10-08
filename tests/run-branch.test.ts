@@ -275,6 +275,9 @@ describe("in-project run branch", () => {
     // The user's own folder holds the change, committed on the run branch with their identity.
     expect(await readFile(join(root, "feature.txt"), "utf8")).toBe("feature\n");
     expect(git(root, "log", "-1", "--format=%an <%ae>")).toBe("Test <test@example.com>");
+    expect(git(root, "log", "-1", "--format=%s")).toBe(
+      "code-factory: Implement (implement) attempt 1",
+    );
     expect(git(root, "show", "--name-only", "--format=", "HEAD")).toBe("feature.txt");
     expect(git(root, "status", "--porcelain", "--", ".", ":(exclude).code-factory")).toBe("");
     // Code Factory's run records live in the project but never reach a commit.
@@ -473,6 +476,53 @@ describe("in-project run branch", () => {
     expect(canceled.status).toBe("canceled");
     await expect(cancelRun(root, crypto.randomUUID())).rejects.toMatchObject({ status: 404 });
     await expect(cancelRun(root, run.snapshot.id)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("gives checks the run's changed files and reviewers the same-candidate validation evidence", async () => {
+    const { root } = await repository();
+    const validate = {
+      id: "validate",
+      name: "Validate",
+      kind: "agent",
+      stage: "validation",
+      role: "validator",
+      instruction: "Validate",
+    };
+    const scoped = {
+      id: "scoped",
+      name: "Scoped lint",
+      kind: "check",
+      stage: "validation",
+      role: "checker",
+      instruction:
+        'test "$CODE_FACTORY_CHANGED_FILES" = "feature.txt" && test -n "$CODE_FACTORY_BASE_REVISION"',
+    };
+    const run = await createProjectRun(
+      root,
+      loopWith(
+        [implement, validate, scoped, review],
+        [
+          { from: "implement", to: "validate" },
+          { from: "validate", to: "scoped" },
+          { from: "scoped", to: "review" },
+        ],
+      ),
+    );
+    const instructions: Record<string, string> = {};
+    const recording = acting(async (input) => {
+      instructions[input.stepId] = input.instruction;
+      if (input.stepId === "implement")
+        await writeFile(join(input.projectDirectory, "feature.txt"), "feature\n");
+    });
+    const done = await executeRun(root, run.snapshot.id, () => recording);
+    expect(outcome(done)).toEqual({ status: "succeeded", failures: [] });
+    expect(instructions.validate).toContain(
+      `This run started at commit ${run.snapshot.baseline.sourceRevision}. Files changed by this run so far (1):\nfeature.txt`,
+    );
+    // The reviewer depends only on the check, yet sees the validation step two hops back.
+    expect(instructions.review).toContain("Input from scoped");
+    expect(instructions.review).toContain("Input from validate");
+    expect(instructions.review).toContain("Input from implement");
   });
 
   it("commits each changing writing step with run, step and attempt trailers and skips no-op steps", async () => {
@@ -869,6 +919,15 @@ describe("promotion and removal through the local API", () => {
       expect(git(root, "symbolic-ref", "HEAD")).toBe(`refs/heads/${branch}`);
       expect((await post(`${base}/promote`, { branch: "other" })).status).toBe(409);
     });
+  });
+
+  it("labels a description-only run's commits with the branch the user named", async () => {
+    const { root } = await repository();
+    const run = await createProjectRun(root, undefined, { branch: "BMAP-9999" });
+    await executeRun(root, run.snapshot.id, () => writer);
+    expect(git(root, "log", "-1", "--format=%s")).toBe(
+      "BMAP-9999: Implement (implement) attempt 1",
+    );
   });
 
   it("needs no promotion when the run branch already carries the ticket name", async () => {

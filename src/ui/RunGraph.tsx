@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RunRecord } from "../domain/run.js";
 import { Button } from "@/components/ui/button";
 import { NOT_REACHED, stepDisplayStatus } from "./run-view-model";
@@ -40,11 +40,27 @@ export const RunGraph = ({
   selectedStepId: string | null;
   onSelect: (id: string) => void;
 }) => {
-  const [zoom, setZoom] = useState(1);
+  // "fit" follows the canvas width, so the whole graph shows without scrolling until the user
+  // zooms by hand; the buttons switch to a fixed zoom and "Fit view" returns to following.
+  const [manualZoom, setManualZoom] = useState<number | null>(null);
+  const [canvasWidth, setCanvasWidth] = useState(0);
   const canvasRef = useRef<HTMLElement>(null);
   const layout = positions(run);
   const width = Math.max(700, ...[...layout.values()].map((point) => point.x + nodeWidth + 60));
   const height = Math.max(340, ...[...layout.values()].map((point) => point.y + nodeHeight + 70));
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const measure = () => setCanvasWidth(canvas.clientWidth);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
+  const fitZoom = canvasWidth ? Math.max(0.25, Math.min(1, (canvasWidth - 2) / width)) : 1;
+  const zoom = manualZoom ?? fitZoom;
+  const setZoom = (next: (value: number) => number) => setManualZoom(next(zoom));
   const moveSelection = (id: string, direction: number) => {
     const ids = run.snapshot.loop.steps.map((step) => step.id);
     const index = ids.indexOf(id);
@@ -84,17 +100,8 @@ export const RunGraph = ({
           <Button
             size="sm"
             variant="outline"
-            onClick={() =>
-              setZoom(
-                Math.max(
-                  0.25,
-                  Math.min(
-                    1,
-                    ((canvasRef.current?.clientWidth || window.innerWidth - 320) - 24) / width,
-                  ),
-                ),
-              )
-            }
+            aria-pressed={manualZoom === null}
+            onClick={() => setManualZoom(null)}
           >
             Fit view
           </Button>
