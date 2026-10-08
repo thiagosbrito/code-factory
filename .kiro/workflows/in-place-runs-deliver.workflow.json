@@ -1,0 +1,59 @@
+{
+  "name": "in-place-runs-deliver",
+  "description": "Make runs edit the project checkout directly: implement, validate with unit and e2e tests, two independent reviews, loop until approved.",
+  "inputs": {},
+  "steps": [
+    {
+      "type": "repeat",
+      "id": "deliver-loop",
+      "maxIterations": 4,
+      "onMaxIterations": "pause",
+      "stopCondition": {
+        "fileCheck": {
+          "path": "/Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-in-place-runs/verdict.json",
+          "jsonPath": "approved",
+          "value": true
+        }
+      },
+      "steps": [
+        {
+          "type": "step",
+          "id": "implement",
+          "agent": "wf-coder",
+          "prompt": "Read /Users/thiagosbrito/personal/code-factory/.agents/tasks/in-place-runs/brief.md fully and obey its hard constraints (no commits/pushes/branch changes in code-factory, no git checkout/reset/stash/clean/restore on it, format only changed files, leave .kiro/workflows alone, do not touch tags-labels-ui, its worktree folder or ~/.kiro).\n\nArtifacts dir: /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-in-place-runs/ (create it if missing).\n\nIf verdict.json exists in that directory, this is a repair round: read it plus code-review-a.md, code-review-b.md and validation.json there, and fix every HIGH/MEDIUM finding and every validation failure (LOW/NIT when cheap, otherwise justify). Otherwise this is round 1: record the starting HEAD (`git -C /Users/thiagosbrito/personal/code-factory log -1 --format=%h`) and an ordered plan in 04-plan.md, then implement every user decision and fix in the brief.\n\nAdd the tests listed in the brief (real git temp repos, UI tests, Playwright e2e proving the project directory itself changes). Update README and docs/architecture.md. Run all checks from the brief and fix failures you caused. Write 05-code-summary.md (overwrite) with starting HEAD, files changed, decision-by-decision mapping, tests added, round number and exact check results. Do not delete verdict.json yourself."
+        },
+        {
+          "type": "step",
+          "id": "validate",
+          "agent": "wf-coder",
+          "prompt": "VALIDATION ONLY in /Users/thiagosbrito/personal/code-factory. Do not edit source, tests or docs; do not commit or change git state. Obey /Users/thiagosbrito/personal/code-factory/.agents/tasks/in-place-runs/brief.md.\n\nRun, each with exit code and a bounded summary: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `./node_modules/.bin/vitest run`, `pnpm build`, `pnpm test:e2e`. If e2e cannot start for environmental reasons, record it as `blocked` with the error; install nothing. Confirm `git -C /Users/thiagosbrito/personal/code-factory log -1 --format=%h` equals the starting HEAD recorded in 05-code-summary.md (no commits made) and list `git status --short`.\n\nWrite /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-in-place-runs/validation.json (overwrite) as {\"round\": <n from 05-code-summary.md>, \"passed\": <true only if every command exited 0 and HEAD unchanged>, \"commands\": [{\"name\":..., \"exit\":..., \"summary\":...}], \"head\": \"...\", \"changedFiles\": [...]}."
+        },
+        {
+          "type": "parallel",
+          "id": "code-reviews",
+          "joinPolicy": "all",
+          "branches": [
+            {
+              "type": "step",
+              "id": "review-a",
+              "agent": "semantic_reviewer",
+              "prompt": "READ-ONLY review; no edits, commits or git state changes. Repo /Users/thiagosbrito/personal/code-factory: review the uncommitted diff (`git diff` plus untracked files) against the starting HEAD recorded in /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-in-place-runs/05-code-summary.md. Spec: /Users/thiagosbrito/personal/code-factory/.agents/tasks/in-place-runs/brief.md; also read 04-plan.md, 05-code-summary.md and validation.json in that directory.\n\nFocus on correctness and data safety: new runs edit the project checkout directly (no worktree, clone or copy anywhere in the new-run path, including reviewers), branch create+switch and name validation, dirty-tree refusal, never overwriting/deleting branches, never stashing/resetting/cleaning the user's tree, .git/info/exclude for .code-factory and no runtime state in commits, per-step commits with user identity and hooks, single-writer lock and restart reconciliation, reviewer frozen-tree check without auto-revert, legacy worktree/clone run inspection, agent cwd = project dir, return-to-original-branch. Verify by reading code and running targeted tests.\n\nWrite code-review-a.md in that directory (overwrite): findings with severity HIGH/MEDIUM/LOW/NIT, file:line, trigger, impact, fix; verdict APPROVE or CHANGES_REQUESTED (CHANGES_REQUESTED if any HIGH/MEDIUM)."
+            },
+            {
+              "type": "step",
+              "id": "review-b",
+              "agent": "semantic_reviewer",
+              "prompt": "READ-ONLY review; no edits, commits or git state changes. Repo /Users/thiagosbrito/personal/code-factory: review the uncommitted diff (`git diff` plus untracked files) against the starting HEAD recorded in /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-in-place-runs/05-code-summary.md. Spec: /Users/thiagosbrito/personal/code-factory/.agents/tasks/in-place-runs/brief.md; also read 04-plan.md, 05-code-summary.md and validation.json in that directory.\n\nFocus on security, UX and tests: tool grants scoped to the project directory, review steps read-only, clear user-facing errors (dirty tree with paths, branch exists, run lock, kiro-cli verification detail with secrets redacted, native rule path), accessible New run branch field and Return-to-branch control, README/architecture accuracy, and test quality (real git temp repos, e2e proving the project directory itself changes, nothing skipped or weakened). Verify by reading code and running targeted tests.\n\nWrite code-review-b.md in that directory (overwrite): findings with severity HIGH/MEDIUM/LOW/NIT, file:line, trigger, impact, fix; verdict APPROVE or CHANGES_REQUESTED (CHANGES_REQUESTED if any HIGH/MEDIUM)."
+            }
+          ]
+        },
+        {
+          "type": "step",
+          "id": "aggregate",
+          "agent": "wf-review-aggregator",
+          "prompt": "Merge this round's evidence into one verdict. Read code-review-a.md, code-review-b.md, validation.json and 05-code-summary.md in /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-in-place-runs/. Deduplicate and keep severities.\n\napproved is true ONLY if validation.json passed is true (every check including pnpm test:e2e exited 0 and HEAD unchanged from the starting HEAD; an e2e 'blocked' result is not passed) AND there are zero HIGH and zero MEDIUM findings across both reviews.\n\nWrite verdict.json in that directory (overwrite) as {\"approved\": <bool>, \"round\": <n>, \"validationPassed\": <bool>, \"blocking\": [{\"severity\":..., \"source\":..., \"file\":..., \"summary\":..., \"fix\":...}], \"nonBlocking\": [...]} and a human-readable 06-verdict.md. Edit no other files and do not change git state."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "name": "message-coalescing-deliver",
+  "description": "Fix fragmented streamed agent messages: implement, validate with unit and e2e tests, two independent reviews, loop until approved.",
+  "inputs": {},
+  "steps": [
+    {
+      "type": "repeat",
+      "id": "deliver-loop",
+      "maxIterations": 3,
+      "onMaxIterations": "pause",
+      "stopCondition": {
+        "fileCheck": {
+          "path": "/Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-message-coalescing/verdict.json",
+          "jsonPath": "approved",
+          "value": true
+        }
+      },
+      "steps": [
+        {
+          "type": "step",
+          "id": "implement",
+          "agent": "wf-coder",
+          "prompt": "Read /Users/thiagosbrito/personal/code-factory/.agents/tasks/message-coalescing/brief.md fully and obey its hard constraints (no commits/pushes/branch changes, no git checkout/reset/stash/clean/restore, format only changed files, leave .kiro/workflows alone, do not touch tags-labels-ui or ~/.kiro).\n\nArtifacts dir: /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-message-coalescing/ (create it if missing).\n\nIf verdict.json exists in that directory, this is a repair round: read it plus code-review-a.md, code-review-b.md and validation.json there, and fix every HIGH/MEDIUM finding and every validation failure (LOW/NIT when cheap, otherwise justify). Otherwise this is round 1: reproduce the bug with a failing test first, record the chosen approach and why in 04-plan.md, then implement.\n\nAdd the unit, UI and Playwright e2e tests listed in the brief. Run all checks from the brief and fix failures you caused. Write 05-code-summary.md (overwrite) with root cause, approach, files changed, tests added, round number and exact check results. Do not delete verdict.json yourself."
+        },
+        {
+          "type": "step",
+          "id": "validate",
+          "agent": "wf-coder",
+          "prompt": "VALIDATION ONLY in /Users/thiagosbrito/personal/code-factory. Do not edit source, tests or docs; do not commit or change git state. Obey /Users/thiagosbrito/personal/code-factory/.agents/tasks/message-coalescing/brief.md.\n\nRun, each with exit code and a bounded summary: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `./node_modules/.bin/vitest run`, `pnpm build`, `pnpm test:e2e`. If e2e cannot start for environmental reasons, record it as `blocked` with the error; install nothing. Confirm `git -C /Users/thiagosbrito/personal/code-factory log -1 --format=%h` is still 90dc9d6 and list `git status --short`.\n\nWrite /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-message-coalescing/validation.json (overwrite) as {\"round\": <n from 05-code-summary.md>, \"passed\": <true only if every command exited 0 and HEAD unchanged>, \"commands\": [{\"name\":..., \"exit\":..., \"summary\":...}], \"head\": \"...\", \"changedFiles\": [...]}."
+        },
+        {
+          "type": "parallel",
+          "id": "code-reviews",
+          "joinPolicy": "all",
+          "branches": [
+            {
+              "type": "step",
+              "id": "review-a",
+              "agent": "semantic_reviewer",
+              "prompt": "READ-ONLY review; no edits, commits or git state changes. Repo /Users/thiagosbrito/personal/code-factory: review the uncommitted diff (`git diff` plus untracked files) against HEAD 90dc9d6. Spec: /Users/thiagosbrito/personal/code-factory/.agents/tasks/message-coalescing/brief.md; also read 04-plan.md, 05-code-summary.md and validation.json in /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-message-coalescing/.\n\nFocus on correctness and data integrity: coalescing rules (same step+attempt only, split on non-message events, ordering by sequence), live updates via SSE and cursor replay/reconnect, reload equivalence, backward compatibility with persisted runs, append-only evidence and sequence contiguity, and if server-side buffering was added: no lost text on cancel/failure/interrupt and unchanged final step output for decisions/review verdicts. Verify by reading code and running targeted tests.\n\nWrite code-review-a.md in that directory (overwrite): findings with severity HIGH/MEDIUM/LOW/NIT, file:line, trigger, impact, fix; verdict APPROVE or CHANGES_REQUESTED (CHANGES_REQUESTED if any HIGH/MEDIUM)."
+            },
+            {
+              "type": "step",
+              "id": "review-b",
+              "agent": "semantic_reviewer",
+              "prompt": "READ-ONLY review; no edits, commits or git state changes. Repo /Users/thiagosbrito/personal/code-factory: review the uncommitted diff (`git diff` plus untracked files) against HEAD 90dc9d6. Spec: /Users/thiagosbrito/personal/code-factory/.agents/tasks/message-coalescing/brief.md; also read 04-plan.md, 05-code-summary.md and validation.json in /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-message-coalescing/.\n\nFocus on UX, accessibility, performance and tests: one message entry with a single title/timestamp and no duplicated label, in-place growth while streaming, live regions not re-announcing the whole text per chunk, rendering cost with many chunks (no quadratic work per update), consistency across Activity, Inspector Activity and RunsList preview, and test quality (behavior-level, meaningful assertions, e2e actually emits multiple chunks, nothing skipped or weakened). Verify by reading code and running targeted tests.\n\nWrite code-review-b.md in that directory (overwrite): findings with severity HIGH/MEDIUM/LOW/NIT, file:line, trigger, impact, fix; verdict APPROVE or CHANGES_REQUESTED (CHANGES_REQUESTED if any HIGH/MEDIUM)."
+            }
+          ]
+        },
+        {
+          "type": "step",
+          "id": "aggregate",
+          "agent": "wf-review-aggregator",
+          "prompt": "Merge this round's evidence into one verdict. Read code-review-a.md, code-review-b.md, validation.json and 05-code-summary.md in /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-08-message-coalescing/. Deduplicate and keep severities.\n\napproved is true ONLY if validation.json passed is true (every check including pnpm test:e2e exited 0 and HEAD unchanged at 90dc9d6; an e2e 'blocked' result is not passed) AND there are zero HIGH and zero MEDIUM findings across both reviews.\n\nWrite verdict.json in that directory (overwrite) as {\"approved\": <bool>, \"round\": <n>, \"validationPassed\": <bool>, \"blocking\": [{\"severity\":..., \"source\":..., \"file\":..., \"summary\":..., \"fix\":...}], \"nonBlocking\": [...]} and a human-readable 06-verdict.md. Edit no other files and do not change git state."
+        }
+      ]
+    }
+  ]
+}

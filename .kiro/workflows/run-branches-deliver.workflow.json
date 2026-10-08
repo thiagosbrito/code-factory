@@ -1,0 +1,59 @@
+{
+  "name": "run-branches-deliver",
+  "description": "Implement the approved run-branches design, validate with full unit and e2e tests, review with two independent reviewers, and loop until the aggregated verdict approves.",
+  "inputs": {},
+  "steps": [
+    {
+      "type": "repeat",
+      "id": "deliver-loop",
+      "maxIterations": 4,
+      "onMaxIterations": "pause",
+      "stopCondition": {
+        "fileCheck": {
+          "path": "/Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/verdict.json",
+          "jsonPath": "approved",
+          "value": true
+        }
+      },
+      "steps": [
+        {
+          "type": "step",
+          "id": "implement",
+          "agent": "wf-coder",
+          "prompt": "You implement the run-branches feature in /Users/thiagosbrito/personal/code-factory (work directly in this repo, no worktree).\n\nFIRST read and obey /Users/thiagosbrito/personal/code-factory/.agents/tasks/run-branches/continue.md (hard constraints: NO git commit/push/branch changes in the code-factory repo, never git checkout/reset/stash/clean/restore on it, format only files you change, do not touch /Users/thiagosbrito/projects/tags-labels-ui, ~/.kiro or the read-only kiro-factory reference, no .env reads, no dependency installs). Tests may create temp git repos and commit inside them. HEAD is 044acbf with a clean tree; ticket-only runs and the Kiro importer are committed.\n\nSpec: the design /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/02-design.md (latest revision, including the tool-permission scope), requirements 01-requirements.md in the same directory, and the brief /Users/thiagosbrito/personal/code-factory/.agents/tasks/run-branches/brief.md. Read the last section of 02-design.md for review responses.\n\nROUND HANDLING: if /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/verdict.json exists, this is a repair round: read it, plus code-review-a.md, code-review-b.md and validation.json in that directory, and fix every HIGH/MEDIUM finding and every validation failure; address LOW/NIT findings when cheap, otherwise justify in the summary. If it does not exist, this is the first round: write a short ordered plan as 04-plan.md in that directory, then implement all acceptance criteria.\n\nRequired before you finish: write/extend behavior tests for every acceptance criterion (real git temp repos for worktree/branch/commit/promotion behavior; UI tests for branch info, copy helpers, promote dialog, Not reached, blocked-review retry, permission dialog and revoke), add or extend Playwright e2e journeys covering run branch creation, promotion to a named branch, and the permission prompt with fixture adapters (follow tests/e2e patterns; no real agent credentials), update README and docs/architecture.md isolation paragraphs. Then run: `pnpm typecheck`, `pnpm lint`, `./node_modules/.bin/oxfmt --check --threads=2 <changed files>`, `./node_modules/.bin/vitest run`, `pnpm build`, `pnpm test:e2e`. Fix failures you caused. Never skip, .only, or weaken tests. Write /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/05-code-summary.md (overwrite) with files changed, acceptance-criteria mapping, round number, and the exact check results. Do not delete verdict.json yourself."
+        },
+        {
+          "type": "step",
+          "id": "validate",
+          "agent": "wf-coder",
+          "prompt": "VALIDATION ONLY in /Users/thiagosbrito/personal/code-factory. Do not edit source, tests or docs, do not commit, do not change git state. Obey /Users/thiagosbrito/personal/code-factory/.agents/tasks/run-branches/continue.md.\n\nRun, each with its exit code and a bounded summary (failing test names, first error lines): `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `./node_modules/.bin/vitest run`, `pnpm build`, `pnpm test:e2e`. If Playwright browsers are missing or the e2e suite cannot start for environmental reasons, record that precisely as `blocked` with the error; do not install anything. Also confirm `git -C /Users/thiagosbrito/personal/code-factory log -1 --format=%h` is still 044acbf (no commits were made) and list changed files from `git status --short`.\n\nWrite /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/validation.json (overwrite) as {\"round\": <n from 05-code-summary.md>, \"passed\": <true only if every command exited 0 and HEAD unchanged>, \"commands\": [{\"name\":..., \"exit\":..., \"summary\":...}], \"head\": \"...\", \"changedFiles\": [...]}."
+        },
+        {
+          "type": "parallel",
+          "id": "code-reviews",
+          "joinPolicy": "all",
+          "branches": [
+            {
+              "type": "step",
+              "id": "review-a",
+              "agent": "semantic_reviewer",
+              "prompt": "READ-ONLY code review. Do not edit files, commit or change git state. Repo /Users/thiagosbrito/personal/code-factory; review the uncommitted working-tree diff (`git -C /Users/thiagosbrito/personal/code-factory diff` plus untracked files from `git status --short`) against HEAD 044acbf. Spec: /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/02-design.md, 01-requirements.md and 05-code-summary.md in that directory; brief /Users/thiagosbrito/personal/code-factory/.agents/tasks/run-branches/brief.md; standards CONTRIBUTING.md and WORKFLOW.md. Also read validation.json in that directory.\n\nFocus on correctness and data safety: git worktree/branch lifecycle (user tree, index, HEAD never touched; no branch ever overwritten or deleted; non-forced worktree removal; restart reconciliation; concurrency), baseline and per-step commits (hooks run, failures recorded as evidence), promotion safety checks and journal, setupCommand execution (argv, no shell injection, bounded logs), Not reached and blocked-review retry semantics, backward compatibility with old clone-based runs, and path/symlink boundary checks. Verify claims by reading code and running targeted tests if useful.\n\nWrite /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/code-review-a.md (overwrite): findings with severity HIGH/MEDIUM/LOW/NIT, file:line, trigger, impact, fix; acceptance-criteria coverage gaps; verdict APPROVE or CHANGES_REQUESTED (CHANGES_REQUESTED if any HIGH/MEDIUM)."
+            },
+            {
+              "type": "step",
+              "id": "review-b",
+              "agent": "semantic_reviewer",
+              "prompt": "READ-ONLY code review. Do not edit files, commit or change git state. Repo /Users/thiagosbrito/personal/code-factory; review the uncommitted working-tree diff (`git -C /Users/thiagosbrito/personal/code-factory diff` plus untracked files from `git status --short`) against HEAD 044acbf. Spec: /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/02-design.md, 01-requirements.md and 05-code-summary.md in that directory; brief /Users/thiagosbrito/personal/code-factory/.agents/tasks/run-branches/brief.md; standards CONTRIBUTING.md and WORKFLOW.md. Also read validation.json in that directory.\n\nFocus on security, UX and tests: the agent tool-permission grant (ask once, exact tool names mapped to Kiro --trust-tools and Codex approvals, never trust-all, scope limited to the run worktree, persistence in .code-factory/project.json with zod validation, revocation, evidence per attempt, honest consent text), UI accessibility (keyboard, focus, labels, live regions, text not only colour) for branch info, copy helpers, promote dialog, Not reached, retry and permission dialog, error surfacing, and test quality (behavior-level, real git temp repos, meaningful assertions, no weakened/skipped tests, e2e journeys actually exercising the new flows). Verify claims by reading code and running targeted tests if useful.\n\nWrite /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/code-review-b.md (overwrite): findings with severity HIGH/MEDIUM/LOW/NIT, file:line, trigger, impact, fix; acceptance-criteria coverage gaps; verdict APPROVE or CHANGES_REQUESTED (CHANGES_REQUESTED if any HIGH/MEDIUM)."
+            }
+          ]
+        },
+        {
+          "type": "step",
+          "id": "aggregate",
+          "agent": "wf-review-aggregator",
+          "prompt": "Merge the round's evidence into one verdict. Read /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/code-review-a.md, code-review-b.md, validation.json and 05-code-summary.md in that directory. Deduplicate findings, keep severities, and decide.\n\napproved is true ONLY if: validation.json passed is true (every check including pnpm test:e2e exited 0 and HEAD unchanged at 044acbf), AND there are zero HIGH and zero MEDIUM findings across both reviews. An e2e result of 'blocked' counts as not passed.\n\nWrite /Users/thiagosbrito/personal/code-factory/.agents/pipeline/2026-10-07_11-50-29/verdict.json (overwrite) as {\"approved\": <bool>, \"round\": <n>, \"validationPassed\": <bool>, \"blocking\": [{\"severity\":..., \"source\":..., \"file\":..., \"summary\":..., \"fix\":...}], \"nonBlocking\": [...]} and a human-readable 06-verdict.md. Do not edit any other files and do not change git state."
+        }
+      ]
+    }
+  ]
+}
