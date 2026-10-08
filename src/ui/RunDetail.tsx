@@ -36,10 +36,12 @@ export const RunDetail = ({
   workspace = null,
   onPromote = async () => ({ error: "Promotion is unavailable." }),
   onRemoveWorktree = async () => "Worktree removal is unavailable.",
+  onReturnCheckout = async () => "Switching back is unavailable.",
 }: {
   workspace?: RunWorkspace | null;
   onPromote?: (name: string) => Promise<PromoteFailure | { warning?: string }>;
   onRemoveWorktree?: () => Promise<string | null>;
+  onReturnCheckout?: () => Promise<string | null>;
   run: RunRecord;
   summary: EvidenceSummary | null;
   accepting: boolean;
@@ -120,7 +122,8 @@ export const RunDetail = ({
                 {executing ? "Executing…" : "Execute run"}
               </Button>
             )}
-            {(executing || ["running", "waiting-input", "paused"].includes(run.status)) &&
+            {(executing ||
+              ["pending", "running", "waiting-input", "paused"].includes(run.status)) &&
               connected && (
                 <Button variant="outline" onClick={onCancel}>
                   Cancel run
@@ -234,6 +237,7 @@ export const RunDetail = ({
           busy={executing}
           onPromote={onPromote}
           onRemove={onRemoveWorktree}
+          onReturn={onReturnCheckout}
         />
       )}
       <RunInputPrompt run={run} agents={agents} connected={connected} onReply={onReplyToInput} />

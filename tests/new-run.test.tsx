@@ -194,6 +194,51 @@ describe("new run dialog", () => {
     expect(requests).toMatchObject([{ description: "", ticketId: "PROJ-123" }]);
   });
 
+  it("names the run branch after the ticket until edited and offers a free name when taken", async () => {
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", async (_path: string, options: RequestInit) => {
+      const body = JSON.parse(String(options.body)) as Record<string, unknown>;
+      requests.push(body);
+      return body.branch === "PROJ-9"
+        ? new Response(
+            JSON.stringify({
+              error:
+                "Branch PROJ-9 already exists. Choose another name; Code Factory never reuses or overwrites a branch.",
+              suggestedName: "PROJ-9-2",
+            }),
+            { status: 409 },
+          )
+        : new Response(JSON.stringify({ runId: "55555555-5555-4555-8555-555555555555" }), {
+            status: 201,
+          });
+    });
+    const started = vi.fn<(id: string) => void>();
+    view({ tracker: false, onStarted: started });
+    const user = userEvent.setup();
+    const branch = screen.getByLabelText("Branch") as HTMLInputElement;
+    expect(branch.value).toBe("");
+    expect(screen.getByText(/switches your checkout to it/)).toBeTruthy();
+    await user.type(screen.getByLabelText(/Ticket number/), "proj-9");
+    expect(branch.value).toBe("PROJ-9");
+    await user.click(screen.getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("already exists"));
+    await user.click(screen.getByRole("button", { name: "Use PROJ-9-2" }));
+    expect(branch.value).toBe("PROJ-9-2");
+    // An edited name no longer follows the ticket, and invalid names never reach the API.
+    await user.clear(branch);
+    await user.type(branch, "main");
+    expect(screen.getByText("main is a protected branch name.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Start run" }));
+    expect(requests).toHaveLength(1);
+    await user.clear(branch);
+    await user.type(branch, "feature/proj-9");
+    await user.click(screen.getByRole("button", { name: "Start run" }));
+    await waitFor(() =>
+      expect(started.mock.calls[0]?.[0]).toBe("55555555-5555-4555-8555-555555555555"),
+    );
+    expect(requests.at(-1)).toMatchObject({ ticketId: "PROJ-9", branch: "feature/proj-9" });
+  });
+
   it.each([
     [401, "Tracker authentication failed"],
     [503, "Ticket retrieval failed"],

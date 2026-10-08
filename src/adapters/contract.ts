@@ -32,6 +32,11 @@ export interface StepExecutionInput {
   projectDirectory: string;
   /** Set only when the project holds a user grant for this attempt's provider. */
   toolGrant?: ToolGrantInEffect;
+  /**
+   * Reviewers are read-only: the adapter must run the step without write or shell permissions
+   * its provider can enforce, and must not apply a tool grant. Code Factory still verifies files.
+   */
+  readOnly?: boolean;
 }
 export interface StepSession {
   runId: string;

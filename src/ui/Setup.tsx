@@ -139,7 +139,7 @@ export const Setup = ({
             <p
               id="setup-error"
               role="alert"
-              className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+              className="whitespace-pre-wrap break-words rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
             >
               {error}
             </p>

@@ -36,6 +36,11 @@ import { formatCommandLine } from "../domain/project.js";
 import {
   appendRunEvent,
   appendScopedEvent,
+  changedFiles,
+  CHECKOUT_MOVED,
+  checkoutMovedMessage,
+  READ_ONLY_VIOLATION,
+  readOnlyViolation,
   SETUP_COMPLETED,
   SETUP_OUTPUT,
   SETUP_STARTED,
@@ -47,7 +52,13 @@ import { snapshotFileDiffs } from "./inspection.js";
 import { ProjectError } from "./project.js";
 import { commitStepChanges, createReviewCopy, listUncommittedPaths } from "./run-branch.js";
 import { resolveToolGrant } from "./tool-grant.js";
-import { fileDigest, resolveRunWorkspace, type ResolvedWorkspace } from "./workspace.js";
+import {
+  currentBranch,
+  fileDigest,
+  gitTreeState,
+  resolveRunWorkspace,
+  type ResolvedWorkspace,
+} from "./workspace.js";
 
 type FileSnapshot = Awaited<ReturnType<typeof snapshotFileDiffs>>[number];
 
@@ -109,6 +120,14 @@ const appendFileReceipts = (
 
 type Resolver = (provider: string) => AgentAdapter | null;
 const SETUP_TIMEOUT_MS = 900_000;
+const FINISHED_RUN = new Set([
+  "succeeded",
+  "failed",
+  "canceled",
+  "rejected",
+  "blocked",
+  "unavailable",
+]);
 const isActiveStatus = (status: string): boolean =>
   status === "running" || status === "waiting-input" || status === "paused";
 const active = new Map<
@@ -171,7 +190,7 @@ const issueContext = (record: RunRecord, stepId: string, ticketId: string): stri
   return `Issue ${ticketId} details were not captured by the first step. Do not fetch the issue again; work from the task and inputs below.`;
 };
 
-/** Agent steps outside review in a worktree run get one Code Factory commit per success. */
+/** Agent steps outside review in a project or worktree run get one Code Factory commit per success. */
 const writesRunBranch = (record: RunRecord, stepId: string): boolean => {
   const definition = record.snapshot.loop.steps.find((step) => step.id === stepId);
   return (
@@ -488,9 +507,41 @@ export const retryStep = async (
 
 export const cancelRun = async (project: string, runId: string): Promise<RunRecord> => {
   const running = active.get(`${project}:${runId}`);
-  if (!running) throw new Error("Run is not executing.");
-  running.controller.abort();
-  return running.work;
+  if (running) {
+    running.controller.abort();
+    return running.work;
+  }
+  // A run that is not executing (pending, or left "running" between steps by a restart) would
+  // otherwise hold an in-project checkout forever, so it can be canceled directly.
+  const record = await readRun(project, runId);
+  if (!record) throw new ProjectError("Run not found.", 404);
+  if (
+    !["pending", "running"].includes(record.status) ||
+    record.steps.some((step) => isActiveStatus(step.status))
+  )
+    throw new ProjectError("Run is not executing.", 409);
+  return withIdleRunSlot(project, runId, () =>
+    mutateRun(project, runId, (current) =>
+      ["pending", "running"].includes(current.status) &&
+      !current.steps.some((step) => isActiveStatus(step.status))
+        ? runRecordSchema.parse({
+            ...appendRunEvent(
+              current,
+              "lifecycle",
+              "Run canceled",
+              current.status === "pending"
+                ? "Canceled before execution."
+                : "Canceled while not executing.",
+              "canceled",
+            ),
+            status: "canceled",
+          })
+        : current,
+    ),
+  ).then((result) => {
+    if (!result) throw new ProjectError("Run is not executing.", 409);
+    return result;
+  });
 };
 
 const executeOnce = async (
@@ -502,6 +553,9 @@ const executeOnce = async (
 ): Promise<RunRecord> => {
   const initial = await readRun(project, runId);
   if (!initial) throw new Error("Run not found.");
+  // A run canceled (or otherwise finished) between the execute request and this slot stays put;
+  // in particular its setup command must not run in the user's checkout after a cancel.
+  if (!retry && FINISHED_RUN.has(initial.status)) return initial;
   let record: RunRecord = initial;
   let pendingCommit: Promise<void> = Promise.resolve();
   const commit = async (
@@ -518,6 +572,18 @@ const executeOnce = async (
   try {
     resolved = await resolveRunWorkspace(project, record, { legacy: "prefix" });
   } catch (error) {
+    // An in-project run whose checkout moved while the runtime was down: its active attempts are
+    // interrupted (their processes are gone), and nothing is switched back automatically.
+    if (error instanceof ProjectError && error.status === 409) {
+      const reason = error.message;
+      const activeSteps = record.steps.filter((step) => isActiveStatus(step.status));
+      if (!activeSteps.length) throw error;
+      for (const step of activeSteps)
+        await commit((current) =>
+          interruptStep(current, step.stepId, reason, "recovery-unavailable"),
+        );
+      return record;
+    }
     // A removed or missing run worktree is reported, never re-created (FR6.2).
     const recoverable =
       error instanceof ProjectError &&
@@ -545,12 +611,17 @@ const executeOnce = async (
   const workspace = resolved.path;
   const mode = resolved.digestMode;
   const isWorktreeRun = resolved.kind === "worktree";
+  const isProjectRun = resolved.kind === "project";
+  const commitsRunBranch = isWorktreeRun || isProjectRun;
   const runStep = async (stepId: string): Promise<void> => {
     const definition = record.snapshot.loop.steps.find((step) => step.id === stepId);
     if (!definition) throw new Error(`Unknown step ${stepId}.`);
     const readonly = definition.stage === "review";
-    const reviewRoot = readonly ? await mkdtemp(join(tmpdir(), "factory-review-")) : undefined;
+    // In-project reviewers and checks run in the project itself; legacy runs keep frozen copies.
+    const reviewRoot =
+      readonly && !isProjectRun ? await mkdtemp(join(tmpdir(), "factory-review-")) : undefined;
     const executionDirectory = reviewRoot ? join(reviewRoot, "candidate") : workspace;
+    const verifiesNoChange = isProjectRun && (readonly || definition.kind === "check");
     try {
       const step = record.steps.find((item) => item.stepId === stepId);
       const attempt = step?.attempts.at(-1);
@@ -574,9 +645,23 @@ const executeOnce = async (
           item.attempts.at(-1)?.id === attempt.id &&
           isActiveStatus(item.status),
       );
+      if (isProjectRun && !recovering) {
+        // The user may switch branches mid-run; never run a step against another branch's files.
+        const branch = record.snapshot.baseline.branch ?? "";
+        const current = await currentBranch(workspace);
+        if (current !== branch) {
+          copyFailure = checkoutMovedMessage(branch, current);
+          const detail = copyFailure;
+          await commit((latest) =>
+            appendLocalEvent(latest, stepId, attempt.id, "check", CHECKOUT_MOVED, detail, "failed"),
+          );
+        }
+      }
+      const filesBefore =
+        verifiesNoChange && !copyFailure ? (await gitTreeState(workspace)).files : null;
       const inputs = stepInputs(record, stepId);
       const inspectable =
-        isWorktreeRun ||
+        commitsRunBranch ||
         /^\.code-factory\/workspaces\/[0-9a-f-]{36}$/i.test(
           record.snapshot.baseline.workspace ?? "",
         );
@@ -626,14 +711,35 @@ const executeOnce = async (
             },
           );
         }
-        staleCheck = (await fileDigest(workspace, mode)) !== step.candidateId;
+        const checkChanges = filesBefore
+          ? changedFiles(filesBefore, (await gitTreeState(workspace)).files)
+          : null;
+        staleCheck = checkChanges
+          ? checkChanges.length > 0
+          : (await fileDigest(workspace, mode)) !== step.candidateId;
         if (staleCheck)
           result = {
             status: "failed",
             outcome: "failed",
-            summary: "Check changed the candidate; its result is stale.",
+            summary: checkChanges?.length
+              ? readOnlyViolation("Check", checkChanges)
+              : "Check changed the candidate; its result is stale.",
             exitCode: result.exitCode ?? null,
           };
+        if (checkChanges?.length) {
+          const detail = readOnlyViolation("Check", checkChanges);
+          await commit((current) =>
+            appendLocalEvent(
+              current,
+              stepId,
+              attempt.id,
+              "check",
+              READ_ONLY_VIOLATION,
+              detail,
+              "failed",
+            ),
+          );
+        }
         if (!recovering)
           await commit((current) =>
             appendLocalEvent(
@@ -696,9 +802,21 @@ const executeOnce = async (
             ...(allowedOutcomes ? { allowedOutcomes } : {}),
             binding,
             projectDirectory: executionDirectory,
+            ...(readonly ? { readOnly: true } : {}),
           };
+          if (readonly && !recovering && binding.provider !== "mock")
+            await commit((current) =>
+              appendLocalEvent(
+                current,
+                stepId,
+                attempt.id,
+                "lifecycle",
+                TOOL_PERMISSION,
+                `Read-only reviewer: ${binding.provider} runs without write or shell permissions it can enforce, and the project's tool grant does not apply.`,
+              ),
+            );
           // A grant is read per fresh attempt, so grant and revoke apply at the next attempt.
-          if (!recovering && binding.provider !== "mock") {
+          if (!readonly && !recovering && binding.provider !== "mock") {
             const permission = await resolveToolGrant(project, binding.provider);
             if (permission.grant) input.toolGrant = permission.grant;
             await commit((current) =>
@@ -781,7 +899,24 @@ const executeOnce = async (
           if (signal.aborted && !cancellationUnconfirmed) result = { status: "canceled" };
         }
       }
-      if (
+      if (readonly && filesBefore) {
+        const reviewChanges = changedFiles(filesBefore, (await gitTreeState(workspace)).files);
+        if (reviewChanges.length && result.status !== "canceled") {
+          result = { status: "failed", summary: readOnlyViolation("Reviewer", reviewChanges) };
+          const detail = result.summary;
+          await commit((current) =>
+            appendLocalEvent(
+              current,
+              stepId,
+              attempt.id,
+              "check",
+              READ_ONLY_VIOLATION,
+              detail,
+              "failed",
+            ),
+          );
+        }
+      } else if (
         readonly &&
         !copyFailure &&
         result.status === "succeeded" &&
@@ -821,7 +956,7 @@ const executeOnce = async (
         };
       // Commit after every result re-validation and before the digest, so hook edits (formatters)
       // belong to the recorded candidate and a failed result never reaches the branch.
-      if (result.status === "succeeded" && isWorktreeRun && writesRunBranch(record, stepId)) {
+      if (result.status === "succeeded" && commitsRunBranch && writesRunBranch(record, stepId)) {
         const outcome = await commitStepChanges(workspace, record, stepId, attempt);
         if (outcome.kind === "committed")
           await commit((current) =>
@@ -953,7 +1088,7 @@ const executeOnce = async (
         : outcome.timedOut
           ? `Timed out after ${SETUP_TIMEOUT_MS / 1000} s\n${output}`
           : `Exit ${outcome.exitCode ?? "none"}\n${output}`;
-    if (state === "succeeded" && isWorktreeRun) {
+    if (state === "succeeded" && commitsRunBranch) {
       const changed = await listUncommittedPaths(workspace).catch(() => []);
       if (changed.length)
         detail += `\nChanged tracked files: ${changed.slice(0, 50).join(", ")}${changed.length > 50 ? ` and ${changed.length - 50} more` : ""}`;

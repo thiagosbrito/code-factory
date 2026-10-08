@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentConnection } from "../src/adapters/contract.js";
 import { createLoopDraft, parseLoop } from "../src/domain/loop.js";
+import { PROJECT_DIRTY } from "../src/domain/run-branch.js";
 import { startRun } from "../src/runtime/intake.js";
+import { cancelRun } from "../src/runtime/scheduler.js";
 import { initializeProject, projectRevision, saveProjectSetup } from "../src/runtime/project.js";
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 import { startLocalServer } from "../src/runtime/server.js";
@@ -31,7 +33,7 @@ const agent: AgentConnection = {
   models: [{ id: "agent-default", displayName: "Default" }],
 };
 async function project() {
-  // Run worktrees live beside the repository, so the repo sits inside a disposable parent.
+  // A disposable parent keeps every Git artifact of the test inside one removable folder.
   const parent = await mkdtemp(join(tmpdir(), "factory-intake-"));
   roots.push(parent);
   const root = join(parent, "repo");
@@ -92,7 +94,8 @@ describe("protected run intake", () => {
     expect(run.snapshot.baseline).toMatchObject({
       kind: "git",
       revision: expect.any(String),
-      workspace: expect.any(String),
+      workspace: ".",
+      branch: `code-factory/${request.requestId.replaceAll("-", "").slice(0, 8)}`,
     });
     expect((await readRun(root, run.snapshot.id))?.snapshot.id).toBe(request.requestId);
     expect(await startRun(root, request, [agent])).toEqual(run);
@@ -119,12 +122,15 @@ describe("protected run intake", () => {
       summary: "Full tracker description",
       attachments: [{ title: "spec.md" }],
     });
+    expect(ticketOnly.snapshot.baseline.branch).toBe("THI-9");
+    await cancelRun(root, ticketOnly.snapshot.id);
     const combined = await startRun(
       root,
-      input({ description: "Additional constraints", ticketId: "THI-9" }),
+      input({ description: "Additional constraints", ticketId: "THI-9", branch: "THI-9-more" }),
       [agent],
       tracker,
     );
+    expect(combined.snapshot.baseline.branch).toBe("THI-9-more");
     expect(combined.snapshot.task.description).toBe("Additional constraints");
     expect(combined.snapshot.task.ticket?.id).toBe("THI-9");
   });
@@ -158,62 +164,34 @@ describe("protected run intake", () => {
     expect(await readRun(root, "00000000-0000-4000-8000-000000000000")).toBeNull();
   });
 
-  it("preserves staged, unstaged, deleted and untracked work in separate writing workspaces", async () => {
+  it("refuses a dirty project and a second run while one still holds the project", async () => {
     const root = await project();
-    await writeFile(join(root, "staged.txt"), "before staging\n");
-    await writeFile(join(root, "deleted.txt"), "to delete\n");
-    execFileSync("git", ["-C", root, "add", "staged.txt", "deleted.txt"]);
-    execFileSync("git", [
-      "-C",
-      root,
-      "-c",
-      "user.name=Test",
-      "-c",
-      "user.email=test@example.com",
-      "commit",
-      "-qm",
-      "More files",
-    ]);
-    await writeFile(join(root, "file.txt"), "staged\n");
-    execFileSync("git", ["-C", root, "add", "file.txt"]);
-    await writeFile(join(root, "file.txt"), "unstaged\n");
-    await writeFile(join(root, "staged.txt"), "only staged\n");
-    execFileSync("git", ["-C", root, "add", "staged.txt"]);
-    await rm(join(root, "deleted.txt"));
-    execFileSync("git", ["-C", root, "add", "-u", "deleted.txt"]);
-    await writeFile(join(root, "new.txt"), "untracked\n");
-    const [first, second] = await Promise.all([
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+    const initial = git("symbolic-ref", "--short", "HEAD");
+    await writeFile(join(root, "file.txt"), "my unfinished edit\n");
+    await expect(startRun(root, input(), [agent])).rejects.toThrow(PROJECT_DIRTY);
+    expect(await readFile(join(root, "file.txt"), "utf8")).toBe("my unfinished edit\n");
+    expect(git("symbolic-ref", "--short", "HEAD")).toBe(initial);
+    git("checkout", "--", "file.txt");
+
+    const [first, second] = await Promise.allSettled([
       startRun(root, input(), [agent]),
       startRun(root, input(), [agent]),
     ]);
-    const firstWorkspace = join(root, first.snapshot.baseline.workspace!);
-    const secondWorkspace = join(root, second.snapshot.baseline.workspace!);
-    expect(firstWorkspace).not.toBe(secondWorkspace);
-    expect(await readFile(join(firstWorkspace, "file.txt"), "utf8")).toBe("unstaged\n");
-    expect(await readFile(join(secondWorkspace, "new.txt"), "utf8")).toBe("untracked\n");
-    expect(await readFile(join(secondWorkspace, "staged.txt"), "utf8")).toBe("only staged\n");
-    await expect(readFile(join(secondWorkspace, "deleted.txt"), "utf8")).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await writeFile(join(firstWorkspace, "file.txt"), "run one edit\n");
-    expect(await readFile(join(secondWorkspace, "file.txt"), "utf8")).toBe("unstaged\n");
-    expect(await readFile(join(root, "file.txt"), "utf8")).toBe("unstaged\n");
-    expect(first.snapshot.baseline.changes).toEqual([
-      "deleted.txt",
-      "file.txt",
-      "new.txt",
-      "staged.txt",
-    ]);
-    expect(
-      execFileSync(
-        "git",
-        ["-C", firstWorkspace, "show", `${first.snapshot.baseline.revision}:file.txt`],
-        { encoding: "utf8" },
-      ),
-    ).toBe("unstaged\n");
-    expect(first.snapshot.baseline.sourceRevision).toBe(
-      execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    const started = [first, second].filter((result) => result.status === "fulfilled");
+    const refused = [first, second].filter((result) => result.status === "rejected");
+    expect(started).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.status === "rejected" && String(refused[0].reason)).toMatch(
+      /is still pending in this project\. Finish or cancel it before starting another run\./,
     );
+    const holder = started[0]?.status === "fulfilled" ? started[0].value : undefined;
+    if (!holder) throw new Error("No run started");
+    expect(git("symbolic-ref", "--short", "HEAD")).toBe(holder.snapshot.baseline.branch);
+    expect((await cancelRun(root, holder.snapshot.id)).status).toBe("canceled");
+    const next = await startRun(root, input(), [agent]);
+    expect(next.snapshot.baseline.checkout?.previousBranch).toBe(holder.snapshot.baseline.branch);
   });
 
   it("deduplicates repeated submissions and rejects a reused request ID with different content", async () => {
@@ -227,13 +205,6 @@ describe("protected run intake", () => {
     await expect(startRun(root, { ...request, description: "Different" }, [agent])).rejects.toThrow(
       /already belongs/,
     );
-  });
-
-  it("rejects links that could write outside the isolated workspace", async () => {
-    const root = await project();
-    await symlink(tmpdir(), join(root, "outside"));
-    await expect(startRun(root, input(), [agent])).rejects.toThrow(/Workspace link escapes/);
-    expect(await readFile(join(root, "file.txt"), "utf8")).toBe("original\n");
   });
 
   it("exposes the saved run ID and actual published loop through the local API", async () => {
@@ -264,6 +235,19 @@ describe("protected run intake", () => {
         ((await fetch(`${url}/api/runs`).then((result) => result.json())) as { runs: unknown[] })
           .runs,
       ).toHaveLength(1);
+      await fetch(`${url}/api/runs/${request.requestId}/cancel`, { method: "POST" });
+      execFileSync("git", ["-C", root, "branch", "PROJ-1"]);
+      const taken = await fetch(`${url}/api/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input({ ticketId: "PROJ-1" })),
+      });
+      expect(taken.status).toBe(409);
+      expect(await taken.json()).toEqual({
+        error:
+          "Branch PROJ-1 already exists. Choose another name; Code Factory never reuses or overwrites a branch.",
+        suggestedName: "PROJ-1-2",
+      });
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

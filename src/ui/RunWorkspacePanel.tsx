@@ -26,7 +26,10 @@ const storedEditor = (): EditorCli => {
 export const openInEditorCommand = (cli: string, path: string): string =>
   `${cli} -n ${shellQuote(path)}`;
 
-/** Run branch, worktree path, copy helpers, commit list, promotion and worktree removal. */
+/**
+ * Run branch, project or worktree path, copy helpers, commit list, promotion, and either the way
+ * back to the branch an in-project run switched from or (legacy runs) worktree removal.
+ */
 export const RunWorkspacePanel = ({
   workspace,
   summary,
@@ -34,6 +37,7 @@ export const RunWorkspacePanel = ({
   busy,
   onPromote,
   onRemove,
+  onReturn,
 }: {
   workspace: RunWorkspace;
   summary: EvidenceSummary | null;
@@ -41,6 +45,7 @@ export const RunWorkspacePanel = ({
   busy: boolean;
   onPromote: (name: string) => Promise<PromoteFailure | { warning?: string }>;
   onRemove: () => Promise<string | null>;
+  onReturn: () => Promise<string | null>;
 }) => {
   const { message, setMessage, copiedKey, copy } = useCopyAnnouncer();
   const [editor, setEditor] = useState<EditorCli>(storedEditor);
@@ -50,6 +55,8 @@ export const RunWorkspacePanel = ({
   const [removeError, setRemoveError] = useState("");
   const [removing, setRemoving] = useState(false);
   const [warning, setWarning] = useState("");
+  const [returning, setReturning] = useState(false);
+  const [returnError, setReturnError] = useState("");
   const promoteTrigger = useRef<HTMLButtonElement>(null);
   const removeTrigger = useRef<HTMLButtonElement>(null);
   const branchRef = useRef<HTMLElement>(null);
@@ -66,7 +73,13 @@ export const RunWorkspacePanel = ({
   const removeHelpId = useId();
   const editorId = useId();
   const setupNoteId = useId();
-  if (workspace.kind !== "worktree") return null;
+  const returnHelpId = useId();
+  if (workspace.kind !== "worktree" && workspace.kind !== "project") return null;
+  const inProject = workspace.kind === "project";
+  const checkout = workspace.checkout;
+  const previous = checkout
+    ? (checkout.previousBranch ?? `${checkout.previousRevision.slice(0, 7)} (detached)`)
+    : "";
   const blocker = summary
     ? promotionBlocker(summary, workspace)
     : "Accept the evidence before creating a ticket branch.";
@@ -82,10 +95,20 @@ export const RunWorkspacePanel = ({
       <h3 id={headingId} ref={headingRef} tabIndex={-1} className="font-semibold">
         Run branch
       </h3>
-      {workspace.state === "removed" && (
+      {inProject && checkout && (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {checkout.onRunBranch
+            ? `Your project checkout is on this branch (it was on ${previous}).`
+            : `Your project checkout is now on ${checkout.current ?? "a detached HEAD"}; this run's commits stay on ${branch}.`}
+        </p>
+      )}
+      {inProject && workspace.state === "missing" && (
+        <p className="mt-1 text-sm text-amber-800">Branch {branch} no longer exists.</p>
+      )}
+      {!inProject && workspace.state === "removed" && (
         <p className="mt-1 text-sm text-muted-foreground">Worktree removed · branch kept</p>
       )}
-      {workspace.state === "missing" && (
+      {!inProject && workspace.state === "missing" && (
         <p className="mt-1 text-sm text-amber-800">
           Worktree missing at {path}; branch {branch} is kept.
         </p>
@@ -105,7 +128,7 @@ export const RunWorkspacePanel = ({
             {copiedKey === "branch" ? "Copied" : "Copy branch"}
           </Button>
         </dd>
-        <dt className="font-medium">Worktree</dt>
+        <dt className="font-medium">{inProject ? "Project" : "Worktree"}</dt>
         <dd className="break-all font-mono text-xs">
           <code ref={pathRef}>{path}</code>
         </dd>
@@ -114,7 +137,9 @@ export const RunWorkspacePanel = ({
             size="sm"
             variant="outline"
             disabled={!path}
-            onClick={() => void copy("path", "Worktree path", path, pathRef.current)}
+            onClick={() =>
+              void copy("path", inProject ? "Project path" : "Worktree path", path, pathRef.current)
+            }
           >
             {copiedKey === "path" ? "Copied" : "Copy path"}
           </Button>
@@ -160,7 +185,7 @@ export const RunWorkspacePanel = ({
           </code>
         </div>
       )}
-      {!workspace.setupConfigured && present && (
+      {!inProject && !workspace.setupConfigured && present && (
         <p id={setupNoteId} className="mt-3 text-xs text-muted-foreground">
           No setup command is configured, so dependencies may be missing in the worktree. Add one in
           Setup.
@@ -182,7 +207,11 @@ export const RunWorkspacePanel = ({
         )}
       </details>
       <div className="mt-4 flex flex-wrap items-start gap-3">
-        {workspace.promotion ? (
+        {inProject && !workspace.promotion && branch === workspace.defaultBranchName ? (
+          <p className="text-sm text-muted-foreground">
+            The run branch already carries the ticket name, so there is nothing to promote.
+          </p>
+        ) : workspace.promotion ? (
           <p ref={promotionRef} tabIndex={-1} className="text-sm">
             Ticket branch <strong className="font-mono">{workspace.promotion.branch}</strong> at{" "}
             <code>{workspace.promotion.commit.slice(0, 7)}</code>
@@ -207,7 +236,40 @@ export const RunWorkspacePanel = ({
             )}
           </div>
         )}
-        {present && (
+        {inProject && checkout?.onRunBranch && (
+          <div>
+            <Button
+              variant="outline"
+              disabled={Boolean(checkout.returnBlocker) || !connected || busy || returning}
+              aria-describedby={checkout.returnBlocker || returnError ? returnHelpId : undefined}
+              onClick={() => {
+                setReturning(true);
+                setReturnError("");
+                void onReturn().then((error) => {
+                  setReturning(false);
+                  if (error) setReturnError(error);
+                  else {
+                    setMessage(`Switched the project back to ${previous}.`);
+                    // The button unmounts once the checkout leaves the run branch.
+                    headingRef.current?.focus();
+                  }
+                });
+              }}
+            >
+              {returning ? "Switching…" : `Back to ${previous}`}
+            </Button>
+            {(returnError || checkout.returnBlocker) && (
+              <p
+                id={returnHelpId}
+                role={returnError ? "alert" : undefined}
+                className={`mt-1 text-xs ${returnError ? "text-red-700" : "text-muted-foreground"}`}
+              >
+                {returnError || checkout.returnBlocker}
+              </p>
+            )}
+          </div>
+        )}
+        {!inProject && present && (
           <div>
             <Button
               ref={removeTrigger}

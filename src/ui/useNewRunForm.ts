@@ -3,8 +3,15 @@ import type { AgentConnection } from "../adapters/contract.js";
 import type { ExecutionBinding, LoopDefinition } from "../domain/loop.js";
 import type { RunRecord } from "../domain/run.js";
 import type { RetrievedTicket } from "../domain/ticket.js";
+import { runBranchNameSchema } from "../domain/run-branch.js";
 import { bindingError } from "./connection";
-import { api, ApiError, ticketResponseSchema, startedRunResponseSchema } from "./project-api";
+import {
+  api,
+  ApiError,
+  promoteErrorSchema,
+  ticketResponseSchema,
+  startedRunResponseSchema,
+} from "./project-api";
 
 type TicketState = "idle" | "loading" | "found" | "not-found" | "auth" | "error";
 
@@ -31,6 +38,9 @@ export const useNewRunForm = ({
   const [ticketId, setTicketId] = useState("");
   const [ticket, setTicket] = useState<RetrievedTicket | null>(null);
   const [ticketState, setTicketState] = useState<TicketState>("idle");
+  // Until the user edits it, the run branch follows the ticket number.
+  const [branchInput, setBranchInput] = useState<string | null>(null);
+  const [suggestedBranch, setSuggestedBranch] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const requestSequence = useRef(0);
@@ -42,6 +52,10 @@ export const useNewRunForm = ({
     .map((step) => bindingError(step.binding ?? defaultBinding, agents))
     .find(Boolean);
   const hasTicketInput = Boolean(ticketId.trim());
+  const branch = branchInput ?? ticketId.trim().toUpperCase();
+  const branchError = branch.trim()
+    ? (runBranchNameSchema.safeParse(branch).error?.issues[0]?.message ?? "")
+    : "";
   const ticketReady =
     !hasTicketInput ||
     !trackerConfigured ||
@@ -85,6 +99,7 @@ export const useNewRunForm = ({
       return setError("Retrieve this ticket, or clear it to start from the description.");
     if (!canStart || connectionError)
       return setError(connectionError ?? "Verify the selected agent connection before starting.");
+    if (branchError) return setError(branchError);
     submitLock.current = true;
     setSubmitting(true);
     setError("");
@@ -99,6 +114,7 @@ export const useNewRunForm = ({
           loopVersion: selected.version,
           description: description.trim(),
           ...(hasTicketInput ? { ticketId: ticketId.trim().toUpperCase() } : {}),
+          ...(branch.trim() ? { branch: branch.trim() } : {}),
         }),
       });
       onStarted(result.runId, result.run);
@@ -107,8 +123,12 @@ export const useNewRunForm = ({
       setTicketId("");
       setTicket(null);
       setTicketState("idle");
+      setBranchInput(null);
+      setSuggestedBranch("");
       onOpenChange(false);
     } catch (caught) {
+      const refusal = caught instanceof ApiError ? promoteErrorSchema.safeParse(caught.body) : null;
+      setSuggestedBranch(refusal?.success ? (refusal.data.suggestedName ?? "") : "");
       setError(caught instanceof Error ? caught.message : "Could not start the run.");
     } finally {
       submitLock.current = false;
@@ -125,6 +145,12 @@ export const useNewRunForm = ({
     setTicketId(value);
     setTicket(null);
     setTicketState("idle");
+    setError("");
+    requestId.current = crypto.randomUUID();
+  };
+  const changeBranch = (value: string) => {
+    setBranchInput(value);
+    setSuggestedBranch("");
     setError("");
     requestId.current = crypto.randomUUID();
   };
@@ -157,5 +183,9 @@ export const useNewRunForm = ({
     changeLoop,
     changeTicket,
     changeDescription,
+    branch,
+    branchError,
+    suggestedBranch,
+    changeBranch,
   };
 };

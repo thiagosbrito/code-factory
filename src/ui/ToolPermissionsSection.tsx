@@ -14,7 +14,7 @@ import { ToolGrantDialog, type ToolGrantChoice, type ToolGrantPrompt } from "./T
 const providerName: Record<GrantableProvider, string> = { kiro: "Kiro", codex: "Codex" };
 const grantedText: Record<GrantableProvider, string> = {
   kiro: "shell (execute_bash) allowed",
-  codex: "commands inside the step's worktree allowed",
+  codex: "commands inside the project allowed",
 };
 const defaultText: Record<GrantableProvider, string> = {
   kiro: "default tools only (fs_read, fs_write)",

@@ -54,6 +54,10 @@ export const NewRunDialog = ({
     changeLoop,
     changeTicket,
     changeDescription,
+    branch,
+    branchError,
+    suggestedBranch,
+    changeBranch,
   } = useNewRunForm({
     loops,
     agents,
@@ -211,15 +215,53 @@ export const NewRunDialog = ({
               placeholder="Describe the change, constraints and expected outcome…"
             />
           </div>
+          <div>
+            <label htmlFor="run-branch" className="mb-1 block text-sm font-medium">
+              Branch
+            </label>
+            <Input
+              id="run-branch"
+              value={branch}
+              onChange={(event) => changeBranch(event.target.value)}
+              placeholder="code-factory/<run id>"
+              aria-describedby={
+                branchError ? "run-branch-help run-branch-error" : "run-branch-help"
+              }
+              aria-invalid={Boolean(branchError) || undefined}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p id="run-branch-help" className="mt-1 text-xs text-muted-foreground">
+              Code Factory creates this new branch in your project and switches your checkout to it;
+              each step is committed there. Commit or stash your own changes first. Empty uses
+              code-factory/&lt;run id&gt;.
+            </p>
+            {branchError && (
+              <p id="run-branch-error" role="alert" className="mt-1 text-xs text-red-700">
+                {branchError}
+              </p>
+            )}
+          </div>
           {!canStart && (
             <p role="alert" className="text-sm text-red-700">
               Verify an authenticated default agent connection before starting.
             </p>
           )}
           {error && (
-            <p role="alert" className="text-sm text-red-700">
-              {error}
-            </p>
+            <div role="alert" className="text-sm text-red-700">
+              <p>{error}</p>
+              {suggestedBranch && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-2"
+                  onClick={() => changeBranch(suggestedBranch)}
+                >
+                  Use {suggestedBranch}
+                </Button>
+              )}
+            </div>
           )}
           {selected && (
             <p className="rounded-lg border bg-canvas p-3 text-sm">

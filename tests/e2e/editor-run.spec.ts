@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -41,7 +41,7 @@ const detectedCodex: AgentConnection = {
 
 const test = base.extend<{ harness: Harness }>({
   harness: async ({ browserName: _browserName }, use) => {
-    // Run worktrees are created beside the repository, so the repo lives in a disposable parent.
+    // A disposable parent keeps every Git artifact of the journey inside one removable folder.
     const parentDirectory = await mkdtemp(join(tmpdir(), "code-factory-e2e-"));
     const projectDirectory = join(parentDirectory, "repo");
     await mkdir(projectDirectory);
@@ -374,7 +374,6 @@ test("native configuration export requires preview and writes only after apply",
   await expect(translation.getByRole("button", { name: "Apply export" })).toBeEnabled();
   const relativePath = await translation.locator("code").first().textContent();
   if (!relativePath) throw new Error("Preview did not provide an export path");
-  const { access } = await import("node:fs/promises");
   await expect(access(join(harness.projectDirectory, relativePath))).rejects.toThrow();
   await translation.getByRole("button", { name: "Apply export" }).click();
   await expect(translation.getByRole("status")).toContainText(`Exported ${relativePath}.`);
@@ -705,7 +704,7 @@ test("a failed review can be retried from its selected latest attempt", async ({
   await expect(page.getByText(/Human acceptance:/)).toContainText("accepted");
 });
 
-test("a granted run commits on its run branch and is promoted to a named branch after acceptance", async ({
+test("a run changes the project folder itself on a new branch, is promoted, and switches back", async ({
   page,
   harness,
 }) => {
@@ -732,7 +731,7 @@ test("a granted run commits on its run branch and is promoted to a named branch 
   const prompt = page.getByRole("dialog", {
     name: "Allow Codex to run commands outside its sandbox?",
   });
-  await expect(prompt).toContainText("network access and writes outside the worktree");
+  await expect(prompt).toContainText("network access and writes outside the project");
   await expect(prompt.getByRole("button", { name: "Cancel" })).toBeFocused();
   await prompt.getByRole("button", { name: "Allow and run" }).click();
   await expect(prompt).toHaveCount(0);
@@ -756,7 +755,17 @@ test("a granted run commits on its run branch and is promoted to a named branch 
   };
   const branch = runs.runs[0]?.snapshot.baseline.branch ?? "";
   expect(git("log", "-1", "--format=%B", branch)).toContain("Code-Factory-Step: implement");
-  expect(git("worktree", "list")).toContain("repo-code-factory");
+  // The user's own checkout is on the run branch and holds the agent's change: no worktree, no copy.
+  expect(git("symbolic-ref", "HEAD")).toBe(`refs/heads/${branch}`);
+  expect(await readFile(join(harness.projectDirectory, "fixture-output.txt"), "utf8")).toBe(
+    "fixture change\n",
+  );
+  expect(git("worktree", "list").split("\n")).toHaveLength(1);
+  expect(git("status", "--porcelain", "--", ".", ":(exclude).code-factory")).toBe("");
+  const previous = userBranch.replace("refs/heads/", "");
+  await expect(runBranch).toContainText(
+    `Your project checkout is on this branch (it was on ${previous}).`,
+  );
 
   const create = runBranch.getByRole("button", { name: "Create ticket branch" });
   await expect(create).toBeDisabled();
@@ -775,8 +784,15 @@ test("a granted run commits on its run branch and is promoted to a named branch 
   // The trigger is gone after success, so focus lands on the result instead of the page body.
   await expect(runBranch.getByText(/^Ticket branch demo-run at/)).toBeFocused();
   expect(git("rev-list", "demo-run")).toBe(git("rev-list", branch));
-  expect(git("rev-parse", "HEAD")).toBe(userHead);
+  expect(git("symbolic-ref", "HEAD")).toBe(`refs/heads/${branch}`);
+
+  // "Back to <branch>" restores the user's checkout; the run's commits stay on its branches.
+  await runBranch.getByRole("button", { name: `Back to ${previous}` }).click();
+  await expect(runBranch).toContainText(`Your project checkout is now on ${previous}`);
   expect(git("symbolic-ref", "HEAD")).toBe(userBranch);
+  expect(git("rev-parse", "HEAD")).toBe(userHead);
+  await expect(access(join(harness.projectDirectory, "fixture-output.txt"))).rejects.toThrow();
+  expect(git("log", "-1", "--format=%B", branch)).toContain("Code-Factory-Step: implement");
 
   // Revoke from Setup: the grant leaves project.json and focus moves to the new Allow… button.
   await page

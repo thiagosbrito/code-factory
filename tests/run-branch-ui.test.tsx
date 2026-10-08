@@ -51,8 +51,28 @@ const workspace = (overrides: Partial<RunWorkspace> = {}): RunWorkspace => ({
   promotion: null,
   defaultBranchName: "BMAP-1190",
   setupConfigured: true,
+  checkout: null,
   ...overrides,
 });
+const projectWorkspace = (
+  checkout: Partial<NonNullable<RunWorkspace["checkout"]>> = {},
+  overrides: Partial<RunWorkspace> = {},
+): RunWorkspace =>
+  workspace({
+    kind: "project",
+    path: "/work/repo",
+    branch: "work/bmap",
+    removalBlocked: null,
+    checkout: {
+      current: "work/bmap",
+      onRunBranch: true,
+      previousBranch: "main",
+      previousRevision: "b".repeat(40),
+      returnBlocker: null,
+      ...checkout,
+    },
+    ...overrides,
+  });
 const panel = (props: Partial<Parameters<typeof RunWorkspacePanel>[0]> = {}) =>
   render(
     <RunWorkspacePanel
@@ -62,6 +82,7 @@ const panel = (props: Partial<Parameters<typeof RunWorkspacePanel>[0]> = {}) =>
       busy={false}
       onPromote={async () => ({})}
       onRemove={async () => null}
+      onReturn={async () => null}
       {...props}
     />,
   );
@@ -101,6 +122,7 @@ describe("run branch panel", () => {
       busy: false,
       onPromote: async () => ({}),
       onRemove: async () => null,
+      onReturn: async () => null,
     };
     rerender(
       <RunWorkspacePanel
@@ -123,7 +145,7 @@ describe("run branch panel", () => {
     expect(button().hasAttribute("disabled")).toBe(true);
     expect(
       screen.getByText(
-        "The worktree has uncommitted changes, so the branch would not match the accepted candidate.",
+        "The run's files have uncommitted changes, so the branch would not match the accepted candidate.",
       ),
     ).toBeTruthy();
   });
@@ -148,6 +170,7 @@ describe("run branch panel", () => {
           connected
           busy={false}
           onRemove={async () => null}
+          onReturn={async () => null}
           onPromote={async (name) => {
             const result = await onPromote(name);
             if (!("error" in result))
@@ -197,6 +220,7 @@ describe("run branch panel", () => {
           connected
           busy={false}
           onPromote={async () => ({})}
+          onReturn={async () => null}
           onRemove={async () => {
             setCurrent(workspace({ state: "removed" }));
             return null;
@@ -238,6 +262,81 @@ describe("run branch panel", () => {
     expect(create.hasAttribute("disabled")).toBe(true);
     await user.type(screen.getByRole("textbox", { name: "Branch name" }), "demo-run");
     expect(create.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("shows an in-project run's checkout and switches back to the previous branch", async () => {
+    const user = userEvent.setup();
+    const onReturn = vi
+      .fn<() => Promise<string | null>>()
+      .mockResolvedValueOnce("Git refused to switch branches: would be overwritten")
+      .mockResolvedValueOnce(null);
+    panel({ workspace: projectWorkspace(), onReturn });
+    expect(screen.getByText("Project")).toBeTruthy();
+    expect(screen.getByText("/work/repo")).toBeTruthy();
+    expect(
+      screen.getByText("Your project checkout is on this branch (it was on main)."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove worktree…" })).toBeNull();
+    expect(screen.queryByText(/No setup command is configured/)).toBeNull();
+    const back = screen.getByRole("button", { name: "Back to main" });
+    await user.click(back);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Git refused to switch branches: would be overwritten",
+    );
+    await user.click(back);
+    expect(onReturn).toHaveBeenCalledTimes(2);
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("Switched the project back to main."),
+    );
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Run branch" }));
+  });
+
+  it("explains why switching back or promoting is unavailable for an in-project run", () => {
+    const { rerender } = panel({
+      workspace: projectWorkspace({
+        returnBlocker: "Finish or cancel the run before switching back to main.",
+      }),
+    });
+    const back = screen.getByRole("button", { name: "Back to main" });
+    expect(back.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Finish or cancel the run before switching back to main.").id).toBe(
+      back.getAttribute("aria-describedby"),
+    );
+    rerender(
+      <RunWorkspacePanel
+        workspace={projectWorkspace({}, { branch: "BMAP-1190" })}
+        summary={summary("accepted")}
+        connected
+        busy={false}
+        onPromote={async () => ({})}
+        onRemove={async () => null}
+        onReturn={async () => null}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Create ticket branch" })).toBeNull();
+    expect(
+      screen.getByText(
+        "The run branch already carries the ticket name, so there is nothing to promote.",
+      ),
+    ).toBeTruthy();
+    rerender(
+      <RunWorkspacePanel
+        workspace={projectWorkspace({ current: "main", onRunBranch: false })}
+        summary={summary("accepted")}
+        connected
+        busy={false}
+        onPromote={async () => ({})}
+        onRemove={async () => null}
+        onReturn={async () => null}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "Your project checkout is now on main; this run's commits stay on work/bmap.",
+      ),
+    ).toBeTruthy();
+    // Nothing to switch back from once the checkout left the run branch.
+    expect(screen.queryByRole("button", { name: "Back to main" })).toBeNull();
   });
 
   it("shows the missing-dependency note only without a setup command", () => {
@@ -323,6 +422,46 @@ describe("stopped runs", () => {
         onBack={() => undefined}
       />,
     );
+
+  it("offers Cancel run next to Execute run for a pending run, which holds the project", async () => {
+    const pending = createRunRecord(
+      createRunSnapshot(
+        parseLoop({
+          schemaVersion: 2,
+          id: "flow",
+          name: "Flow",
+          version: 1,
+          status: "published",
+          steps: [step("implement", "implementation")],
+          dependencies: [],
+          groups: [],
+          joins: [],
+          decisions: [],
+          policy: {},
+        }),
+        { description: "Task" },
+        { provider: "mock", model: "default" },
+      ),
+    );
+    const onCancel = vi.fn<() => void>();
+    render(
+      <RunDetail
+        run={pending}
+        summary={null}
+        accepting={false}
+        onAccept={() => undefined}
+        connected
+        executing={false}
+        onExecute={() => undefined}
+        onCancel={onCancel}
+        onRetry={() => undefined}
+        onBack={() => undefined}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Execute run" })).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Cancel run" }));
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
 
   it("renders Not reached for pending steps, names the blocking review, and offers Retry", async () => {
     const run = blockedRun();
@@ -545,7 +684,7 @@ describe("agent tool permission prompt", () => {
       />,
     );
     expect(screen.getByText(toolGrantText.codex.implication).textContent).toContain(
-      "network access and writes outside the worktree",
+      "network access and writes outside the project",
     );
     expect(screen.getByText(toolGrantText.codex.implication).textContent).toContain(
       "branches, stash and config",
