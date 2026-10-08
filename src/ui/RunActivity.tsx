@@ -1,9 +1,9 @@
 import { useState } from "react";
 import type { RunRecord } from "../domain/run.js";
-import type { PublicEvent } from "../runtime/events.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { coalesceActivity, showsTitle, type ActivityEntry } from "./activity-entries";
 
 type Filter = "all" | "message" | "tool" | "check" | "error";
 const filters: { value: Filter; label: string }[] = [
@@ -14,7 +14,7 @@ const filters: { value: Filter; label: string }[] = [
   { value: "error", label: "Errors" },
 ];
 
-const EventCard = ({ event }: { event: PublicEvent }) => {
+const EventCard = ({ event }: { event: ActivityEntry }) => {
   const [expanded, setExpanded] = useState(false);
   return (
     <li className="flex gap-3 border-b border-border py-3 text-sm last:border-b-0">
@@ -25,7 +25,7 @@ const EventCard = ({ event }: { event: PublicEvent }) => {
           <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time>
           {event.state && <span>· {event.state}</span>}
         </div>
-        <p className="mt-1 break-words font-medium">{event.title}</p>
+        {showsTitle(event) && <p className="mt-1 break-words font-medium">{event.title}</p>}
         {event.detail && event.type !== "tool" && (
           <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
             {event.detail}
@@ -58,15 +58,14 @@ export const RunActivity = ({ run, connected }: { run: RunRecord; connected: boo
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const step = run.steps.find((item) => item.stepId === stepId);
-  const events = run.evidence
-    .filter((item): item is PublicEvent => item.kind === "event")
+  // Coalesce before filtering so a hidden tool event still ends the message it interrupted.
+  const events = coalesceActivity(run.evidence)
     .filter((item) => !stepId || item.stepId === stepId)
     .filter((item) => !attemptId || item.attemptId === attemptId)
     .filter((item) => filter === "all" || item.type === filter)
     .filter((item) =>
       `${item.title} ${item.detail ?? ""}`.toLowerCase().includes(search.toLowerCase()),
-    )
-    .sort((a, b) => a.sequence - b.sequence);
+    );
   return (
     <section className="mt-6 rounded-lg border bg-card p-4" aria-label="Activity">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -133,7 +132,8 @@ export const RunActivity = ({ run, connected }: { run: RunRecord; connected: boo
         value={search}
         onChange={(event) => setSearch(event.target.value)}
       />
-      <ol className="mt-3 max-h-80 overflow-y-auto" aria-live="polite">
+      {/* Streamed text grows inside an existing entry; announce new entries, not every chunk. */}
+      <ol className="mt-3 max-h-80 overflow-y-auto" aria-live="polite" aria-relevant="additions">
         {events.map((event) => (
           <EventCard key={event.id} event={event} />
         ))}

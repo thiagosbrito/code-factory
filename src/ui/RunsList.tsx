@@ -3,6 +3,7 @@ import type { RunRecord } from "../domain/run.js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { runStatus, runTitle } from "./run-view-model";
+import { activityPreview } from "./activity-entries";
 
 type StatusFilter = "All" | "Active" | "Waiting" | "Failed" | "Completed";
 const filters: StatusFilter[] = ["All", "Active", "Waiting", "Failed", "Completed"];
@@ -58,7 +59,7 @@ export const RunsList = ({ runs, onOpen }: { runs: RunRecord[]; onOpen: (id: str
       </div>
       <div className="overflow-hidden rounded-lg border bg-white">
         {visible.map((run) => {
-          const last = run.evidence.filter((item) => item.kind === "event").at(-1);
+          const last = activityPreview(run.evidence);
           return (
             <button
               key={run.snapshot.id}
@@ -82,7 +83,7 @@ export const RunsList = ({ runs, onOpen }: { runs: RunRecord[]; onOpen: (id: str
                 {new Date(run.snapshot.createdAt).toLocaleDateString()}
               </time>
               <span className="truncate text-xs text-muted-foreground">
-                {last?.title ?? "No activity yet"}
+                {last ?? "No activity yet"}
               </span>
             </button>
           );

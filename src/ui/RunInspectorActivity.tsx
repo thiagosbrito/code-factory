@@ -4,6 +4,7 @@ import type { Evidence } from "../domain/evidence.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { scopeEvidence, type RunScope } from "./run-view-model";
+import { coalesceActivity, latestSequence, showsTitle } from "./activity-entries";
 
 type Filter = "All" | "Messages" | "Tools" | "Checks" | "Errors";
 const filters: Filter[] = ["All", "Messages", "Tools", "Checks", "Errors"];
@@ -31,15 +32,15 @@ export const RunInspectorActivity = ({
   const scroller = useRef<HTMLOListElement>(null);
   const key =
     scope.kind === "run" ? `run:${run.snapshot.id}` : `${scope.stepId}:${scope.attemptId ?? "all"}`;
-  const events = scopeEvidence(run, scope)
-    .filter((item): item is Extract<Evidence, { kind: "event" }> => item.kind === "event")
-    .filter(
-      (item) =>
-        matchesFilter(item, filter) &&
-        `${item.title} ${item.detail ?? ""}`.toLowerCase().includes(search.toLowerCase()),
-    )
-    .sort((left, right) => left.sequence - right.sequence);
-  const lastSequence = events.at(-1)?.sequence ?? -1;
+  // Coalesce before filtering so a hidden tool event still ends the message it interrupted.
+  // Guidance and question receipts in scope end the message they interrupted.
+  const events = coalesceActivity(scopeEvidence(run, scope)).filter(
+    (item) =>
+      matchesFilter(item, filter) &&
+      `${item.title} ${item.detail ?? ""}`.toLowerCase().includes(search.toLowerCase()),
+  );
+  // A growing message moves the live edge without adding an entry.
+  const lastSequence = latestSequence(events);
   const previous = useRef({ key, lastSequence });
   useLayoutEffect(() => {
     const element = scroller.current;
@@ -115,7 +116,7 @@ export const RunInspectorActivity = ({
                 {new Date(item.createdAt).toLocaleString()}
               </time>
             </div>
-            <strong className="mt-1 block">{item.title}</strong>
+            {showsTitle(item) && <strong className="mt-1 block">{item.title}</strong>}
             {item.detail && (
               <p className="mt-1 whitespace-pre-wrap break-words text-xs text-muted-foreground">
                 {item.detail}

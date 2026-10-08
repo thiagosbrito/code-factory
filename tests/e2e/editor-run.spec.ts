@@ -141,7 +141,11 @@ const test = base.extend<{ harness: Harness }>({
           };
           sessions.set(session.sessionId, session);
           yield { type: "started", ...session };
-          yield { type: "message", text: `Fixture executing ${input.stepId}`, ...session };
+          // Real adapters stream text in small chunks; reviews finish their sentence after the gate.
+          yield { type: "message", text: "Fixture ", ...session };
+          yield { type: "message", text: "executing ", ...session };
+          if (!input.stepId.endsWith("-review") || input.attempt !== 1)
+            yield { type: "message", text: input.stepId, ...session };
           if (requestInput && input.stepId === "implement") {
             yield {
               type: "input-request",
@@ -176,6 +180,8 @@ const test = base.extend<{ harness: Harness }>({
               ),
             ]);
           signal.throwIfAborted();
+          if (input.stepId.endsWith("-review") && input.attempt === 1)
+            yield { type: "message", text: input.stepId, ...session };
           const failsFirstReview =
             failFirstReview &&
             (input.stepId === "quality-review" || input.stepId === "review") &&
@@ -456,6 +462,58 @@ test("reloading during parallel review reconnects without duplicating attempts",
     .toMatchObject({ status: "succeeded", reviewAttempts: [1, 1, 1, 1, 1, 1] });
 });
 
+test("streamed message chunks show as one growing activity entry that survives reload", async ({
+  page,
+  harness,
+}) => {
+  await finishSetup(page, harness.origin);
+  await page.getByRole("button", { name: "Loops" }).click();
+  await page.getByRole("button", { name: "Use starter template" }).click();
+  await page
+    .getByLabel("Starter templates")
+    .getByRole("button", { name: "Create draft" })
+    .nth(1)
+    .click();
+  await page.getByRole("button", { name: "Publish v1" }).click();
+  await page.getByRole("button", { name: "Runs" }).click();
+  await page.getByRole("button", { name: /New run/i }).click();
+  await page.getByLabel(/Task description/).fill("Stream review commentary");
+  await page.getByRole("button", { name: "Start run" }).click();
+  await executeWithDefaultTools(page);
+  await page.getByRole("button", { name: /Code quality review, running/ }).click();
+  const messages = () =>
+    page
+      .getByLabel("Run inspector")
+      .getByRole("list", { name: "Activity events" })
+      .getByRole("listitem")
+      // Each entry starts with its type label; keep only message entries.
+      .filter({ hasText: /^message/ });
+  // Two chunks streamed before the review gate render as one entry.
+  await expect(messages()).toHaveCount(1);
+  await expect(messages()).toContainText("Fixture executing");
+  const streaming = await messages().elementHandle();
+  harness.releaseReviews();
+  // The final chunk arrives live and grows the same entry instead of adding one.
+  await expect(messages()).toContainText("Fixture executing quality-review");
+  await expect(messages()).toHaveCount(1);
+  // Same DOM node as before the final chunk: it grew in place rather than being re-rendered anew.
+  expect(
+    await streaming?.evaluate(
+      (node) => node.isConnected && (node.textContent ?? "").includes("quality-review"),
+    ),
+  ).toBe(true);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`${harness.origin}/api/runs`);
+      const body = (await response.json()) as { runs: { status: string }[] };
+      return body.runs[0]?.status;
+    })
+    .toBe("succeeded");
+  await page.reload();
+  await page.getByRole("button", { name: /Code quality review, succeeded/ }).click();
+  await expect(messages()).toHaveCount(1);
+  await expect(messages()).toContainText("Fixture executing quality-review");
+});
 test("a blocking agent question survives reload and accepts one answer", async ({
   page,
   harness,
