@@ -341,6 +341,24 @@ const renderDetail = (
     />,
   );
 
+it("returns focus to the detail icon when a dialog closes, and to the evidence icon after a hand-off", async () => {
+  const user = userEvent.setup();
+  renderDetail(makeRun());
+  const description = screen.getByRole("button", { name: "Description" });
+  await user.click(description);
+  await user.keyboard("{Escape}");
+  await vi.waitFor(() => expect(document.activeElement).toBe(description));
+  const evidence = screen.getByRole("button", { name: "Final evidence summary" });
+  await user.click(evidence);
+  await user.click(screen.getByRole("button", { name: /Changed files/ }));
+  const inspector = screen.getByLabelText("Run inspector");
+  expect(screen.queryByRole("dialog", { name: "Final evidence summary" })).toBeNull();
+  // The closing dialog must not pull focus back to its icon while the inspector is open.
+  await vi.waitFor(() => expect(inspector.contains(document.activeElement)).toBe(true));
+  await user.click(screen.getByRole("button", { name: "Close inspector" }));
+  await vi.waitFor(() => expect(document.activeElement).toBe(evidence));
+});
+
 it.each([
   ["provider-neutral", "BLOCKED: Issue PROJ-123 could not be retrieved; MCP unavailable"],
   ["legacy Jira", "BLOCKED: Jira issue PROJ-123 could not be retrieved; MCP unavailable"],
