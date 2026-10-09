@@ -10,16 +10,16 @@ Current stack: Node >=22.12, pnpm 11.8.0, strict TypeScript, React 19, Vite 8, T
 
 ## Where changes belong
 
-| Path               | Responsibility                                                                                      |
-| ------------------ | --------------------------------------------------------------------------------------------------- |
-| `src/domain/`      | Portable schemas, types, validation, and run/loop rules; no provider or UI assumptions.             |
-| `src/adapters/`    | Provider discovery, verification, capabilities, and execution behind `contract.ts`.                 |
-| `src/runtime/`     | Local API, persistence, Git worktrees, scheduling, intake, events, and provider coordination.       |
-| `src/translators/` | Explicit import/export of agent-native configuration, with loss reporting.                          |
-| `src/ui/`          | React screens, hooks, API clients, and presentation; `src/ui/components/ui/` holds shared controls. |
-| `tests/`           | Vitest domain/runtime/UI tests, provider fixtures, and `tests/e2e/` browser journeys.               |
-| `scripts/`         | Development, package smoke, and native proof tooling.                                               |
-| `docs/`            | Architecture decisions and dated evidence.                                                          |
+| Path               | Responsibility                                                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/`      | Portable schemas, types, validation, and run/loop rules; no provider or UI assumptions.                                               |
+| `src/adapters/`    | Provider discovery, verification, capabilities, and execution behind `contract.ts`.                                                   |
+| `src/runtime/`     | Local API, persistence, Git worktrees, scheduling, intake, events, and provider coordination.                                         |
+| `src/translators/` | Explicit import/export of agent-native configuration, with loss reporting.                                                            |
+| `src/ui/`          | React UI by area: `app/`, `factory/`, `features/{runs,loops,setup}/`, and `shared/` (`shared/components/` holds the shadcn controls). |
+| `tests/`           | Vitest domain/runtime/UI tests, provider fixtures, and `tests/e2e/` browser journeys.                                                 |
+| `scripts/`         | Development, package smoke, and native proof tooling.                                                                                 |
+| `docs/`            | Architecture decisions and dated evidence.                                                                                            |
 
 Trace a behavior through domain contract, runtime route/storage/scheduler, API client, and UI before editing. Keep rendering, state orchestration, domain decisions, persistence, and provider protocol code in their respective modules. Add or change a portable contract before teaching multiple layers a new state.
 

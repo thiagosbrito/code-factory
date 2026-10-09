@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseCodexMessage } from "../src/adapters/codex.js";
-import { api, projectResponseSchema } from "../src/ui/project-api.js";
+import { api, projectResponseSchema } from "../src/ui/shared/project-api.js";
 
 afterEach(() => vi.unstubAllGlobals());
 

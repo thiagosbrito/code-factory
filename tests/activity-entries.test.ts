@@ -3,9 +3,9 @@ import type { Evidence } from "../src/domain/evidence.js";
 import { parseLoop } from "../src/domain/loop.js";
 import { createRunRecord, createRunSnapshot, runRecordSchema } from "../src/domain/run.js";
 import type { PublicEvent } from "../src/runtime/events.js";
-import { activityPreview, coalesceActivity } from "../src/ui/activity-entries.js";
+import { activityPreview, coalesceActivity } from "../src/ui/features/runs/activity-entries.js";
 import { claimStep } from "../src/domain/scheduler.js";
-import { mergeRunEvent } from "../src/ui/run-events.js";
+import { mergeRunEvent } from "../src/ui/features/runs/run-events.js";
 
 const record = createRunRecord(
   createRunSnapshot(

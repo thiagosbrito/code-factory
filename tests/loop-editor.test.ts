@@ -12,7 +12,7 @@ import {
   setParallelGroup,
   setRepeatGroup,
   undo,
-} from "../src/ui/loop-editor-model.js";
+} from "../src/ui/features/loops/loop-editor-model.js";
 
 function chain() {
   return parseLoop({

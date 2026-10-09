@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { App } from "../src/ui/App.js";
-import { ErrorBoundary } from "../src/ui/ErrorBoundary.js";
+import { App } from "../src/ui/app/App.js";
+import { ErrorBoundary } from "../src/ui/app/ErrorBoundary.js";
 import type { ProjectConfig } from "../src/runtime/project.js";
 import type { AgentConnection } from "../src/adapters/contract.js";
 import { trustState } from "./fixtures/trust.js";
