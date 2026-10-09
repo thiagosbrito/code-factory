@@ -38,7 +38,11 @@ afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
   await rm(join(trustDirectory(), "trust.json"), { force: true });
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    roots
+      .splice(0)
+      .map((root) => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
+  );
 });
 
 const git = (root: string, ...args: string[]) =>
@@ -193,6 +197,10 @@ describe("project trust", () => {
     expect((await trusted.json()).trust).toMatchObject({ trusted: true });
     expect((await call(`/api/runs/${runId}/execute`, "POST")).status).toBe(202);
     await vi.waitFor(async () => expect(await exists(marker)).toBe(true));
+    // Let the run finish so it is not still writing into the project when cleanup removes it.
+    await vi.waitFor(async () =>
+      expect((await (await call(`/api/runs/${runId}`)).json()).run.status).not.toBe("running"),
+    );
   });
 
   it("keeps trust and tool grants in the user's private trust file, never in the project", async () => {

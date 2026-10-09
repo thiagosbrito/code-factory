@@ -3,7 +3,8 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, readdir, readFile, writeFile, rm, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { createServer } from "node:net";
 import { once } from "node:events";
 
 const execute = promisify(execFile);
@@ -39,8 +40,18 @@ try {
     ],
     { cwd: consumer, maxBuffer: 2_000_000 },
   );
-  const cli = join(consumer, "node_modules", "code-factory", "dist", "node", "cli.js");
+  const cli = join(
+    consumer,
+    "node_modules",
+    "@thiagosbrito",
+    "code-factory",
+    "dist",
+    "node",
+    "cli.js",
+  );
   assert.match((await execute(process.execPath, [cli, "--help"])).stdout, /code-factory init/);
+  const packed = JSON.parse(await readFile(join(dirname(cli), "..", "..", "package.json"), "utf8"));
+  assert.equal((await execute(process.execPath, [cli, "--version"])).stdout.trim(), packed.version);
   await execute(process.execPath, [cli, "init", workspace]);
   const config = JSON.parse(
     await readFile(join(workspace, ".code-factory", "project.json"), "utf8"),
@@ -57,10 +68,27 @@ try {
     [
       "--input-type=module",
       "-e",
-      'import {createLoopDraft} from "code-factory"; if(createLoopDraft("blank", "Blank").steps.length) throw Error("Not empty");',
+      'import {createLoopDraft} from "@thiagosbrito/code-factory"; if(createLoopDraft("blank", "Blank").steps.length) throw Error("Not empty");',
     ],
     { cwd: consumer },
   );
+  // A port that cannot be bound gets a sentence that names the port, not a raw socket error.
+  const busy = createServer();
+  await new Promise((done) => busy.listen(0, "127.0.0.1", done));
+  const busyPort = busy.address().port;
+  const refused = await execute(process.execPath, [
+    cli,
+    "start",
+    "--project",
+    workspace,
+    "--port",
+    String(busyPort),
+  ]).then(
+    () => assert.fail("start must fail on a busy port"),
+    (error) => error,
+  );
+  busy.close();
+  assert.match(refused.stderr, new RegExp(`Port ${busyPort} is already in use.*--port 0`));
   runtime = spawn(process.execPath, [cli, "start", "--project", workspace, "--port", "0"], {
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -113,7 +141,7 @@ try {
   assert.equal((await exited)[0], 0);
   runtime = undefined;
   console.log(
-    "Package smoke passed: npm production install, public API, blank init, preservation, duplicate-init rejection, packaged UI/assets/API with security headers behind the session token, and clean shutdown.",
+    "Package smoke passed: npm production install, public API, --version, busy-port message, blank init, preservation, duplicate-init rejection, packaged UI/assets/API with security headers behind the session token, and clean shutdown.",
   );
 } finally {
   if (runtime && runtime.exitCode === null && runtime.signalCode === null) {

@@ -1,6 +1,30 @@
 # Code Factory
 
-A local, agent-independent coding loop factory. React + TypeScript, shadcn/ui, Tailwind, and Vite supply the UI; a Node CLI hosts it and accesses project files. The npm package will include both parts.
+A local, agent-independent coding loop factory. React + TypeScript, shadcn/ui, Tailwind, and Vite supply the UI; a Node CLI hosts it and accesses project files. The npm package includes both parts.
+
+## Quick start
+
+Requirements:
+
+- Node 22.12 or newer.
+- A Git repository with at least one commit and a clean working tree.
+- One of Codex, Kiro or Claude Code, installed and signed in.
+
+```sh
+cd your-repo
+npx @thiagosbrito/code-factory start
+```
+
+Open the printed link (it opens automatically in an interactive terminal; pass `--no-open` to skip), then go to Setup → Verify connection. `--version` prints the installed version; `--port 0` picks a free port.
+
+Safety, in plain words:
+
+- It listens on `127.0.0.1` only, and the link carries a token that changes on every start.
+- It asks once whether to trust a project and lists everything that project would run. Nothing runs from an untrusted project.
+- Agents use their own logins; Code Factory stores no agent credentials.
+- Letting an agent run shell commands is a separate permission you can revoke at any time.
+
+Data lives in `.code-factory/` inside the project, and the trust decisions in `trust.json` in your user configuration folder. See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Development
 
@@ -77,6 +101,6 @@ Optional Linear retrieval is configured by supplying `CODE_FACTORY_LINEAR_API_KE
 pnpm pack
 ```
 
-The tarball includes the CLI, compiled portable contracts, built UI, and architecture docs. It is suitable for installation from a local tarball. The package is marked private until its public name and publishing scope are decided. Development uses pnpm; consumers will be able to install the release through npm.
+The tarball includes the CLI, compiled portable contracts, built UI, and the architecture document. It is published to npm as `@thiagosbrito/code-factory`; see [the packaging plan](docs/packaging-plan.md) for the release procedure. Development uses pnpm.
 
 See [architecture decisions](docs/architecture.md) and [development guidance](CONTRIBUTING.md).

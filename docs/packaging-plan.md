@@ -19,7 +19,7 @@ This document records the decisions taken, the security work that had to land fi
 | Access        | public (`publishConfig.access`) | Scoped packages are private by default and would fail to publish.                                                                                                                                |
 | First release | `0.1.0`, published by hand      | The first publish proves the account, scope and tarball. Automation follows (step 7).                                                                                                            |
 
-Open decision: whether `start` opens the browser by default (with `--no-open`). The printed link now carries the session token, so opening it automatically also saves the user a copy and paste.
+Decided: `start` opens the printed link in the default browser when run in an interactive terminal; `--no-open` skips it. The link carries the session token, so this also saves a copy and paste.
 
 ## Security work done before publishing
 
@@ -53,7 +53,7 @@ Measured on `main` with `npm pack --dry-run`: 591 kB packed, 2.0 MB unpacked, 18
 
 ## Remaining work
 
-Steps 1 to 5 are code changes, made on a branch and merged through a PR. Step 6 needs the maintainer's npm account.
+Steps 1 to 4 are implemented on `feat/npm-packaging` (metadata, CLI first run, README, `SECURITY.md`); the source maps are kept. Steps 1 to 5 are code changes, made on a branch and merged through a PR. Step 6 needs the maintainer's npm account.
 
 ### 1. Package metadata
 
@@ -104,6 +104,8 @@ Before publishing, test the tarball that will be uploaded, not the working tree:
 If something is wrong after publishing, publish a fixed `0.1.1` and `npm deprecate @thiagosbrito/code-factory@0.1.0 "<reason>"`; reach for `npm unpublish` only within its window and only for a release that should never have existed.
 
 ### 7. Automate later releases
+
+Implemented in `.github/workflows`: `ci.yml` (check on Node 24 and tests on Node 22.12, browser journeys, packed tarball with a file-list guard), `security.yml` (CodeQL, production dependency audit, dependency review on PRs, weekly), `release.yml` (on `v*` tags: verify, then publish with provenance and create the GitHub release) and Dependabot. Still manual: the trusted publisher on npmjs.com, an `npm` environment with required reviewers, and branch protection requiring these checks. Actions are pinned to major tags, not commit SHAs.
 
 A GitHub Actions workflow on `v*` tags that runs `pnpm check`, `pnpm test:e2e` and `pnpm test:package`, then publishes with npm trusted publishing (OIDC) and provenance, so no long-lived npm token sits on a laptop or in repository secrets. Configure the trusted publisher on npmjs.com for the repository and workflow file first.
 
