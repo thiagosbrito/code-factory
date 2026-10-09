@@ -11,18 +11,25 @@ import {
 import { SetupSection } from "./SetupSection";
 import { ToolGrantDialog, type ToolGrantChoice, type ToolGrantPrompt } from "./ToolGrantDialog";
 
-const providerName: Record<GrantableProvider, string> = { kiro: "Kiro", codex: "Codex" };
+const providerName: Record<GrantableProvider, string> = {
+  kiro: "Kiro",
+  codex: "Codex",
+  "claude-code": "Claude Code",
+};
 const grantedText: Record<GrantableProvider, string> = {
   kiro: "shell (execute_bash) allowed",
   codex: "commands inside the project allowed",
+  "claude-code": "shell (Bash) allowed",
 };
 const defaultText: Record<GrantableProvider, string> = {
   kiro: "default tools only (fs_read, fs_write)",
   codex: "default: command approval requests are declined",
+  "claude-code": "default: file tools only, Bash denied",
 };
 const permissionName: Record<GrantableProvider, string> = {
   kiro: "Kiro shell permission",
   codex: "Codex command permission",
+  "claude-code": "Claude Code shell permission",
 };
 
 /** Setup → Agent tool permission. Rows render from App's project state; nothing is cached. */

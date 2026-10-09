@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer as createViteServer } from "vite";
 import { expect, test as base } from "@playwright/test";
+import { CLAUDE_CODE_MODELS } from "../../src/adapters/claude-code.js";
 import type { AgentConnection } from "../../src/adapters/contract.js";
 import { ConnectionRegistry } from "../../src/runtime/connections.js";
 import { startLocalServer } from "../../src/runtime/server.js";
@@ -91,6 +92,27 @@ const test = base.extend<{ harness: Harness }>({
               { id: "kiro-auto", displayName: "Auto", efforts: [] },
               { id: "kiro-fast", displayName: "Fast", efforts: [] },
             ],
+            capabilities: {
+              streaming: "supported",
+              steering: "unsupported",
+              resume: "unsupported",
+              pause: "unsupported",
+              waitingInput: "unsupported",
+            },
+          };
+        },
+      }),
+      async (executable) => ({
+        close() {},
+        async inspect(): Promise<AgentConnection> {
+          return {
+            ...candidate("claude-code", true),
+            executable,
+            identity: "Claude Code",
+            version: "2.1.295",
+            protocol: "claude-code-stream-json",
+            authentication: "authenticated",
+            models: CLAUDE_CODE_MODELS,
             capabilities: {
               streaming: "supported",
               steering: "unsupported",
@@ -246,6 +268,37 @@ test("authenticated Kiro exposes its model catalog and persists the chosen bindi
   await expect(page.getByRole("combobox", { name: "Project default model" })).toHaveValue(
     "kiro-fast",
   );
+});
+
+test("a machine with only Claude Code verifies it and persists model and effort", async ({
+  page,
+  harness,
+}) => {
+  harness.setCandidates([
+    candidate("codex"),
+    candidate("cursor"),
+    candidate("kiro"),
+    candidate("claude-code", true),
+    candidate("custom"),
+  ]);
+  await page.goto(harness.origin);
+  await page.getByRole("textbox", { name: "Project name" }).fill("Claude project");
+  await page.getByRole("button", { name: /Claude Code.*Executable detected/ }).click();
+  await page.getByRole("button", { name: "Verify connection" }).click();
+  await expect(page.getByText(/Claude Code 2\.1\.295 · Connected/)).toBeVisible();
+  const model = page.getByRole("combobox", { name: "Project default model" });
+  await expect(model).toBeEnabled();
+  await model.selectOption("sonnet");
+  await page.getByRole("combobox", { name: "Effort" }).selectOption("xhigh");
+  await page.getByRole("button", { name: "Finish setup" }).click();
+  await expect
+    .poll(() => harness.config())
+    .toMatchObject({
+      defaultBinding: { provider: "claude-code", model: "sonnet", effort: "xhigh" },
+    });
+  await page.reload();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByText("Project default: claude-code · sonnet")).toBeVisible();
 });
 
 test("verified model and effort are saved and survive reload", async ({ page, harness }) => {

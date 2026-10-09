@@ -9,6 +9,13 @@ import type {
   StepExecutionInput,
   StepSession,
 } from "./contract.js";
+import {
+  parseJson,
+  PROBE_OUTPUT_LIMIT,
+  probeCommand,
+  stripAnsi,
+  terminateChild,
+} from "./process.js";
 import { KIRO_DEFAULT_TRUSTED_TOOLS, KIRO_READ_ONLY_TRUSTED_TOOLS } from "../domain/tool-grant.js";
 
 /**
@@ -61,89 +68,17 @@ const streamEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runError"), data: z.unknown() }),
 ]);
 
-const parseJson = (text: string): unknown => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-};
-
 /** SSO sign-ins can refresh their token over the network during whoami, which takes seconds. */
-const PROBE_TIMEOUT_MS = 30_000;
-const PROBE_OUTPUT_LIMIT = 600;
-
-// oxlint-disable-next-line no-control-regex -- ANSI escape sequences are exactly what is removed.
-const stripAnsi = (text: string): string => text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
-
-/**
- * Run a short Kiro CLI command with stdin closed. A failure names the command and says whether it
- * timed out, exited with a code or was killed by a signal, followed by Kiro's own output, so
- * Settings can show the real cause instead of a bare "Command failed".
- */
 export const probeKiro = (
   executable: string,
   args: string[],
   options: { cwd?: string; timeoutMs?: number } = {},
 ): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const command = `kiro-cli ${args.join(" ")}`;
-    const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
-    const child = spawn(executable, args, {
-      ...(options.cwd ? { cwd: options.cwd } : {}),
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, NO_COLOR: "1" },
-    });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs);
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(
-        new Error(
-          `${command} could not start: ${"code" in error && typeof error.code === "string" ? error.code : error.message}`,
-        ),
-      );
-    });
-    child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      const output = stripAnsi(stderr.trim() || stdout.trim()).slice(-PROBE_OUTPUT_LIMIT);
-      if (timedOut)
-        reject(
-          new Error(
-            `${command} did not finish within ${timeoutMs / 1000} s. Kiro may be refreshing its sign-in or waiting for the network; run \`${command}\` in a terminal to check.${output ? `\n${output}` : ""}`,
-          ),
-        );
-      else if (code !== 0)
-        reject(
-          new Error(
-            `${command} ${code === null ? `was stopped by ${signal ?? "a signal"}` : `exited with code ${code}`}: ${output || "no output"}`,
-          ),
-        );
-      else resolve(stdout);
-    });
+  probeCommand(executable, args, {
+    ...options,
+    label: "kiro-cli",
+    timeoutHint: "Kiro may be refreshing its sign-in or waiting for the network",
   });
-
-const terminateChild = (child: ReturnType<typeof spawn>): void => {
-  if (!child.pid) return;
-  try {
-    if (process.platform === "win32") child.kill();
-    else process.kill(-child.pid, "SIGTERM");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ESRCH") return;
-    throw error;
-  }
-};
 
 /** A Kiro v2 stream-json invocation executes one assigned step. Its session cannot be reattached. */
 export class KiroAdapter implements AgentAdapter {

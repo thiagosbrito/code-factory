@@ -1,4 +1,5 @@
 import type { AgentConnection } from "../adapters/contract.js";
+import type { ConnectRequest } from "./connection";
 import { Button } from "@/components/ui/button";
 import { Brand } from "./Brand";
 import type { ProjectResponse, SavedProjectResponse } from "./project-api";
@@ -24,12 +25,7 @@ export const Setup = ({
   agents: AgentConnection[];
   agentError: string;
   onRefreshAgents: () => Promise<void>;
-  onConnect: (
-    request:
-      | { provider: "codex"; launch: true }
-      | { provider: "kiro"; launch: true }
-      | { provider: "custom"; launch: true; executable: string; protocol: "codex-app-server" },
-  ) => Promise<AgentConnection>;
+  onConnect: (request: ConnectRequest) => Promise<AgentConnection>;
   onSaved: (state: ProjectResponse) => void;
   onDemo: () => void;
   onCancel?: () => void;

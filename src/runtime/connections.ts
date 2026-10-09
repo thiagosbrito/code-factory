@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { createClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { createCodexAdapter } from "../adapters/codex.js";
 import { createKiroAdapter } from "../adapters/kiro.js";
 import type { AgentAdapter, AgentConnection } from "../adapters/contract.js";
@@ -12,6 +13,7 @@ import { ProjectError } from "./project.js";
 export const connectionRequestSchema = z.discriminatedUnion("provider", [
   z.strictObject({ provider: z.literal("codex"), launch: z.literal(true) }),
   z.strictObject({ provider: z.literal("kiro"), launch: z.literal(true) }),
+  z.strictObject({ provider: z.literal("claude-code"), launch: z.literal(true) }),
   z.strictObject({
     provider: z.literal("custom"),
     launch: z.literal(true),
@@ -20,6 +22,11 @@ export const connectionRequestSchema = z.discriminatedUnion("provider", [
   }),
 ]);
 export type ConnectionRequest = z.infer<typeof connectionRequestSchema>;
+/** Providers with an execution adapter that Code Factory launches from their detected CLI. */
+export const NATIVE_PROVIDERS = ["codex", "kiro", "claude-code"] as const;
+type NativeProvider = (typeof NATIVE_PROVIDERS)[number];
+const isNativeProvider = (provider: string): provider is NativeProvider =>
+  (NATIVE_PROVIDERS as readonly string[]).includes(provider);
 type InspectableAdapter = {
   inspect(projectDirectory: string): Promise<AgentConnection>;
   close(): void;
@@ -34,7 +41,7 @@ const resolveExecutable = async (
   request: ConnectionRequest,
   candidates: AgentConnection[],
 ): Promise<string> => {
-  if (request.provider === "codex" || request.provider === "kiro") {
+  if (request.provider !== "custom") {
     const executable = candidates.find((item) => item.provider === request.provider)?.executable;
     if (!executable)
       throw new ProjectError(
@@ -72,7 +79,17 @@ export class ConnectionRegistry {
     private readonly createKiro: (
       executable: string,
     ) => Promise<InspectableAdapter> = createKiroAdapter,
+    private readonly createClaudeCode: (
+      executable: string,
+    ) => Promise<InspectableAdapter> = createClaudeCodeAdapter,
   ) {}
+
+  private create(provider: ConnectionRequest["provider"], executable: string) {
+    if (provider === "kiro") return this.createKiro(executable);
+    if (provider === "claude-code") return this.createClaudeCode(executable);
+    // A custom executable speaks the Codex app-server protocol.
+    return this.createCodex(executable);
+  }
 
   async list(): Promise<AgentConnection[]> {
     const candidates = await this.discover();
@@ -80,11 +97,7 @@ export class ConnectionRegistry {
       const active = this.active.get(candidate.provider)?.connection;
       if (active && (candidate.provider === "custom" || active.executable === candidate.executable))
         return active;
-      if (
-        candidate.provider !== "codex" &&
-        candidate.provider !== "kiro" &&
-        candidate.provider !== "custom"
-      )
+      if (!isNativeProvider(candidate.provider) && candidate.provider !== "custom")
         return {
           ...candidate,
           reason:
@@ -124,12 +137,10 @@ export class ConnectionRegistry {
     const executable = await resolveExecutable(request, candidates);
     let adapter: InspectableAdapter | undefined;
     try {
-      adapter = await (request.provider === "kiro"
-        ? this.createKiro(executable)
-        : this.createCodex(executable));
+      adapter = await this.create(request.provider, executable);
       const inspected = await adapter.inspect(this.projectDirectory);
       if (
-        inspected.provider !== (request.provider === "kiro" ? "kiro" : "codex") ||
+        inspected.provider !== (request.provider === "custom" ? "codex" : request.provider) ||
         !inspected.version ||
         !inspected.protocol
       )

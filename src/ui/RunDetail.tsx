@@ -5,6 +5,7 @@ import type { AgentConnection } from "../adapters/contract.js";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { BranchIcon, DescriptionIcon, EvidenceIcon, PlayIcon, RetryIcon, StopIcon } from "./icons";
+import { providerName } from "./connection";
 import { Markdown } from "./Markdown";
 import { RunEvidenceSummary } from "./RunEvidenceSummary";
 import { RunGraph } from "./RunGraph";
@@ -116,12 +117,7 @@ export const RunDetail = ({
   const connectionProvider = connectionStep
     ? run.snapshot.bindings[connectionStep.stepId]?.provider
     : undefined;
-  const connectionAgentName =
-    connectionProvider === "codex"
-      ? "Codex"
-      : connectionProvider === "kiro"
-        ? "Kiro"
-        : connectionProvider;
+  const connectionAgentName = connectionProvider ? providerName(connectionProvider) : undefined;
   const connectionAttempt = connectionStep?.attempts.at(-1);
   const connectionRetryAvailable = connectionStep ? hasRetryBudget(run, connectionStep) : false;
   // At most one banner: the tracker-connection banner already explains a failed issue lookup.

@@ -28,7 +28,9 @@ export const grantToolPermission = (
       ...current.toolGrants,
       ...(provider === "kiro"
         ? { kiro: { scope: [...TOOL_GRANT_SCOPE.kiro], grantedAt } }
-        : { codex: { scope: [...TOOL_GRANT_SCOPE.codex], grantedAt } }),
+        : provider === "codex"
+          ? { codex: { scope: [...TOOL_GRANT_SCOPE.codex], grantedAt } }
+          : { "claude-code": { scope: [...TOOL_GRANT_SCOPE["claude-code"]], grantedAt } }),
     };
     return { ...current, toolGrants };
   });

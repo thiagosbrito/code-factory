@@ -1,11 +1,15 @@
 import { z } from "zod";
 import type { RunRecord } from "./run.js";
 
-export const GRANTABLE_PROVIDERS = ["kiro", "codex"] as const;
+export const GRANTABLE_PROVIDERS = ["kiro", "codex", "claude-code"] as const;
 export const grantableProviderSchema = z.enum(GRANTABLE_PROVIDERS);
 export type GrantableProvider = z.infer<typeof grantableProviderSchema>;
 // The only scopes that exist. Widening a scope is a code change, never a config edit.
-export const TOOL_GRANT_SCOPE = { kiro: ["execute_bash"], codex: ["commandExecution"] } as const;
+export const TOOL_GRANT_SCOPE = {
+  kiro: ["execute_bash"],
+  codex: ["commandExecution"],
+  "claude-code": ["Bash"],
+} as const;
 export const KIRO_DEFAULT_TRUSTED_TOOLS = ["fs_read", "fs_write"] as const;
 /** A read-only reviewer trusts reading only, whatever the project grant says. */
 export const KIRO_READ_ONLY_TRUSTED_TOOLS = ["fs_read"] as const;
@@ -15,6 +19,7 @@ const grantedAt = z.iso.datetime();
 export const toolGrantsSchema = z.strictObject({
   kiro: z.strictObject({ scope: z.tuple([z.literal("execute_bash")]), grantedAt }).optional(),
   codex: z.strictObject({ scope: z.tuple([z.literal("commandExecution")]), grantedAt }).optional(),
+  "claude-code": z.strictObject({ scope: z.tuple([z.literal("Bash")]), grantedAt }).optional(),
 });
 export type ToolGrants = z.infer<typeof toolGrantsSchema>;
 export const toolGrantInEffectSchema = z.discriminatedUnion("provider", [
@@ -26,6 +31,11 @@ export const toolGrantInEffectSchema = z.discriminatedUnion("provider", [
   z.strictObject({
     provider: z.literal("codex"),
     scope: z.tuple([z.literal("commandExecution")]),
+    grantedAt,
+  }),
+  z.strictObject({
+    provider: z.literal("claude-code"),
+    scope: z.tuple([z.literal("Bash")]),
     grantedAt,
   }),
 ]);
@@ -46,6 +56,8 @@ export const toolGrantInEffect = (
 ): ToolGrantInEffect | null => {
   if (provider === "kiro" && grants?.kiro) return { provider: "kiro", ...grants.kiro };
   if (provider === "codex" && grants?.codex) return { provider: "codex", ...grants.codex };
+  if (provider === "claude-code" && grants?.["claude-code"])
+    return { provider: "claude-code", ...grants["claude-code"] };
   return null;
 };
 
@@ -84,5 +96,9 @@ export const describeToolGrant = (
     return grant?.provider === "codex"
       ? `Codex project grant from ${grant.grantedAt}: command approval requests are accepted only when the command's working directory is inside ${executionDirectory} (an accepted command runs unsandboxed); network-access prompts and file-change approvals are declined.`
       : `Codex default: command approval requests are declined.${suffix}`;
+  if (provider === "claude-code")
+    return grant?.provider === "claude-code"
+      ? `Claude Code project grant from ${grant.grantedAt}: file tools and Bash allowed.`
+      : `Claude Code default: file tools allowed. Bash is denied.${suffix}`;
   return `No tool permission grant applies to provider ${provider}.`;
 };
