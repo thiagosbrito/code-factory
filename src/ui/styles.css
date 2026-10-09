@@ -102,8 +102,69 @@
   background-size: 18px 18px;
 }
 .run-graph-node-running {
-  border-color: #2b9c8e;
-  box-shadow: 0 0 0 2px #2b9c8e22;
+  border-color: #f08a24;
+  box-shadow: 0 0 0 2px #f08a2433;
+}
+/* The active step: a vivid pulsing glow on its border and a small orb that travels around it.
+   The halo is a separate element, so the node's own box-shadow (the selection ring) is untouched. */
+.run-graph-node-running::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 0.5rem;
+  box-shadow:
+    0 0 12px 3px #ff8a1fcc,
+    0 0 30px 8px #ff8a1f77,
+    0 0 56px 14px #ff8a1f33;
+  pointer-events: none;
+  animation: run-node-glow 2s ease-in-out infinite;
+}
+@keyframes run-node-glow {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@supports (offset-path: inset(0)) {
+  .run-graph-node-running::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    background: radial-gradient(circle, #fff 0 26%, #ffd08a 48%, #ff8a1f 100%);
+    box-shadow:
+      0 0 8px 3px #ffb454,
+      0 0 18px 7px #ff8a1fbb,
+      0 0 30px 12px #ff8a1f55;
+    /* Rides the border line: 1px border, so the centre is half a pixel outside the padding box. */
+    offset-path: inset(-0.5px round 0.5rem);
+    offset-rotate: 0deg;
+    pointer-events: none;
+    animation: run-node-orb 3s linear infinite;
+  }
+  @keyframes run-node-orb {
+    from {
+      offset-distance: 0%;
+    }
+    to {
+      offset-distance: 100%;
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-graph-node-running::before {
+    animation: none;
+    opacity: 0.9;
+  }
+  .run-graph-node-running::after {
+    display: none;
+  }
 }
 .run-graph-node-failed {
   border-color: #d27870;
