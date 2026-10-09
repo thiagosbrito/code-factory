@@ -1,14 +1,33 @@
 {
-  "name": "code-factory",
+  "name": "@thiagosbrito/code-factory",
   "version": "0.1.0",
-  "private": true,
   "description": "A local, agent-independent coding loop factory",
+  "keywords": [
+    "agents",
+    "ai",
+    "claude-code",
+    "cli",
+    "codex",
+    "coding-agent",
+    "kiro",
+    "workflow"
+  ],
+  "homepage": "https://github.com/thiagosbrito/code-factory#readme",
+  "bugs": {
+    "url": "https://github.com/thiagosbrito/code-factory/issues"
+  },
+  "license": "MIT",
+  "author": "Thiago Brito",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thiagosbrito/code-factory.git"
+  },
   "bin": {
     "code-factory": "dist/node/cli.js"
   },
   "files": [
     "dist",
-    "docs"
+    "docs/architecture.md"
   ],
   "type": "module",
   "exports": {
@@ -17,10 +36,13 @@
       "import": "./dist/node/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "tsx watch scripts/dev.mts",
     "dev:ui": "vite",
-    "dev:runtime": "tsx watch src/cli.ts start --port 4310",
+    "dev:runtime": "tsx watch src/cli.ts start --port 4310 --no-open",
     "build": "node scripts/clean.mjs && tsc -p tsconfig.runtime.json && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "oxlint --threads=2",
@@ -33,7 +55,8 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "prepack": "pnpm build",
     "prove:codex": "pnpm build && node scripts/prove-codex.mjs",
-    "prove:claude": "tsx scripts/prove-claude.mts"
+    "prove:claude": "tsx scripts/prove-claude.mts",
+    "prepublishOnly": "pnpm check && pnpm test:package"
   },
   "dependencies": {
     "zod": "4.6.5"

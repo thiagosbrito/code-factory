@@ -19,7 +19,7 @@ This document records the decisions taken, the security work that had to land fi
 | Access        | public (`publishConfig.access`) | Scoped packages are private by default and would fail to publish.                                                                                                                                |
 | First release | `0.1.0`, published by hand      | The first publish proves the account, scope and tarball. Automation follows (step 7).                                                                                                            |
 
-Open decision: whether `start` opens the browser by default (with `--no-open`). The printed link now carries the session token, so opening it automatically also saves the user a copy and paste.
+Decided: `start` opens the printed link in the default browser when run in an interactive terminal; `--no-open` skips it. The link carries the session token, so this also saves a copy and paste.
 
 ## Security work done before publishing
 
@@ -53,7 +53,7 @@ Measured on `main` with `npm pack --dry-run`: 591 kB packed, 2.0 MB unpacked, 18
 
 ## Remaining work
 
-Steps 1 to 5 are code changes, made on a branch and merged through a PR. Step 6 needs the maintainer's npm account.
+Steps 1 to 4 are implemented on `feat/npm-packaging` (metadata, CLI first run, README, `SECURITY.md`); the source maps are kept. Steps 1 to 5 are code changes, made on a branch and merged through a PR. Step 6 needs the maintainer's npm account.
 
 ### 1. Package metadata
 
