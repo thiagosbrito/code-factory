@@ -5,9 +5,9 @@ import { afterEach, expect, it } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
 import { createRunRecord, createRunSnapshot, runRecordSchema } from "../src/domain/run.js";
 import { claimStep } from "../src/domain/scheduler.js";
-import { RunActivity } from "../src/ui/RunActivity.js";
-import { RunInspectorActivity } from "../src/ui/RunInspectorActivity.js";
-import { RunsList } from "../src/ui/RunsList.js";
+import { RunActivity } from "../src/ui/features/runs/RunActivity.js";
+import { RunInspectorActivity } from "../src/ui/features/runs/RunInspectorActivity.js";
+import { RunsList } from "../src/ui/features/runs/RunsList.js";
 
 afterEach(cleanup);
 

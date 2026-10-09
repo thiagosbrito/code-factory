@@ -5,8 +5,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { parseLoop } from "../src/domain/loop.js";
 import { createRunRecord, createRunSnapshot } from "../src/domain/run.js";
 import { claimStep } from "../src/domain/scheduler.js";
-import { RunExecution } from "../src/ui/RunExecution.js";
-import { useFactoryRuns } from "../src/ui/useFactoryRuns.js";
+import { RunExecution } from "../src/ui/features/runs/RunExecution.js";
+import { useFactoryRuns } from "../src/ui/features/runs/useFactoryRuns.js";
 
 afterEach(() => {
   cleanup();

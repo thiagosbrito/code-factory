@@ -16,13 +16,13 @@ import {
 import { claimStep, completeStep } from "../src/domain/scheduler.js";
 import { REMOVAL_DIRTY, type RunWorkspace } from "../src/domain/run-branch.js";
 import { issueBlockedSentinel } from "../src/domain/ticket.js";
-import { RunDetail } from "../src/ui/RunDetail.js";
-import { RunWorkspacePanel } from "../src/ui/RunWorkspacePanel.js";
-import { ToolGrantDialog, toolGrantText } from "../src/ui/ToolGrantDialog.js";
-import { ToolPermissionsSection } from "../src/ui/ToolPermissionsSection.js";
-import { useFactoryRuns } from "../src/ui/useFactoryRuns.js";
-import type { ProjectPatch, ProjectResponse } from "../src/ui/project-api.js";
-import { TrustDialog, TRUST_TEXT } from "../src/ui/TrustDialog.js";
+import { RunDetail } from "../src/ui/features/runs/RunDetail.js";
+import { RunWorkspacePanel } from "../src/ui/features/runs/RunWorkspacePanel.js";
+import { ToolGrantDialog, toolGrantText } from "../src/ui/shared/ToolGrantDialog.js";
+import { ToolPermissionsSection } from "../src/ui/features/setup/ToolPermissionsSection.js";
+import { useFactoryRuns } from "../src/ui/features/runs/useFactoryRuns.js";
+import type { ProjectPatch, ProjectResponse } from "../src/ui/shared/project-api.js";
+import { TrustDialog, TRUST_TEXT } from "../src/ui/shared/TrustDialog.js";
 import type { ProjectTrust } from "../src/domain/trust.js";
 import { trustState } from "./fixtures/trust.js";
 

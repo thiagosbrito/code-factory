@@ -5,12 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { createLoopDraft, parseLoop, type LoopDefinition } from "../src/domain/loop.js";
 import { exportPortableLoop } from "../src/domain/loop-portable.js";
 import type { AgentConnection } from "../src/adapters/contract.js";
-import { Loops } from "../src/ui/Loops.js";
-import { LoopEditor } from "../src/ui/LoopEditor.js";
-import { NativeTranslation } from "../src/ui/NativeTranslation.js";
+import { Loops } from "../src/ui/features/loops/Loops.js";
+import { LoopEditor } from "../src/ui/features/loops/LoopEditor.js";
+import { NativeTranslation } from "../src/ui/features/loops/NativeTranslation.js";
 import { importerGeneratedRole } from "../src/translators/contract.js";
-import { setParallelGroup } from "../src/ui/loop-editor-model.js";
-import type { ProjectResponse } from "../src/ui/project-api.js";
+import { setParallelGroup } from "../src/ui/features/loops/loop-editor-model.js";
+import type { ProjectResponse } from "../src/ui/shared/project-api.js";
 import { trustState } from "./fixtures/trust.js";
 
 const project: ProjectResponse = {

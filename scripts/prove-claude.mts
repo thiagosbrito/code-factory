@@ -6,7 +6,7 @@ import type { StepExecutionInput } from "../src/adapters/contract.js";
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 import { initializeProject, projectRevision, saveProjectSetup } from "../src/runtime/project.js";
 import { startLocalServer } from "../src/runtime/server.js";
-import { bindingError } from "../src/ui/connection.js";
+import { bindingError } from "../src/ui/shared/connection.js";
 
 // Explicit invocation launches three bounded native steps using Claude Code-owned authentication.
 const root = await mkdtemp(join(tmpdir(), "factory-claude-proof-"));

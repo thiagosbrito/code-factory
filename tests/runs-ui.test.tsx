@@ -24,18 +24,18 @@ import {
   runRecordSchema,
 } from "../src/domain/run.js";
 import type { RunRecord } from "../src/domain/run.js";
-import { RunDetail } from "../src/ui/RunDetail.js";
-import { RunInputPrompt } from "../src/ui/RunInputPrompt.js";
-import { RunGraph } from "../src/ui/RunGraph.js";
-import { RunInspector } from "../src/ui/RunInspector.js";
-import { RunInspectorFiles } from "../src/ui/RunInspectorFiles.js";
-import { RunInspectorArtifacts } from "../src/ui/RunInspectorArtifacts.js";
-import { downloadBytes } from "../src/ui/inspection-api.js";
-import { RunGuidance } from "../src/ui/RunGuidance.js";
+import { RunDetail } from "../src/ui/features/runs/RunDetail.js";
+import { RunInputPrompt } from "../src/ui/features/runs/RunInputPrompt.js";
+import { RunGraph } from "../src/ui/features/runs/RunGraph.js";
+import { RunInspector } from "../src/ui/features/runs/RunInspector.js";
+import { RunInspectorFiles } from "../src/ui/features/runs/RunInspectorFiles.js";
+import { RunInspectorArtifacts } from "../src/ui/features/runs/RunInspectorArtifacts.js";
+import { downloadBytes } from "../src/ui/features/runs/inspection-api.js";
+import { RunGuidance } from "../src/ui/features/runs/RunGuidance.js";
 import type { AgentConnection } from "../src/adapters/contract.js";
-import type { RunScope } from "../src/ui/run-view-model.js";
-import { useFactoryRuns } from "../src/ui/useFactoryRuns.js";
-import { RunsList } from "../src/ui/RunsList.js";
+import type { RunScope } from "../src/ui/features/runs/run-view-model.js";
+import { useFactoryRuns } from "../src/ui/features/runs/useFactoryRuns.js";
+import { RunsList } from "../src/ui/features/runs/RunsList.js";
 import type { EvidenceSummary } from "../src/domain/acceptance.js";
 import { acceptEvidence, summarizeEvidence } from "../src/domain/acceptance.js";
 

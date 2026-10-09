@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { AgentConnection } from "../src/adapters/contract.js";
 import type { ExecutionBinding } from "../src/domain/loop.js";
-import { StepBindingSelectors } from "../src/ui/StepBindingSelectors.js";
+import { StepBindingSelectors } from "../src/ui/shared/StepBindingSelectors.js";
 
 afterEach(cleanup);
 const codex: AgentConnection = {

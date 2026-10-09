@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createLoopDraft, parseLoop } from "../src/domain/loop.js";
 import type { AgentConnection } from "../src/adapters/contract.js";
-import { NewRunDialog } from "../src/ui/NewRunDialog.js";
+import { NewRunDialog } from "../src/ui/factory/NewRunDialog.js";
 
 const loop = parseLoop({
   ...createLoopDraft("saved", "Saved loop"),

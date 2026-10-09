@@ -2,8 +2,8 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvidenceSummary } from "../src/domain/acceptance.js";
-import { Markdown } from "../src/ui/Markdown.js";
-import { RunEvidenceSummary } from "../src/ui/RunEvidenceSummary.js";
+import { Markdown } from "../src/ui/shared/Markdown.js";
+import { RunEvidenceSummary } from "../src/ui/features/runs/RunEvidenceSummary.js";
 
 afterEach(cleanup);
 

@@ -7,7 +7,7 @@ import { CancellationUnconfirmedError, type AdapterEvent } from "../src/adapters
 import { cancelRun, executeRun, retryStep } from "../src/runtime/scheduler.js";
 import { createRun, readRun, updateRun } from "../src/runtime/storage.js";
 import { startLocalServer } from "../src/runtime/server.js";
-import { evidenceFreshness } from "../src/ui/run-view-model.js";
+import { evidenceFreshness } from "../src/ui/features/runs/run-view-model.js";
 import { parseLoop } from "../src/domain/loop.js";
 import {
   createRunRecord,

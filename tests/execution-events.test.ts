@@ -21,7 +21,7 @@ import { createRun, readRun, updateRun } from "../src/runtime/storage.js";
 import { startLocalServer } from "../src/runtime/server.js";
 import { trustProject } from "../src/runtime/trust.js";
 import { ConnectionRegistry } from "../src/runtime/connections.js";
-import { mergeRunEvent, mergeRunSnapshot } from "../src/ui/run-events.js";
+import { mergeRunEvent, mergeRunSnapshot } from "../src/ui/features/runs/run-events.js";
 
 const roots: string[] = [];
 afterEach(async () => {
