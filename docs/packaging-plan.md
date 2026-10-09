@@ -114,3 +114,10 @@ A GitHub Actions workflow on `v*` tags that runs `pnpm check`, `pnpm test:e2e` a
 - `pnpm check`, `pnpm test:e2e` and `pnpm test:package` pass on the branch before it merges.
 - Step 5 is done by hand against the tarball and recorded in the release PR (Node version, agent, result).
 - After step 6, the `npx …@latest` run is the acceptance test of the release.
+
+## Release log
+
+- Step 5 (tarball check), 2026-10-09: the packed `0.1.0` tarball was installed with `npx -p <tarball> code-factory` in a scratch Git repository and the journey worked. A bare `npx <tarball>` fails for a scoped package; the `-p … code-factory` form is the one to use. The Node version and agent used were not recorded.
+- Step 6 (publish), 2026-10-09: `@thiagosbrito/code-factory@0.1.0` was published by hand with `npm publish`. The registry returned 404 for a few minutes before the version appeared. `npx @thiagosbrito/code-factory@latest start` found the binary and started the runtime. The browser journey from the registry install is not recorded here.
+- No `v0.1.0` tag was pushed, because the release workflow would try to publish an existing version. The first release through CI will be `0.1.1`.
+- Still to do: configure the trusted publisher on npmjs.com (repository `thiagosbrito/code-factory`, workflow `release.yml`, environment `npm`), then tag `v0.1.1`.
