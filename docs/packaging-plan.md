@@ -105,7 +105,7 @@ If something is wrong after publishing, publish a fixed `0.1.1` and `npm depreca
 
 ### 7. Automate later releases
 
-Implemented in `.github/workflows`: `ci.yml` (check on Node 22.12 and 24, browser journeys, packed tarball with a file-list guard), `security.yml` (CodeQL, production dependency audit, dependency review on PRs, weekly), `release.yml` (on `v*` tags: verify, then publish with provenance and create the GitHub release) and Dependabot. Still manual: the trusted publisher on npmjs.com, an `npm` environment with required reviewers, and branch protection requiring these checks. Actions are pinned to major tags, not commit SHAs.
+Implemented in `.github/workflows`: `ci.yml` (check on Node 24 and tests on Node 22.12, browser journeys, packed tarball with a file-list guard), `security.yml` (CodeQL, production dependency audit, dependency review on PRs, weekly), `release.yml` (on `v*` tags: verify, then publish with provenance and create the GitHub release) and Dependabot. Still manual: the trusted publisher on npmjs.com, an `npm` environment with required reviewers, and branch protection requiring these checks. Actions are pinned to major tags, not commit SHAs.
 
 A GitHub Actions workflow on `v*` tags that runs `pnpm check`, `pnpm test:e2e` and `pnpm test:package`, then publishes with npm trusted publishing (OIDC) and provenance, so no long-lived npm token sits on a laptop or in repository secrets. Configure the trusted publisher on npmjs.com for the repository and workflow file first.
 
