@@ -93,3 +93,5 @@ export const useFactoryRuns = (
     selectedRunId,
   };
 };
+
+export type FactoryRuns = ReturnType<typeof useFactoryRuns>;
