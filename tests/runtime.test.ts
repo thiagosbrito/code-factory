@@ -133,9 +133,12 @@ describe("project initialization", () => {
       saveProjectSetup(directory, { name: "First", revision }),
       saveProjectSetup(directory, { name: "Second", revision }),
     ]);
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    expect(fulfilled).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
-    expect((await readProjectConfig(directory))?.name).toBe("First");
+    // Which save reaches the queue first depends on directory validation timing, so assert on
+    // the winner rather than on call order.
+    expect((await readProjectConfig(directory))?.name).toBe(fulfilled[0]?.value.name);
   });
 });
 
