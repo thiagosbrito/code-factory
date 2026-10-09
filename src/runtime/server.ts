@@ -74,6 +74,31 @@ const contentTypes: Record<string, string> = {
 };
 const defaultUiDirectory = fileURLToPath(new URL("../../ui/", import.meta.url));
 
+/**
+ * Sent with every response. The UI may never be framed by another page (clickjacking), runs only
+ * its own bundled scripts, and talks only to this runtime. Styles allow inline because a dialog
+ * dependency injects a style element; scripts stay strict.
+ */
+export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; "),
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Resource-Policy": "same-origin",
+};
+
 const json = (response: ServerResponse, status: number, body: unknown) => {
   response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
   response.end(JSON.stringify(body));
@@ -156,7 +181,6 @@ const serveAsset = async (response: ServerResponse, pathname: string, uiDirector
     const content = await readFile(resolvedPath);
     response.writeHead(200, {
       "Content-Type": contentTypes[extname(path)] ?? "application/octet-stream",
-      "X-Content-Type-Options": "nosniff",
     });
     response.end(content);
   } catch (error) {
@@ -213,6 +237,7 @@ export const startLocalServer = async (options: {
     if (saved && (await canonicalPath(saved)) === target) throw projectNotTrusted();
   };
   const server = createServer((request, response) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) response.setHeader(name, value);
     void (async () => {
       const address = server.address();
       if (!address || typeof address === "string")
