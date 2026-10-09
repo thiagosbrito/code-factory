@@ -105,6 +105,13 @@ export class ApiError extends Error {
   }
 }
 
+/** Request options for a JSON body. */
+export const jsonPost = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
 export const api = async <T>(
   path: string,
   parse: (data: unknown) => T,
