@@ -21,13 +21,21 @@ const positions = (run: RunRecord): Map<string, Point> => {
     return value;
   };
   run.snapshot.loop.steps.forEach((step) => depth(step.id));
+  const columnSizes = new Map<number, number>();
+  run.snapshot.loop.steps.forEach((step) => {
+    const column = depths.get(step.id) ?? 0;
+    columnSizes.set(column, (columnSizes.get(column) ?? 0) + 1);
+  });
+  const tallest = Math.max(1, ...columnSizes.values());
   const rows = new Map<number, number>();
   return new Map(
     run.snapshot.loop.steps.map((step) => {
       const column = depths.get(step.id) ?? 0;
       const row = rows.get(column) ?? 0;
       rows.set(column, row + 1);
-      return [step.id, step.position ?? { x: 40 + column * 290, y: 55 + row * 165 }];
+      // A column shorter than the tallest one is centered on it; x is unchanged.
+      const centered = row + (tallest - (columnSizes.get(column) ?? 1)) / 2;
+      return [step.id, step.position ?? { x: 40 + column * 290, y: 55 + centered * 165 }];
     }),
   );
 };
