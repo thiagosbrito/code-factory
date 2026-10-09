@@ -234,6 +234,8 @@ describe("local API", () => {
     const ui = join(directory, "ui");
     await mkdir(ui);
     await writeFile(join(ui, "index.html"), "<h1>Test shell</h1>");
+    await mkdir(join(ui, "assets"));
+    await writeFile(join(ui, "assets", "app.js"), "export {};");
     const { server, url } = await startLocalServer({
       projectDirectory: directory,
       uiDirectory: ui,
@@ -242,6 +244,8 @@ describe("local API", () => {
     try {
       for (const response of [
         await fetch(url),
+        await fetch(`${url}/assets/app.js`),
+        await fetch(`${url}/assets/missing.js`),
         await fetch(`${url}/api/health`),
         await fetch(`${url}/api/unknown`),
         await fetch(`${url}/api/project`, { headers: { Origin: "https://foreign.example" } }),
@@ -253,6 +257,8 @@ describe("local API", () => {
         expect(response.headers.get("x-frame-options")).toBe("DENY");
         expect(response.headers.get("x-content-type-options")).toBe("nosniff");
         expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+        expect(response.headers.get("cross-origin-opener-policy")).toBe("same-origin");
+        expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
       }
     } finally {
       await new Promise<void>((resolveClosed, reject) =>

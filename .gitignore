@@ -6,6 +6,7 @@ test-results/
 .pnpm-*/
 .code-factory/
 .agents/
+.claude/worktrees/
 *.tgz
 .DS_Store
 .env
