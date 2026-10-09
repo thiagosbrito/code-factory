@@ -157,6 +157,7 @@ it("reconnects to active work after a closed browser stream without canceling th
     }
   }
   const { server, url } = await startLocalServer({
+    sessionToken: null,
     projectDirectory: root,
     port: 0,
     connections: new TestConnections(root),
@@ -231,6 +232,7 @@ it("streams a long active event feed without repeating the full run on each mess
     }
   }
   const { server, url } = await startLocalServer({
+    sessionToken: null,
     projectDirectory: root,
     port: 0,
     connections: new TestConnections(root),
@@ -339,7 +341,11 @@ it("records unknown recovery explicitly and preserves attempts and queued guidan
 });
 
 const resumeOnRequest = async (root: string, runId: string) => {
-  const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
+  const { server, url } = await startLocalServer({
+    sessionToken: null,
+    projectDirectory: root,
+    port: 0,
+  });
   try {
     // Nothing resumes on start, even in a trusted project: the run stays as it was, marked interrupted.
     await new Promise((resolve) => setTimeout(resolve, 300));

@@ -158,7 +158,11 @@ describe("local API", () => {
   it("starts with zero history and saves setup only in the trusted CLI project", async () => {
     const directory = await temporaryProject();
     const other = await temporaryProject();
-    const { server, url } = await startLocalServer({ projectDirectory: directory, port: 0 });
+    const { server, url } = await startLocalServer({
+      sessionToken: null,
+      projectDirectory: directory,
+      port: 0,
+    });
     try {
       expect(await fetch(`${url}/api/project`).then((response) => response.json())).toMatchObject({
         project: null,
@@ -209,6 +213,7 @@ describe("local API", () => {
     await mkdir(ui);
     await writeFile(join(ui, "index.html"), "<h1>Test shell</h1>");
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: directory,
       uiDirectory: ui,
       port: 0,
@@ -237,6 +242,7 @@ describe("local API", () => {
     await mkdir(join(ui, "assets"));
     await writeFile(join(ui, "assets", "app.js"), "export {};");
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: directory,
       uiDirectory: ui,
       port: 0,
@@ -268,6 +274,7 @@ describe("local API", () => {
   });
   it("rejects foreign origins, host rebinding, and unsupported mutations", async () => {
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: await temporaryProject(),
       port: 0,
     });

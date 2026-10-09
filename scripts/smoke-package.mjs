@@ -64,7 +64,7 @@ try {
   runtime = spawn(process.execPath, [cli, "start", "--project", workspace, "--port", "0"], {
     stdio: ["ignore", "pipe", "pipe"],
   });
-  const url = await new Promise((resolveReady, reject) => {
+  const { url, token } = await new Promise((resolveReady, reject) => {
     let output = "";
     const timer = setTimeout(() => reject(new Error("Packaged runtime did not start")), 10_000);
     runtime.once("error", (error) => {
@@ -77,15 +77,26 @@ try {
     });
     runtime.stdout.on("data", (data) => {
       output += data.toString();
-      const match = output.match(/Code Factory: (http:\/\/127\.0\.0\.1:\d+)/);
+      const match = output.match(/Code Factory: (http:\/\/127\.0\.0\.1:\d+)\/\?token=([\w-]+)/);
       if (match) {
         clearTimeout(timer);
-        resolveReady(match[1]);
+        resolveReady({ url: match[1], token: match[2] });
       }
     });
   });
+  // The API needs the session from the printed link; another local process has no way in.
+  assert.equal((await fetch(`${url}/api/health`)).status, 401);
+  assert.equal((await fetch(`${url}/?token=wrong`, { redirect: "manual" })).status, 403);
+  const login = await fetch(`${url}/?token=${token}`, { redirect: "manual" });
+  assert.equal(login.status, 303);
+  const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+  assert.match(login.headers.get("set-cookie") ?? "", /HttpOnly; SameSite=Strict/);
   assert.equal(
-    (await fetch(`${url}/api/health`).then((response) => response.json())).executionAvailable,
+    (
+      await fetch(`${url}/api/health`, { headers: { Cookie: cookie } }).then((response) =>
+        response.json(),
+      )
+    ).executionAvailable,
     true,
   );
   const page = await fetch(url);
@@ -102,7 +113,7 @@ try {
   assert.equal((await exited)[0], 0);
   runtime = undefined;
   console.log(
-    "Package smoke passed: npm production install, public API, blank init, preservation, duplicate-init rejection, packaged UI/assets/API with security headers, and clean shutdown.",
+    "Package smoke passed: npm production install, public API, blank init, preservation, duplicate-init rejection, packaged UI/assets/API with security headers behind the session token, and clean shutdown.",
   );
 } finally {
   if (runtime && runtime.exitCode === null && runtime.signalCode === null) {

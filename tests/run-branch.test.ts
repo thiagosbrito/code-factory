@@ -953,7 +953,11 @@ describe("setup command", () => {
 describe("promotion and removal through the local API", () => {
   const withServer = async (root: string, work: (url: string) => Promise<void>) => {
     await trustProject(root);
-    const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
+    const { server, url } = await startLocalServer({
+      sessionToken: null,
+      projectDirectory: root,
+      port: 0,
+    });
     try {
       await work(url);
     } finally {

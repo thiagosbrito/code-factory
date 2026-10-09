@@ -14,6 +14,7 @@ test("native Codex verifies, exposes its catalog, and persists a selected model 
   const projectDirectory = await mkdtemp(join(tmpdir(), "code-factory-native-onboarding-"));
   let ui: Awaited<ReturnType<typeof createViteServer>> | undefined;
   const runtime = await startLocalServer({
+    sessionToken: null,
     projectDirectory,
     port: 0,
     get devOrigin() {

@@ -266,6 +266,7 @@ describe("Kiro workflow import", () => {
     // No agent discovery: this request never needs an agent connection.
     const registry = new ConnectionRegistry(root, async () => []);
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: root,
       port: 0,
       connections: registry,
@@ -290,6 +291,7 @@ describe("Kiro workflow import", () => {
     const root = await kiroProject();
     const registry = new ConnectionRegistry(root, async () => []);
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: root,
       port: 0,
       connections: registry,

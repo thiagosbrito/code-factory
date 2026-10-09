@@ -107,6 +107,7 @@ describe("connection registry and local handoff", () => {
       },
     );
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: directory,
       port: 0,
       connections: registry,
@@ -186,6 +187,7 @@ describe("connection registry and local handoff", () => {
       },
     );
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: directory,
       port: 0,
       connections: registry,
@@ -244,6 +246,7 @@ describe("connection registry and local handoff", () => {
       async (path) => ({ inspect: async () => inspected(path), close: () => {} }),
     );
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: directory,
       port: 0,
       connections: registry,
@@ -296,6 +299,7 @@ describe("connection registry and local handoff", () => {
       }),
     );
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: directory,
       port: 0,
       connections: registry,

@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { discoverAgents } from "./adapters/discovery.js";
 import { initializeProject } from "./runtime/project.js";
 import { startLocalServer } from "./runtime/server.js";
+import { createSessionToken } from "./runtime/session.js";
 
 const help = `Code Factory\n\n  code-factory init [directory]\n  code-factory doctor\n  code-factory start [--project directory] [--port 4310]\n\nInitialize a local project, inspect agent candidates, and open the local UI.\nConnect a supported agent in the UI before running agent-backed work.\n`;
 
@@ -34,14 +35,17 @@ const main = async () => {
   const port = Number(values.port ?? "4310");
   if (!Number.isInteger(port) || port < 0 || port > 65535)
     throw new Error("Port must be between 0 and 65535; 0 selects an available port.");
-  const { server, url } = await startLocalServer({
+  const { server, loginUrl } = await startLocalServer({
     projectDirectory: resolve(values.project ?? process.cwd()),
+    sessionToken: createSessionToken(),
     port,
     ...(process.env.CODE_FACTORY_DEV_ORIGIN
       ? { devOrigin: process.env.CODE_FACTORY_DEV_ORIGIN }
       : {}),
   });
-  console.log(`Code Factory: ${url}\nPress Ctrl+C to stop.`);
+  console.log(
+    `Code Factory: ${loginUrl}\nOpen this link to use it; it carries this session's access token.\nPress Ctrl+C to stop.`,
+  );
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => server.close());
 };
 

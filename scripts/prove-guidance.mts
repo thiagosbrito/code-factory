@@ -98,7 +98,12 @@ try {
   } as unknown as ConnectionRegistry;
   // The disposable project is the proof's own; trust it so the local API will run its steps.
   await trustProject(project);
-  const local = await startLocalServer({ projectDirectory: project, port: 0, connections });
+  const local = await startLocalServer({
+    sessionToken: null,
+    projectDirectory: project,
+    port: 0,
+    connections,
+  });
   server = local.server;
   const launch = await fetch(`${local.url}/api/runs/${run.snapshot.id}/execute`, {
     method: "POST",
