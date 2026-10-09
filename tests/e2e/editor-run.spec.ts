@@ -40,6 +40,16 @@ const detectedCodex: AgentConnection = {
   },
 };
 
+/**
+ * Rejects when the step is canceled. A cancel can land before the fixture reaches its wait (while
+ * the scheduler stores the started event), and an abort event never fires twice, so check first.
+ */
+const untilAborted = (signal: AbortSignal) =>
+  new Promise<never>((_, reject) => {
+    if (signal.aborted) reject(signal.reason);
+    else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+
 const test = base.extend<{ harness: Harness }>({
   harness: async ({ browserName: _browserName }, use) => {
     // A disposable parent keeps every Git artifact of the journey inside one removable folder.
@@ -166,20 +176,13 @@ const test = base.extend<{ harness: Harness }>({
             };
             await Promise.race([
               new Promise<void>((resolve) => pendingInput.set(session.sessionId, resolve)),
-              new Promise<never>((_, reject) =>
-                signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
-              ),
+              untilAborted(signal),
             ]);
           }
           if (input.stepId === "implement")
             await writeFile(join(input.projectDirectory, "fixture-output.txt"), "fixture change\n");
           if (input.stepId.endsWith("-review") && input.attempt === 1)
-            await Promise.race([
-              reviewGate,
-              new Promise<never>((_, reject) =>
-                signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
-              ),
-            ]);
+            await Promise.race([reviewGate, untilAborted(signal)]);
           signal.throwIfAborted();
           if (input.stepId.endsWith("-review") && input.attempt === 1)
             yield { type: "message", text: input.stepId, ...session };
@@ -299,6 +302,13 @@ const test = base.extend<{ harness: Harness }>({
 });
 
 /** Codex steps ask for tool permission once per page session; these journeys keep the default. */
+/**
+ * Waits on run progress, not on the UI. Before its reviews start, the starter loop runs eight steps
+ * in order, three of them gate checks that each launch Node; on a busy machine that outlasts the
+ * 7.5 s default meant for UI reactions, and so can canceling while a check's process exits.
+ */
+const runProgress = expect.configure({ timeout: 30_000 });
+
 const executeWithDefaultTools = async (
   page: import("@playwright/test").Page,
   options: { trustFirst?: boolean } = {},
@@ -420,9 +430,11 @@ test("canceling parallel review persists a canceled run after reload", async ({
   await page.getByLabel(/Task description/).fill("Cancel during parallel review");
   await page.getByRole("button", { name: "Start run" }).click();
   await executeWithDefaultTools(page);
-  await expect(page.getByRole("button", { name: /Code quality review, running/ })).toBeVisible();
+  await runProgress(
+    page.getByRole("button", { name: /Code quality review, running/ }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Cancel run" }).click();
-  await expect
+  await runProgress
     .poll(async () => {
       const response = await page.request.get(`${harness.origin}/api/runs`);
       const body = (await response.json()) as { runs: { status: string }[] };
@@ -453,11 +465,13 @@ test("reloading during parallel review reconnects without duplicating attempts",
   await page.getByLabel(/Task description/).fill("Reload during parallel review");
   await page.getByRole("button", { name: "Start run" }).click();
   await executeWithDefaultTools(page);
-  await expect(page.getByRole("button", { name: /Code quality review, running/ })).toBeVisible();
+  await runProgress(
+    page.getByRole("button", { name: /Code quality review, running/ }),
+  ).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
   harness.releaseReviews();
-  await expect
+  await runProgress
     .poll(async () => {
       const response = await page.request.get(`${harness.origin}/api/runs`);
       const body = (await response.json()) as {
@@ -514,7 +528,7 @@ test("streamed message chunks show as one growing activity entry that survives r
       (node) => node.isConnected && (node.textContent ?? "").includes("quality-review"),
     ),
   ).toBe(true);
-  await expect
+  await runProgress
     .poll(async () => {
       const response = await page.request.get(`${harness.origin}/api/runs`);
       const body = (await response.json()) as { runs: { status: string }[] };
@@ -556,10 +570,10 @@ test("a blocking agent question survives reload and accepts one answer", async (
     .getByRole("textbox", { name: "Implementation choice" })
     .fill("Keep it small");
   await restoredPrompt.getByRole("button", { name: "Send answers" }).click();
-  await expect
+  await runProgress
     .poll(() => harness.inputReplies)
     .toEqual([{ choice: { answers: ["Keep it small"] } }]);
-  await expect
+  await runProgress
     .poll(async () => {
       const response = await page.request.get(`${harness.origin}/api/runs`);
       const body = (await response.json()) as { runs: { status: string }[] };
@@ -618,8 +632,10 @@ test("verified model selection, loop controls, and run intake work as one keyboa
   await expect(page.getByRole("heading", { name: "Complete browser acceptance" })).toBeVisible();
   await executeWithDefaultTools(page, { trustFirst: true });
 
-  await expect(page.getByRole("button", { name: /Code quality review, running/ })).toBeVisible();
-  await expect(
+  await runProgress(
+    page.getByRole("button", { name: /Code quality review, running/ }),
+  ).toBeVisible();
+  await runProgress(
     page.getByRole("button", { name: /React and accessibility review, running/ }),
   ).toBeVisible();
 
@@ -627,7 +643,7 @@ test("verified model selection, loop controls, and run intake work as one keyboa
   const guidance = page.getByLabel("Message for selected attempt");
   await guidance.fill("Check the accessible name before completing review.");
   await page.getByRole("button", { name: "Queue guidance" }).click();
-  await expect
+  await runProgress
     .poll(() =>
       harness.steered.some((message) =>
         message.startsWith("Check the accessible name before completing review."),
@@ -637,7 +653,7 @@ test("verified model selection, loop controls, and run intake work as one keyboa
   await page.getByRole("button", { name: "Close inspector" }).click();
 
   harness.releaseReviews();
-  await expect
+  await runProgress
     .poll(async () => {
       const response = await page.request.get(`${harness.origin}/api/runs`);
       const body = (await response.json()) as {
@@ -646,7 +662,7 @@ test("verified model selection, loop controls, and run intake work as one keyboa
       return JSON.stringify({ runStatus: body.runs[0]?.status, steps: body.runs[0]?.steps });
     })
     .toContain('"runStatus":"succeeded"');
-  await expect
+  await runProgress
     .poll(async () => {
       const runs = (await (await page.request.get(`${harness.origin}/api/runs`)).json()) as {
         runs: { snapshot: { id: string } }[];
@@ -658,7 +674,9 @@ test("verified model selection, loop controls, and run intake work as one keyboa
     })
     .toContain('"validation":"passed"');
   await expect(page.getByText(/Local validation:/)).toContainText("Passed");
-  await expect(page.getByRole("button", { name: /Code quality review, succeeded/ })).toBeVisible();
+  await runProgress(
+    page.getByRole("button", { name: /Code quality review, succeeded/ }),
+  ).toBeVisible();
   // Changed files open from the evidence dialog, which hands off to the run inspector.
   await page.getByRole("button", { name: "Final evidence summary" }).click();
   await page
@@ -706,7 +724,7 @@ test("a failed review can be retried from its selected latest attempt", async ({
   await page.getByRole("button", { name: "Retry…" }).click();
   await page.getByRole("button", { name: "Start Attempt 2" }).click();
   await expect(page.getByRole("button", { name: /Review, succeeded, 2 attempts/ })).toBeVisible();
-  await expect
+  await runProgress
     .poll(async () => {
       const response = await page.request.get(`${harness.origin}/api/runs`);
       const body = (await response.json()) as { runs: { status: string }[] };
@@ -766,7 +784,7 @@ test("a run changes the project folder itself on a new branch, is promoted, and 
   await expect(page.getByText(/^code-factory\/[0-9a-f]{8}$/)).toBeVisible();
   const graph = page.getByRole("region", { name: "Execution graph" });
   const runBranch = page.getByRole("dialog", { name: "Run branch" });
-  await expect
+  await runProgress
     .poll(async () => {
       const body = (await (await page.request.get(`${harness.origin}/api/runs`)).json()) as {
         runs: { status: string }[];
@@ -874,11 +892,11 @@ test("a blocked review stops the run, and retrying it from the banner reaches ad
     };
     return body.runs[0]?.status;
   };
-  await expect.poll(status).toBe("blocked");
+  await runProgress.poll(status).toBe("blocked");
 
   const banner = page.getByRole("region", { name: "Test quality review blocked the run" });
   await expect(banner).toContainText("Cannot run pnpm test: shell refused.");
-  await expect(
+  await runProgress(
     page.getByRole("button", { name: /^Verify and adjudicate, Not reached/ }),
   ).toBeVisible();
   await banner.getByRole("button", { name: "Retry Test quality review" }).click();
@@ -886,12 +904,12 @@ test("a blocked review stops the run, and retrying it from the banner reaches ad
   await expect(
     page.getByRole("heading", { level: 2, name: "Recover a blocked review" }),
   ).toBeFocused();
-  await expect.poll(status).toBe("succeeded");
+  await runProgress.poll(status).toBe("succeeded");
   await expect(banner).toHaveCount(0);
-  await expect(
+  await runProgress(
     page.getByRole("button", { name: /^Verify and adjudicate, succeeded/ }),
   ).toBeVisible();
-  await expect(
+  await runProgress(
     page.getByRole("button", { name: /^Test quality review, succeeded, 2 attempts/ }),
   ).toBeVisible();
 });

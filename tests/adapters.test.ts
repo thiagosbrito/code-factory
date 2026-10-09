@@ -435,6 +435,29 @@ describe("portable adapter conformance", () => {
     ]);
   });
 
+  it("interrupts a turn whose cancel arrived while turn/start was still pending", async () => {
+    const controller = new AbortController();
+    // Cancel lands during the turn/start round trip, before the adapter knows the turn's ID.
+    class CancelDuringStart extends FixtureRpc {
+      override async request(method: string, params: Record<string, unknown>) {
+        const result = await super.request(method, params);
+        if (method === "turn/start") controller.abort();
+        return result;
+      }
+    }
+    const rpc = new CancelDuringStart(false, false, true);
+    const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
+    const iterator = adapter.execute(input, controller.signal)[Symbol.asyncIterator]();
+    await iterator.next().catch(() => undefined);
+    await iterator.next().catch(() => undefined);
+    expect(rpc.calls.filter((call) => call.method === "turn/interrupt")).toEqual([
+      {
+        method: "turn/interrupt",
+        params: { threadId: "thread-1", turnId: "turn-thread-1" },
+      },
+    ]);
+  });
+
   it("does not confirm cancellation when the native interrupt fails", async () => {
     const rpc = new FixtureRpc(false, false, true, "transport closed");
     const adapter = new CodexAdapter(rpc, "/bin/codex", "0.160.0");
