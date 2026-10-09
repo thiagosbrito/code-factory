@@ -195,3 +195,9 @@ export const validScope = (run: RunRecord, scope: RunScope): RunScope => {
     return { kind: "step", stepId: scope.stepId, attemptId: step.attempts.at(-1)?.id ?? null };
   return scope;
 };
+
+/** Steps running now and steps that have succeeded. */
+export const stepProgress = (run: RunRecord): { active: number; complete: number } => ({
+  active: run.steps.filter((step) => step.status === "running").length,
+  complete: run.steps.filter((step) => step.status === "succeeded").length,
+});
