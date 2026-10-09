@@ -17,9 +17,11 @@ Current stack: Node >=22.12, pnpm 11.8.0, strict TypeScript, React 19, Vite 8, T
 | `src/runtime/`     | Local API, persistence, Git worktrees, scheduling, intake, events, and provider coordination.                                         |
 | `src/translators/` | Explicit import/export of agent-native configuration, with loss reporting.                                                            |
 | `src/ui/`          | React UI by area: `app/`, `factory/`, `features/{runs,loops,setup}/`, and `shared/` (`shared/components/` holds the shadcn controls). |
-| `tests/`           | Vitest domain/runtime/UI tests, provider fixtures, and `tests/e2e/` browser journeys.                                                 |
+| `tests/`           | Vitest tests, provider fixtures, shared builders in `tests/support/`, and `tests/e2e/` journeys (harness in `e2e/support/`).          |
 | `scripts/`         | Development, package smoke, and native proof tooling.                                                                                 |
 | `docs/`            | Architecture decisions and dated evidence.                                                                                            |
+
+Files stay under 500 lines (oxlint `max-lines`, no exceptions); a larger module becomes a small entry file over sibling modules, for example `runtime/scheduler.ts`, `runtime/server.ts`, `runtime/run-branch.ts` and `domain/run.ts`. Layers import inward only and UI features do not import each other; see `CONTRIBUTING.md` and `docs/architecture.md`.
 
 Trace a behavior through domain contract, runtime route/storage/scheduler, API client, and UI before editing. Keep rendering, state orchestration, domain decisions, persistence, and provider protocol code in their respective modules. Add or change a portable contract before teaching multiple layers a new state.
 

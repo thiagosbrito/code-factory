@@ -1,5 +1,5 @@
 import type { RunRecord } from "../../../domain/run.js";
-import type { PublicEvent } from "../../../runtime/events.js";
+import type { PublicEvent } from "../../../domain/evidence.js";
 
 /** Socket frames can arrive beside an older snapshot; keep each event once by sequence. */
 export const mergeRunEvent = (record: RunRecord, event: PublicEvent): RunRecord => {

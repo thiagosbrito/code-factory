@@ -167,3 +167,5 @@ export const evidenceSchema = z.discriminatedUnion("kind", [
   acceptanceReceiptSchema,
 ]);
 export type Evidence = z.infer<typeof evidenceSchema>;
+/** An event entry of a run's evidence: what the event stream publishes and the UI renders. */
+export type PublicEvent = Extract<Evidence, { kind: "event" }>;

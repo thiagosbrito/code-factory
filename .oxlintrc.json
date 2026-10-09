@@ -6,7 +6,15 @@
   },
   "rules": {
     "typescript/no-explicit-any": "error",
-    "typescript/no-non-null-assertion": "error"
+    "typescript/no-non-null-assertion": "error",
+    "max-lines": [
+      "error",
+      {
+        "max": 500,
+        "skipBlankLines": true,
+        "skipComments": true
+      }
+    ]
   },
   "overrides": [
     {
@@ -20,6 +28,180 @@
       "files": ["tests/**"],
       "rules": {
         "typescript/no-non-null-assertion": "off"
+      }
+    },
+    {
+      "files": ["src/domain/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/ui/**",
+                  "**/runtime/**",
+                  "**/adapters/**",
+                  "**/translators/**",
+                  "!**/translators/contract.js"
+                ],
+                "message": "The UI talks to the runtime over the local API; it must not import runtime or translator code (the shared translators/contract.js types are allowed)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/adapters/**", "src/translators/**", "src/runtime/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/ui/**"],
+                "message": "Only the UI may import UI code."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/ui/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/runtime/**", "**/translators/**", "!**/translators/contract.js"],
+                "message": "The UI talks to the runtime over the local API; it must not import runtime or translator code (the shared translators/contract.js types are allowed)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/ui/features/runs/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/features/loops/**",
+                  "../loops/**",
+                  "../../loops/**",
+                  "**/features/setup/**",
+                  "../setup/**",
+                  "../../setup/**",
+                  "**/factory/**",
+                  "**/app/**"
+                ],
+                "message": "Features may import shared code and the domain, not another feature's internals or the app shell."
+              },
+              {
+                "group": ["**/runtime/**", "**/translators/**", "!**/translators/contract.js"],
+                "message": "The UI talks to the runtime over the local API; it must not import runtime or translator code (the shared translators/contract.js types are allowed)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/ui/features/loops/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/features/runs/**",
+                  "../runs/**",
+                  "../../runs/**",
+                  "**/features/setup/**",
+                  "../setup/**",
+                  "../../setup/**",
+                  "**/factory/**",
+                  "**/app/**"
+                ],
+                "message": "Features may import shared code and the domain, not another feature's internals or the app shell."
+              },
+              {
+                "group": ["**/runtime/**", "**/translators/**", "!**/translators/contract.js"],
+                "message": "The UI talks to the runtime over the local API; it must not import runtime or translator code (the shared translators/contract.js types are allowed)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/ui/features/setup/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/features/runs/**",
+                  "../runs/**",
+                  "../../runs/**",
+                  "**/features/loops/**",
+                  "../loops/**",
+                  "../../loops/**",
+                  "**/factory/**",
+                  "**/app/**"
+                ],
+                "message": "Features may import shared code and the domain, not another feature's internals or the app shell."
+              },
+              {
+                "group": ["**/runtime/**", "**/translators/**", "!**/translators/contract.js"],
+                "message": "The UI talks to the runtime over the local API; it must not import runtime or translator code (the shared translators/contract.js types are allowed)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/ui/shared/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/features/**", "**/factory/**", "**/app/**"],
+                "message": "Shared UI code must not depend on features or the app shell."
+              },
+              {
+                "group": ["**/runtime/**", "**/translators/**", "!**/translators/contract.js"],
+                "message": "The UI talks to the runtime over the local API; it must not import runtime or translator code (the shared translators/contract.js types are allowed)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/ui/**/*.tsx"],
+      "rules": {
+        "max-lines": [
+          "warn",
+          {
+            "max": 300,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
+        ]
       }
     }
   ],

@@ -52,18 +52,18 @@ Route selection, run history polling, detail polling, SSE event stream, evidence
 
 Epic: THI-29. Tick each item when its ticket is Done.
 
-- [ ] THI-30: UI folders reorganized by feature (moves and import updates only)
-- [ ] THI-31: `useFactoryRuns` split into focused hooks
-- [ ] THI-32: `RunDetail` broken into components
-- [ ] THI-33: `Factory` and `Loops` broken into components
-- [ ] THI-34: `RunWorkspacePanel` and `RunInspector` broken into components
-- [ ] THI-35: `runtime/scheduler.ts` split
-- [ ] THI-36: `runtime/run-branch.ts` split
-- [ ] THI-36: `runtime/server.ts` split
-- [ ] THI-37: `adapters/codex.ts`, `domain/run.ts`, `translators/kiro-workflow-mapper.ts` split
-- [ ] THI-38: Large Vitest files split by behavior
-- [ ] THI-38: Large Playwright specs split
-- [ ] THI-39: File-size guardrail enforced in lint, and `AGENTS.md`/`CONTRIBUTING.md` updated
+- [x] THI-30: UI folders reorganized by feature (moves and import updates only)
+- [x] THI-31: `useFactoryRuns` split into focused hooks
+- [x] THI-32: `RunDetail` broken into components
+- [x] THI-33: `Factory` and `Loops` broken into components
+- [x] THI-34: `RunWorkspacePanel` and `RunInspector` broken into components
+- [x] THI-35: `runtime/scheduler.ts` split
+- [x] THI-36: `runtime/run-branch.ts` split
+- [x] THI-36: `runtime/server.ts` split
+- [x] THI-37: `adapters/codex.ts`, `domain/run.ts`, `translators/kiro-workflow-mapper.ts` split
+- [x] THI-38: Large Vitest files split by behavior
+- [x] THI-38: Large Playwright specs split
+- [x] THI-39: File-size guardrail enforced in lint, and `AGENTS.md`/`CONTRIBUTING.md` updated
 
 ## Suggested order
 
