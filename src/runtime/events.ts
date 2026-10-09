@@ -1,8 +1,9 @@
 import type { ServerResponse } from "node:http";
+import type { PublicEvent } from "../domain/evidence.js";
 import type { RunRecord } from "../domain/run.js";
 import { readRun } from "./storage.js";
 
-export type PublicEvent = Extract<RunRecord["evidence"][number], { kind: "event" }>;
+export type { PublicEvent };
 
 /** A cursor names the last committed event, not a socket or process-local offset. */
 export const eventsAfter = (record: RunRecord, cursor: number): PublicEvent[] =>

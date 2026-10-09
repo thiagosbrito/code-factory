@@ -1,5 +1,5 @@
 import type { Evidence } from "../../../domain/evidence.js";
-import type { PublicEvent } from "../../../runtime/events.js";
+import type { PublicEvent } from "../../../domain/evidence.js";
 
 /** One rendered activity row; a streamed message keeps its first chunk's id, time and sequence. */
 export type ActivityEntry = PublicEvent & {
