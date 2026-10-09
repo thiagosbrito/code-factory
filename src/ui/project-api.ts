@@ -6,6 +6,7 @@ import { eventSchema } from "../domain/evidence.js";
 import { projectConfigSchema } from "../domain/project.js";
 import { retrievedTicketSchema } from "../domain/ticket.js";
 import { runWorkspaceSchema } from "../domain/run-branch.js";
+import { projectTrustSchema } from "../domain/trust.js";
 
 const capabilitySchema = z.enum(["supported", "unsupported", "unknown"]);
 export const agentConnectionSchema = z.object({
@@ -39,7 +40,9 @@ export const projectResponseSchema = z.object({
   project: projectConfigSchema.nullable(),
   path: z.string(),
   revision: z.string().nullable(),
+  trust: projectTrustSchema,
 });
+export const trustResponseSchema = z.object({ trust: projectTrustSchema });
 export type ProjectResponse = z.infer<typeof projectResponseSchema>;
 export const factoryResponseSchema = z.object({ loops: z.number(), runs: z.number() });
 export type FactoryResponse = z.infer<typeof factoryResponseSchema>;
@@ -58,7 +61,11 @@ export const loopEntriesResponseSchema = z.object({
   ),
 });
 export const runsResponseSchema = z.object({ runs: z.array(runRecordSchema) });
-export const runResponseSchema = z.object({ run: runRecordSchema });
+export const runResponseSchema = z.object({
+  run: runRecordSchema,
+  /** Unfinished, but this runtime is not executing it: offer Resume. */
+  interrupted: z.boolean().optional(),
+});
 export const evidenceResponseSchema = z.object({ summary: evidenceSummarySchema });
 export const acceptedEvidenceResponseSchema = z.object({
   run: runRecordSchema,
@@ -76,6 +83,8 @@ export const savedProjectResponseSchema = z.object({
   revision: z.string(),
 });
 export type SavedProjectResponse = z.infer<typeof savedProjectResponseSchema>;
+/** A partial update to the App's one project state, from a save, grant, revoke or trust. */
+export type ProjectPatch = Partial<ProjectResponse>;
 export const workspaceResponseSchema = z.object({ workspace: runWorkspaceSchema });
 export const promoteResponseSchema = z.object({
   run: runRecordSchema,

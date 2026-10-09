@@ -4,12 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
 export type ToolGrantChoice = "grant" | "decline" | "cancel";
-export type ToolGrantPrompt = {
-  provider: GrantableProvider;
-  revision: string | null;
-  pending: boolean;
-  error: string;
-};
+export type ToolGrantPrompt = { provider: GrantableProvider; pending: boolean; error: string };
 
 /** Exact consent strings; tests assert these so the dialog never understates the grant. */
 export const toolGrantText: Record<

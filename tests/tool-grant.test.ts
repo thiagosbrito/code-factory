@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,9 +20,6 @@ import {
   toolGrantsSchema,
   type ToolGrantInEffect,
 } from "../src/domain/tool-grant.js";
-import { initializeProject, projectRevision, saveProjectSetup } from "../src/runtime/project.js";
-import { startLocalServer } from "../src/runtime/server.js";
-import { resolveToolGrant } from "../src/runtime/tool-grant.js";
 
 const roots: string[] = [];
 afterEach(async () =>
@@ -325,124 +322,5 @@ describe("adapter mapping", () => {
       { jsonrpc: "2.0", id: 2, result: { decision: "decline" } },
       { jsonrpc: "2.0", id: 3, result: { decision: "decline" } },
     ]);
-  });
-});
-
-describe("grant and revoke routes", () => {
-  it("persists a grant once, reuses it, preserves it on setup saves, and revokes it", async () => {
-    const root = await temp();
-    await initializeProject(root);
-    const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
-    const origin = url;
-    const call = (
-      path: string,
-      method: string,
-      body: unknown,
-      headers: Record<string, string> = { Origin: origin },
-    ) =>
-      fetch(`${url}${path}`, {
-        method,
-        headers: { "Content-Type": "application/json", ...headers },
-        body: JSON.stringify(body),
-      });
-    const config = async () =>
-      JSON.parse(await readFile(join(root, ".code-factory", "project.json"), "utf8"));
-    try {
-      const revision = await projectRevision(root);
-      expect(
-        (
-          await call(
-            "/api/project/tool-grants",
-            "POST",
-            { provider: "kiro", revision, acknowledged: true },
-            {},
-          )
-        ).status,
-      ).toBe(403);
-      expect(
-        (
-          await call("/api/project/tool-grants", "POST", {
-            provider: "kiro",
-            revision,
-            acknowledged: false,
-          })
-        ).status,
-      ).toBe(400);
-      expect(
-        (
-          await call("/api/project/tool-grants", "POST", {
-            provider: "kiro",
-            revision: "stale",
-            acknowledged: true,
-          })
-        ).status,
-      ).toBe(409);
-      const granted = await call("/api/project/tool-grants", "POST", {
-        provider: "kiro",
-        revision,
-        acknowledged: true,
-      });
-      expect(granted.status).toBe(200);
-      const body = await granted.json();
-      expect(body.revision).toBe(await projectRevision(root));
-      const stored = (await config()).toolGrants.kiro;
-      expect(stored).toEqual({ scope: ["execute_bash"], grantedAt: expect.any(String) });
-      const again = await call("/api/project/tool-grants", "POST", {
-        provider: "kiro",
-        revision: body.revision,
-        acknowledged: true,
-      });
-      expect((await again.json()).project.toolGrants.kiro.grantedAt).toBe(stored.grantedAt);
-      const withGrants = await call("/api/project/setup", "PUT", {
-        name: "x",
-        revision: body.revision,
-        toolGrants: {},
-      });
-      expect(withGrants.status).toBe(400);
-      await saveProjectSetup(root, { name: "Renamed", revision: await projectRevision(root) });
-      expect((await config()).toolGrants.kiro.grantedAt).toBe(stored.grantedAt);
-      expect(
-        (await call("/api/project/tool-grants/cursor", "DELETE", { revision: null })).status,
-      ).toBe(400);
-      const revoked = await call("/api/project/tool-grants/kiro", "DELETE", {
-        revision: await projectRevision(root),
-      });
-      expect(revoked.status).toBe(200);
-      expect((await config()).toolGrants).toBeUndefined();
-    } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
-    }
-  });
-
-  it("refuses a grant before setup is saved and fails closed on a hand-widened scope", async () => {
-    const root = await temp();
-    const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
-    try {
-      const missing = await fetch(`${url}/api/project/tool-grants`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Origin: url },
-        body: JSON.stringify({ provider: "codex", revision: null, acknowledged: true }),
-      });
-      expect(missing.status).toBe(409);
-      expect((await missing.json()).error).toBe(
-        "Save project setup before granting tool permission.",
-      );
-    } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
-    }
-    await initializeProject(root);
-    const path = join(root, ".code-factory", "project.json");
-    const widened = {
-      ...JSON.parse(await readFile(path, "utf8")),
-      toolGrants: { kiro: { scope: ["*"], grantedAt: kiroGrant.grantedAt } },
-    };
-    await writeFile(path, JSON.stringify(widened));
-    const resolved = await resolveToolGrant(root, "kiro");
-    expect(resolved.grant).toBeNull();
-    expect(resolved.note).toMatch(/Invalid project configuration/);
   });
 });

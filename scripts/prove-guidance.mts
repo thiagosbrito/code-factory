@@ -7,6 +7,7 @@ import { parseLoop } from "../src/domain/loop.js";
 import { createRunRecord, createRunSnapshot } from "../src/domain/run.js";
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 import { startLocalServer } from "../src/runtime/server.js";
+import { trustProject } from "../src/runtime/trust.js";
 import { createRun, readRun } from "../src/runtime/storage.js";
 
 const executable = process.env.CODEX_EXECUTABLE ?? "codex";
@@ -95,6 +96,8 @@ try {
     list: async () => [connection],
     close: () => adapter.close(),
   } as unknown as ConnectionRegistry;
+  // The disposable project is the proof's own; trust it so the local API will run its steps.
+  await trustProject(project);
   const local = await startLocalServer({ projectDirectory: project, port: 0, connections });
   server = local.server;
   const launch = await fetch(`${local.url}/api/runs/${run.snapshot.id}/execute`, {

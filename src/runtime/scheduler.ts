@@ -507,6 +507,10 @@ const checkCommand = async (
   });
 
 /** Execute the persisted graph with one scheduler and per-step adapters. Duplicate calls share work. */
+/** Whether this runtime is executing the run now; an unfinished run that is not was interrupted. */
+export const isRunActive = (project: string, runId: string): boolean =>
+  active.has(`${project}:${runId}`);
+
 export const executeRun = async (
   project: string,
   runId: string,

