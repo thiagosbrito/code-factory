@@ -37,9 +37,19 @@ type InspectableAdapter = {
   capabilities?: AgentAdapter["capabilities"];
 };
 
+/**
+ * Decides whether an executable may be launched before anything starts it; throws to refuse. The
+ * runtime uses it to keep executables that come from an untrusted project from running.
+ */
+export type LaunchAuthorizer = (
+  provider: ConnectionRequest["provider"],
+  executable: string,
+) => Promise<void>;
+
 const resolveExecutable = async (
   request: ConnectionRequest,
   candidates: AgentConnection[],
+  authorize: LaunchAuthorizer,
 ): Promise<string> => {
   if (request.provider !== "custom") {
     const executable = candidates.find((item) => item.provider === request.provider)?.executable;
@@ -48,11 +58,13 @@ const resolveExecutable = async (
         `${request.provider} executable is not detected. Install it and recheck.`,
         422,
       );
+    await authorize(request.provider, executable);
     return executable;
   }
 
   if (!isAbsolute(request.executable))
     throw new ProjectError("Enter an absolute executable path.", 400);
+  await authorize(request.provider, request.executable);
   try {
     const executable = await realpath(request.executable);
     await access(executable, constants.X_OK);
@@ -132,9 +144,12 @@ export class ConnectionRegistry {
     };
   }
 
-  async connect(request: ConnectionRequest): Promise<AgentConnection> {
+  async connect(
+    request: ConnectionRequest,
+    authorize: LaunchAuthorizer = async () => undefined,
+  ): Promise<AgentConnection> {
     const candidates = await this.discover();
-    const executable = await resolveExecutable(request, candidates);
+    const executable = await resolveExecutable(request, candidates, authorize);
     let adapter: InspectableAdapter | undefined;
     try {
       adapter = await this.create(request.provider, executable);

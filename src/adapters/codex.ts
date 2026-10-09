@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, relative } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
@@ -161,7 +162,11 @@ export class CodexStdioRpc implements CodexRpc {
       approveCommandExecution?(request: RpcMessage): boolean;
     } = {},
   ) {
-    this.child = spawn(executable, ["app-server", "--listen", "stdio://"], { stdio: "pipe" });
+    // Each thread names its own working directory; the server process starts from a neutral one.
+    this.child = spawn(executable, ["app-server", "--listen", "stdio://"], {
+      cwd: tmpdir(),
+      stdio: "pipe",
+    });
     createInterface({ input: this.child.stdout }).on("line", (line) => {
       let message: RpcMessage;
       try {
@@ -229,7 +234,10 @@ export class CodexStdioRpc implements CodexRpc {
 
 /** Verify the executable before starting its native protocol process. */
 export const createCodexAdapter = async (executable: string): Promise<CodexAdapter> => {
-  const { stdout } = await promisify(execFile)(executable, ["--version"], { timeout: 5000 });
+  const { stdout } = await promisify(execFile)(executable, ["--version"], {
+    cwd: tmpdir(),
+    timeout: 5000,
+  });
   const version = /^codex-cli (\d+\.\d+\.\d+)(?:\s|$)/.exec(stdout.trim())?.[1];
   if (!version) throw new Error("Executable is not a supported Codex CLI");
   // The RPC must exist before the adapter; the holder lets its approval hook reach the adapter.

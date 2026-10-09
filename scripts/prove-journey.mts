@@ -6,6 +6,7 @@ import { parseLoop } from "../src/domain/loop.js";
 import { initializeProject, projectRevision, saveProjectSetup } from "../src/runtime/project.js";
 import { saveDraft, publishDraft, readRun } from "../src/runtime/storage.js";
 import { startLocalServer } from "../src/runtime/server.js";
+import { trustProject } from "../src/runtime/trust.js";
 
 // Explicit invocation uses three small native Kiro tasks and preserves a compact receipt.
 const settleDelayMs = process.argv.includes("--no-settle-delay") ? 0 : 250;
@@ -61,6 +62,8 @@ try {
     "Baseline",
   ]);
   await initializeProject(root);
+  // The disposable project is the proof's own; trust it so the local API will run its steps.
+  await trustProject(root);
   local = await startLocalServer({
     projectDirectory: root,
     port: 0,

@@ -19,6 +19,7 @@ import { executeRun } from "../src/runtime/scheduler.js";
 import { eventsAfter, parseEventCursor } from "../src/runtime/events.js";
 import { createRun, readRun, updateRun } from "../src/runtime/storage.js";
 import { startLocalServer } from "../src/runtime/server.js";
+import { trustProject } from "../src/runtime/trust.js";
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 import { mergeRunEvent, mergeRunSnapshot } from "../src/ui/run-events.js";
 
@@ -30,6 +31,8 @@ afterEach(async () => {
 const fixture = async (checkCommand?: string): Promise<{ root: string; record: RunRecord }> => {
   const root = await mkdtemp(join(tmpdir(), "factory-events-"));
   roots.push(root);
+  // Runs execute through the local API here, which only runs steps in a trusted project.
+  await trustProject(root);
   const workspace = join(root, ".code-factory", "workspaces", "candidate");
   await mkdir(workspace, { recursive: true });
   await writeFile(join(workspace, "task.txt"), "baseline");
@@ -335,14 +338,33 @@ it("records unknown recovery explicitly and preserves attempts and queued guidan
   });
 });
 
-it("reconstructs an interrupted run when the service starts without relaunching mock work", async () => {
+const resumeOnRequest = async (root: string, runId: string) => {
+  const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
+  try {
+    // Nothing resumes on start, even in a trusted project: the run stays as it was, marked interrupted.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const untouched = await readRun(root, runId);
+    const response = await fetch(`${url}/api/runs/${runId}`);
+    expect(await response.json()).toMatchObject({ interrupted: true });
+    const execute = (await fetch(`${url}/api/runs/${runId}/execute`, { method: "POST" })).status;
+    return { untouched, execute, server };
+  } catch (error) {
+    server.close();
+    throw error;
+  }
+};
+
+it("reconstructs an interrupted run only when the user resumes it, without relaunching mock work", async () => {
   const { root, record } = await fixture();
   const claimed = claimStep(record, "build", "candidate", "input");
   await updateRun(root, claimed);
   const attached = attachAttemptSession(claimed, "build", "session", "turn");
   await updateRun(root, attached);
-  const { server } = await startLocalServer({ projectDirectory: root, port: 0 });
+  const { untouched, execute, server } = await resumeOnRequest(root, record.snapshot.id);
   try {
+    expect(untouched?.status).toBe("running");
+    expect(untouched?.steps[0]?.attempts[0]?.status).toBe("running");
+    expect(execute).toBe(202);
     await vi.waitFor(async () => {
       const reconstructed = await readRun(root, record.snapshot.id);
       expect(reconstructed?.status).toBe("unavailable");
@@ -354,7 +376,7 @@ it("reconstructs an interrupted run when the service starts without relaunching 
   }
 });
 
-it("invalidates a pending input request when restart recovery cannot resume it", async () => {
+it("invalidates a pending input request when a resumed run cannot recover it", async () => {
   const { root, record } = await fixture();
   const claimed = claimStep(record, "build", "candidate", "input");
   await updateRun(root, claimed);
@@ -364,8 +386,10 @@ it("invalidates a pending input request when restart recovery cannot resume it",
   if (!attemptId) throw new Error("Missing attempt");
   const waiting = setAttemptControlState(attached, "build", attemptId, "waiting-input");
   await updateRun(root, waiting);
-  const { server } = await startLocalServer({ projectDirectory: root, port: 0 });
+  const { untouched, execute, server } = await resumeOnRequest(root, record.snapshot.id);
   try {
+    expect(untouched?.status).toBe("waiting-input");
+    expect(execute).toBe(202);
     await vi.waitFor(async () => {
       const recovered = await readRun(root, record.snapshot.id);
       expect(recovered?.status).toBe("unavailable");

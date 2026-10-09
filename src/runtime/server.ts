@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
 import { z } from "zod";
 import { extname, join, resolve, sep } from "node:path";
-import { ConnectionRegistry, connectionRequestSchema } from "./connections.js";
+import {
+  ConnectionRegistry,
+  connectionRequestSchema,
+  type LaunchAuthorizer,
+} from "./connections.js";
+import { canonicalPath, isWithin } from "./launch-safety.js";
 import { listLoops, readDraft, readPublishedVersion, saveDraft, publishDraft } from "./storage.js";
 import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
@@ -12,6 +17,7 @@ import {
   agentNotConnected,
   cancelRun,
   executeRun,
+  isRunActive,
   retryStep,
   withIdleRunSlot,
 } from "./scheduler.js";
@@ -24,12 +30,17 @@ import {
   removeRunWorktree,
   returnToPreviousBranch,
 } from "./run-branch.js";
-import { grantToolPermission, revokeToolPermission } from "./tool-grant.js";
 import {
-  grantableProviderSchema,
-  toolGrantRequestSchema,
-  toolGrantRevokeSchema,
-} from "../domain/tool-grant.js";
+  grantToolPermission,
+  isProjectTrusted,
+  projectNotTrusted,
+  revokeToolPermission,
+  trustProject,
+  untrustProject,
+} from "./trust.js";
+import { describeProjectTrust } from "./trust-review.js";
+import { trustRequestSchema } from "../domain/trust.js";
+import { grantableProviderSchema, toolGrantRequestSchema } from "../domain/tool-grant.js";
 import type { RunRecord } from "../domain/run.js";
 import {
   applyNative,
@@ -165,9 +176,6 @@ export const startLocalServer = async (options: {
   tracker?: TicketTracker;
 }) => {
   const projectDirectory = await validateProjectDirectory(options.projectDirectory);
-  const recoveryRuns = (await listRuns(projectDirectory)).filter((run) =>
-    ["running", "waiting-input", "paused"].includes(run.status),
-  );
   const connections = options.connections ?? new ConnectionRegistry(projectDirectory);
   const tracker =
     options.tracker ??
@@ -187,6 +195,23 @@ export const startLocalServer = async (options: {
       )
       .map((step) => run.snapshot.bindings[step.id]?.provider)
       .find((provider) => provider !== undefined && !connections.adapter(provider));
+  /**
+   * Until the project is trusted, an agent executable that is the project's content does not run:
+   * one inside the project (a committed `node_modules/.bin/claude` that npx put on PATH, or a path
+   * typed into the form) or the custom executable the project's own files saved, however spelled.
+   * Paths compare by real path, so `./`, `//` and symlinked spellings find the same file.
+   */
+  const authorizeLaunch: LaunchAuthorizer = async (provider, executable) => {
+    if (await isProjectTrusted(projectDirectory)) return;
+    const [target, root] = await Promise.all([
+      canonicalPath(executable),
+      canonicalPath(projectDirectory),
+    ]);
+    if (isWithin(root, target)) throw projectNotTrusted();
+    if (provider !== "custom") return;
+    const saved = (await readProjectConfig(projectDirectory))?.customAgent?.executable;
+    if (saved && (await canonicalPath(saved)) === target) throw projectNotTrusted();
+  };
   const server = createServer((request, response) => {
     void (async () => {
       const address = server.address();
@@ -218,7 +243,9 @@ export const startLocalServer = async (options: {
           return json(response, 400, {
             error: parsed.error.issues[0]?.message ?? "Invalid connection request.",
           });
-        return json(response, 200, { connection: await connections.connect(parsed.data) });
+        return json(response, 200, {
+          connection: await connections.connect(parsed.data, authorizeLaunch),
+        });
       }
       if (pathname === "/api/loops" && request.method === "GET")
         return json(response, 200, { loops: await listLoops(projectDirectory) });
@@ -327,26 +354,44 @@ export const startLocalServer = async (options: {
           return json(response, 400, {
             error: parsed.error.issues[0]?.message ?? "Invalid tool permission request.",
           });
-        const project = await grantToolPermission(
-          projectDirectory,
-          parsed.data.provider,
-          parsed.data.revision,
+        await grantToolPermission(projectDirectory, parsed.data.provider);
+        return json(response, 200, { trust: await describeProjectTrust(projectDirectory) });
+      }
+      if (pathname === "/api/project/trust" && request.method === "POST") {
+        // Trust lets the project's commands run, so it also requires the Code Factory UI's Origin.
+        if (!request.headers.origin || !allowedOrigins.includes(request.headers.origin))
+          return json(response, 403, {
+            error: "A project can only be trusted from the Code Factory UI.",
+          });
+        if (!trustRequestSchema.safeParse(await readBody(request)).success)
+          return json(response, 400, { error: "Acknowledge what trusting this project allows." });
+        await trustProject(projectDirectory);
+        return json(response, 200, { trust: await describeProjectTrust(projectDirectory) });
+      }
+      if (pathname === "/api/project/trust" && request.method === "DELETE") {
+        await untrustProject(projectDirectory);
+        // Withdrawing trust also cancels the runs this runtime is executing in the project now, the
+        // same as Cancel on each; their evidence stays.
+        const active = (await listRuns(projectDirectory)).filter((run) =>
+          isRunActive(projectDirectory, run.snapshot.id),
         );
-        return json(response, 200, { project, revision: await projectRevision(projectDirectory) });
+        const results = await Promise.allSettled(
+          active.map((run) => cancelRun(projectDirectory, run.snapshot.id)),
+        );
+        for (const result of results)
+          if (result.status === "rejected")
+            console.error(
+              result.reason instanceof Error ? result.reason.message : "Run cancellation failed",
+            );
+        return json(response, 200, { trust: await describeProjectTrust(projectDirectory) });
       }
       const revokePath = /^\/api\/project\/tool-grants\/([a-z-]+)$/.exec(pathname);
       if (revokePath?.[1] && request.method === "DELETE") {
         const provider = grantableProviderSchema.safeParse(revokePath[1]);
         if (!provider.success)
           return json(response, 400, { error: "Unknown tool permission provider." });
-        const parsed = toolGrantRevokeSchema.safeParse(await readBody(request));
-        if (!parsed.success) return json(response, 400, { error: "Send the project revision." });
-        const project = await revokeToolPermission(
-          projectDirectory,
-          provider.data,
-          parsed.data.revision,
-        );
-        return json(response, 200, { project, revision: await projectRevision(projectDirectory) });
+        await revokeToolPermission(projectDirectory, provider.data);
+        return json(response, 200, { trust: await describeProjectTrust(projectDirectory) });
       }
       const workspacePath = /^\/api\/runs\/([0-9a-f-]{36})\/workspace$/i.exec(pathname);
       if (workspacePath?.[1] && request.method === "GET") {
@@ -401,7 +446,12 @@ export const startLocalServer = async (options: {
       if (executePath?.[1] && request.method === "POST") {
         const run = await readRun(projectDirectory, executePath[1]);
         if (!run) return json(response, 404, { error: "Run not found." });
-        if (run.status !== "pending" && run.status !== "running")
+        if (!(await isProjectTrusted(projectDirectory))) throw projectNotTrusted();
+        // An interrupted run (waiting for input or paused when the runtime stopped) resumes here too.
+        const resumable =
+          ["waiting-input", "paused"].includes(run.status) &&
+          !isRunActive(projectDirectory, run.snapshot.id);
+        if (run.status !== "pending" && run.status !== "running" && !resumable)
           return json(response, 409, { error: "Run cannot be started from its current state." });
         const missing = disconnectedProvider(run);
         if (missing) return json(response, 409, { error: agentNotConnected(missing) });
@@ -435,6 +485,7 @@ export const startLocalServer = async (options: {
           return json(response, 400, { error: "Select a step and its latest attempt." });
         const run = await readRun(projectDirectory, retryPath[1]);
         if (!run) return json(response, 404, { error: "Run not found." });
+        if (!(await isProjectTrusted(projectDirectory))) throw projectNotTrusted();
         const { stepId, attemptId } = parsed.data;
         if (
           run.evidence.some(
@@ -549,6 +600,7 @@ export const startLocalServer = async (options: {
           project: await readProjectConfig(projectDirectory),
           path: projectDirectory,
           revision: await projectRevision(projectDirectory),
+          trust: await describeProjectTrust(projectDirectory),
         });
       if (pathname === "/api/factory")
         return json(response, 200, {
@@ -615,7 +667,12 @@ export const startLocalServer = async (options: {
         if (!/^[0-9a-f-]{36}$/i.test(id)) return json(response, 400, { error: "Invalid run ID." });
         const run = await readRun(projectDirectory, id);
         return run
-          ? json(response, 200, { run })
+          ? json(response, 200, {
+              run,
+              interrupted:
+                ["running", "waiting-input", "paused"].includes(run.status) &&
+                !isRunActive(projectDirectory, id),
+            })
           : json(response, 404, { error: "Run not found." });
       }
       if (pathname.startsWith("/api/")) return json(response, 404, { error: "Unknown endpoint" });
@@ -648,12 +705,7 @@ export const startLocalServer = async (options: {
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Runtime has no TCP address.");
-  for (const run of recoveryRuns) {
-    void executeRun(projectDirectory, run.snapshot.id, (provider) =>
-      connections.adapter(provider),
-    ).catch((error: unknown) =>
-      console.error(error instanceof Error ? error.message : "Run recovery failed"),
-    );
-  }
+  // Unfinished runs are never resumed on start: the project's files may come from someone else.
+  // The UI offers Resume for each interrupted run once the user trusts the project.
   return { server, url: `http://127.0.0.1:${address.port}` };
 };

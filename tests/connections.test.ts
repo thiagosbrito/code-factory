@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentConnection } from "../src/adapters/contract.js";
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 import { startLocalServer } from "../src/runtime/server.js";
+import { trustProject } from "../src/runtime/trust.js";
 import { readProjectConfig } from "../src/runtime/project.js";
 import { createLoopDraft, parseLoop } from "../src/domain/loop.js";
 import { createRunSnapshot } from "../src/domain/run.js";
@@ -163,6 +164,7 @@ describe("connection registry and local handoff", () => {
 
   it("requires an explicit custom path and identity handshake; a path alone cannot connect", async () => {
     const directory = await temporaryProject();
+    await trustProject(directory);
     const executable = join(directory, "agent");
     await writeFile(executable, "#!/bin/sh\nexit 0\n");
     await chmod(executable, 0o755);
@@ -232,6 +234,7 @@ describe("connection registry and local handoff", () => {
 
   it("connects a custom executable only after its verified compatible handshake", async () => {
     const directory = await temporaryProject();
+    await trustProject(directory);
     const executable = join(directory, "codex-compatible");
     await writeFile(executable, "#!/bin/sh\nexit 0\n");
     await chmod(executable, 0o755);

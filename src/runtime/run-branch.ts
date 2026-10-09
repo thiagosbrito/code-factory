@@ -24,6 +24,7 @@ import {
   type RunWorkspace,
 } from "../domain/run-branch.js";
 import { createKeyedLock } from "./keyed-lock.js";
+import { systemCommand } from "./launch-safety.js";
 import { ProjectError } from "./project.js";
 import { listRuns, mutateRun, readRun } from "./storage.js";
 import {
@@ -51,14 +52,20 @@ type GitResult = {
   spawnError?: string;
 };
 
-const runGit = (
+const runGit = async (
   cwd: string,
   args: readonly string[],
   timeout = COMMIT_TIMEOUT_MS,
-): Promise<GitResult> =>
-  new Promise((resolveGit) => {
+): Promise<GitResult> => {
+  let command: string;
+  try {
+    command = await systemCommand("git");
+  } catch {
+    return { code: null, stdout: "", stderr: "", timedOut: false, spawnError: "ENOENT" };
+  }
+  return new Promise((resolveGit) => {
     execFile(
-      "git",
+      command,
       ["-C", cwd, ...args],
       {
         encoding: "utf8",
@@ -79,6 +86,7 @@ const runGit = (
       },
     );
   });
+};
 
 const firstLine = (text: string): string =>
   text

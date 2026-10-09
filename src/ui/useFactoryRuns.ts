@@ -15,14 +15,16 @@ import {
   projectResponseSchema,
   promoteErrorSchema,
   promoteResponseSchema,
-  savedProjectResponseSchema,
+  trustResponseSchema,
   workspaceResponseSchema,
-  type SavedProjectResponse,
+  type ProjectPatch,
 } from "./project-api";
 import { mergeRunEvent, mergeRunSnapshot } from "./run-events";
 import type { RunWorkspace } from "../domain/run-branch.js";
 import { providersNeedingToolGrant, type GrantableProvider } from "../domain/tool-grant.js";
 import type { ToolGrantChoice, ToolGrantPrompt } from "./ToolGrantDialog";
+import type { TrustChoice, TrustPrompt } from "./TrustDialog";
+import type { ProjectTrust } from "../domain/trust.js";
 import type { PromoteFailure } from "./PromoteRunDialog";
 
 const jsonPost = (method: string, body: unknown): RequestInit => ({
@@ -34,7 +36,7 @@ const jsonPost = (method: string, body: unknown): RequestInit => ({
 /** Runtime data and run navigation owned by the factory screen. */
 export const useFactoryRuns = (
   demo: boolean,
-  options: { onProjectChanged?: (next: SavedProjectResponse) => void } = {},
+  options: { onProjectChanged?: (next: ProjectPatch) => void } = {},
 ) => {
   const { onProjectChanged } = options;
   const [workspace, setWorkspace] = useState<{ runId: string; workspace: RunWorkspace } | null>(
@@ -45,8 +47,10 @@ export const useFactoryRuns = (
   const promptResolver = useRef<((choice: "proceed" | "decline" | "cancel") => void) | null>(null);
   const declinedProviders = useRef(new Set<GrantableProvider>()); // page session only
   const returnFocusTo = useRef<HTMLElement | null>(null);
-  // Revision returned by the last successful grant, carried into the next provider's prompt.
-  const latestRevision = useRef<string | null>(null);
+  const [trustPrompt, setTrustPrompt] = useState<TrustPrompt | null>(null);
+  const trustResolver = useRef<((choice: "proceed" | "cancel") => void) | null>(null);
+  // Trust returned by the trust request, so the grant prompts that follow see it immediately.
+  const latestTrust = useRef<ProjectTrust | null>(null);
   const [notice, setNotice] = useState("");
   const [publishedLoops, setPublishedLoops] = useState<LoopDefinition[]>([]);
   const [runs, setRuns] = useState<RunRecord[]>([]);
@@ -60,6 +64,8 @@ export const useFactoryRuns = (
     null,
   );
   const [accepting, setAccepting] = useState(false);
+  // The runtime's own answer: unfinished, but not being executed (for example after a restart).
+  const [interrupted, setInterrupted] = useState<{ runId: string; value: boolean } | null>(null);
   const [selectedRunId, setSelectedRunId] = useState(
     () => location.hash.match(/^#runs\/([0-9a-f-]{36})$/i)?.[1] ?? "",
   );
@@ -131,7 +137,8 @@ export const useFactoryRuns = (
     if (!pollingRunId || demo) return;
     const refresh = () => {
       void api(`/api/runs/${pollingRunId}`, runResponseSchema.parse)
-        .then(({ run }) =>
+        .then(({ run, interrupted: stopped }) => {
+          setInterrupted({ runId: pollingRunId, value: Boolean(stopped) });
           setRuns((previous) => {
             const existing = previous.find((item) => item.snapshot.id === pollingRunId);
             return existing
@@ -139,8 +146,8 @@ export const useFactoryRuns = (
                   item.snapshot.id === pollingRunId ? mergeRunSnapshot(item, run) : item,
                 )
               : [run, ...previous];
-          }),
-        )
+          });
+        })
         .then(() => setConnected(true))
         .catch(() => setConnected(false));
     };
@@ -219,40 +226,49 @@ export const useFactoryRuns = (
     );
     setWorkspace({ runId: id, workspace: next });
   };
-  /** Ask once per grantable provider without a stored grant; never sends a grant with execute. */
-  const ensureToolGrants = async (
+  const reportLost = (error: unknown) => {
+    if (error instanceof ApiError) setNotice(error.message);
+    else {
+      setConnected(false);
+      setNotice("Connection lost. Execution state is unknown; reconnect to inspect this run.");
+    }
+  };
+  /**
+   * Before anything runs: ask once to trust the project, then once per grantable provider without
+   * a stored grant. Neither decision is ever sent along with execute.
+   */
+  const ensurePermissions = async (
     id: string,
     focusTarget: HTMLElement | null,
   ): Promise<"proceed" | "cancel"> => {
     const run = runs.find((item) => item.snapshot.id === id);
     if (!run) return "proceed";
-    const outstanding = (grants: Parameters<typeof providersNeedingToolGrant>[1]) =>
-      providersNeedingToolGrant(run, grants).filter(
-        (provider) => !declinedProviders.current.has(provider),
-      );
-    if (!outstanding(undefined).length) return "proceed";
     returnFocusTo.current = focusTarget;
     let project;
     try {
       project = await api("/api/project", projectResponseSchema.parse);
     } catch (error) {
-      if (error instanceof ApiError) setNotice(error.message);
-      else {
-        setConnected(false);
-        setNotice("Connection lost. Execution state is unknown; reconnect to inspect this run.");
-      }
+      reportLost(error);
       return "cancel";
     }
-    if (project.project && project.revision)
-      onProjectChanged?.({ project: project.project, revision: project.revision });
-    let revision = project.revision;
-    for (const provider of outstanding(project.project?.toolGrants)) {
+    onProjectChanged?.(project);
+    let trust = project.trust;
+    if (!trust.trusted) {
+      const choice = await new Promise<"proceed" | "cancel">((resolve) => {
+        trustResolver.current = resolve;
+        setTrustPrompt({ review: trust.review, pending: false, error: "" });
+      });
+      setTrustPrompt(null);
+      if (choice === "cancel") return "cancel";
+      trust = latestTrust.current ?? trust;
+    }
+    const outstanding = providersNeedingToolGrant(run, trust.toolGrants).filter(
+      (provider) => !declinedProviders.current.has(provider),
+    );
+    for (const provider of outstanding) {
       const choice = await new Promise<"proceed" | "decline" | "cancel">((resolve) => {
-        promptResolver.current = (answer) => {
-          if (answer === "proceed") revision = latestRevision.current ?? revision;
-          resolve(answer);
-        };
-        setToolGrantPrompt({ provider, revision, pending: false, error: "" });
+        promptResolver.current = resolve;
+        setToolGrantPrompt({ provider, pending: false, error: "" });
       });
       if (choice === "cancel") {
         setToolGrantPrompt(null);
@@ -261,6 +277,37 @@ export const useFactoryRuns = (
     }
     setToolGrantPrompt(null);
     return "proceed";
+  };
+  const answerTrust = async (choice: TrustChoice): Promise<void> => {
+    const prompt = trustPrompt;
+    const resolve = trustResolver.current;
+    if (!prompt || !resolve) return;
+    if (choice === "cancel") {
+      trustResolver.current = null;
+      resolve("cancel");
+      return;
+    }
+    setTrustPrompt({ ...prompt, pending: true, error: "" });
+    try {
+      const { trust } = await api(
+        "/api/project/trust",
+        trustResponseSchema.parse,
+        jsonPost("POST", { acknowledged: true }),
+      );
+      latestTrust.current = trust;
+      onProjectChanged?.({ trust });
+      trustResolver.current = null;
+      resolve("proceed");
+    } catch (error) {
+      setTrustPrompt({
+        ...prompt,
+        pending: false,
+        error:
+          error instanceof ApiError
+            ? error.message
+            : "Connection lost. The project was not trusted; try again.",
+      });
+    }
   };
   const answerToolGrant = async (choice: ToolGrantChoice): Promise<void> => {
     const prompt = toolGrantPrompt;
@@ -279,42 +326,15 @@ export const useFactoryRuns = (
     }
     setToolGrantPrompt({ ...prompt, pending: true, error: "" });
     try {
-      const result = await api(
+      const { trust } = await api(
         "/api/project/tool-grants",
-        savedProjectResponseSchema.parse,
-        jsonPost("POST", {
-          provider: prompt.provider,
-          revision: prompt.revision,
-          acknowledged: true,
-        }),
+        trustResponseSchema.parse,
+        jsonPost("POST", { provider: prompt.provider, acknowledged: true }),
       );
-      onProjectChanged?.(result);
-      latestRevision.current = result.revision;
+      onProjectChanged?.({ trust });
       promptResolver.current = null;
       resolve("proceed");
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        try {
-          const fresh = await api("/api/project", projectResponseSchema.parse);
-          if (fresh.project && fresh.revision)
-            onProjectChanged?.({ project: fresh.project, revision: fresh.revision });
-          if (fresh.project?.toolGrants?.[prompt.provider]) {
-            latestRevision.current = fresh.revision;
-            promptResolver.current = null;
-            resolve("proceed");
-            return;
-          }
-          setToolGrantPrompt({
-            ...prompt,
-            revision: fresh.revision,
-            pending: false,
-            error: error.message,
-          });
-        } catch {
-          setToolGrantPrompt({ ...prompt, pending: false, error: error.message });
-        }
-        return;
-      }
       setToolGrantPrompt({
         ...prompt,
         pending: false,
@@ -328,7 +348,7 @@ export const useFactoryRuns = (
   const activeElement = (): HTMLElement | null =>
     document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const execute = async (id: string, focusTarget: HTMLElement | null = activeElement()) => {
-    if ((await ensureToolGrants(id, focusTarget)) === "cancel") return;
+    if ((await ensurePermissions(id, focusTarget)) === "cancel") return;
     setExecutingRunId(id);
     setNotice("");
     try {
@@ -368,7 +388,7 @@ export const useFactoryRuns = (
     attemptId: string,
     focusTarget: HTMLElement | null = activeElement(),
   ) => {
-    if ((await ensureToolGrants(id, focusTarget)) === "cancel") return;
+    if ((await ensurePermissions(id, focusTarget)) === "cancel") return;
     setExecutingRunId(id);
     setNotice("");
     try {
@@ -520,6 +540,9 @@ export const useFactoryRuns = (
     returnCheckout,
     toolGrantPrompt,
     answerToolGrant,
+    trustPrompt,
+    answerTrust,
+    selectedRunInterrupted: interrupted?.runId === selectedRunId && interrupted.value,
     toolGrantReturnFocus: () => returnFocusTo.current,
     executingRunId,
     connected,

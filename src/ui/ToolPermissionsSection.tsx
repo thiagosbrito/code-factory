@@ -4,12 +4,13 @@ import { Button } from "@/components/ui/button";
 import {
   api,
   ApiError,
-  savedProjectResponseSchema,
+  trustResponseSchema,
+  type ProjectPatch,
   type ProjectResponse,
-  type SavedProjectResponse,
 } from "./project-api";
 import { SetupSection } from "./SetupSection";
 import { ToolGrantDialog, type ToolGrantChoice, type ToolGrantPrompt } from "./ToolGrantDialog";
+import { TrustDialog, type TrustChoice, type TrustPrompt } from "./TrustDialog";
 
 const providerName: Record<GrantableProvider, string> = {
   kiro: "Kiro",
@@ -32,13 +33,16 @@ const permissionName: Record<GrantableProvider, string> = {
   "claude-code": "Claude Code shell permission",
 };
 
-/** Setup → Agent tool permission. Rows render from App's project state; nothing is cached. */
+/**
+ * Setup → Agent tool permission: project trust, then one row per grantable provider. Rows render
+ * from App's project state; nothing is cached.
+ */
 export const ToolPermissionsSection = ({
   state,
   onProjectChanged,
 }: {
   state: ProjectResponse;
-  onProjectChanged: (next: SavedProjectResponse) => void;
+  onProjectChanged: (next: ProjectPatch) => void;
 }) => {
   const [prompt, setPrompt] = useState<ToolGrantPrompt | null>(null);
   const [message, setMessage] = useState("");
@@ -47,21 +51,60 @@ export const ToolPermissionsSection = ({
   const fallback = useRef<HTMLDivElement>(null);
   const lastProvider = useRef<GrantableProvider | null>(null);
   const focusAfterRevoke = useRef<GrantableProvider | null>(null);
-  const grants = state.project?.toolGrants;
+  const [trustPrompt, setTrustPrompt] = useState<TrustPrompt | null>(null);
+  const trustTrigger = useRef<HTMLButtonElement | null>(null);
+  const { trusted, trustedAt, toolGrants: grants } = state.trust;
+  const answerTrust = async (choice: TrustChoice) => {
+    if (!trustPrompt) return;
+    if (choice === "cancel") {
+      setTrustPrompt(null);
+      return;
+    }
+    setTrustPrompt({ ...trustPrompt, pending: true, error: "" });
+    try {
+      const { trust } = await api("/api/project/trust", trustResponseSchema.parse, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ acknowledged: true }),
+      });
+      onProjectChanged({ trust });
+      setMessage("Project trusted. Code Factory can now run steps here.");
+      setTrustPrompt(null);
+    } catch (caught) {
+      setTrustPrompt({
+        ...trustPrompt,
+        pending: false,
+        error:
+          caught instanceof ApiError
+            ? caught.message
+            : "Connection lost. The project was not trusted; try again.",
+      });
+    }
+  };
+  const untrust = async () => {
+    setError("");
+    try {
+      const { trust } = await api("/api/project/trust", trustResponseSchema.parse, {
+        method: "DELETE",
+      });
+      onProjectChanged({ trust });
+      setMessage("Project no longer trusted. Its tool permissions were removed.");
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Connection lost. Trust not changed.");
+    }
+  };
   const revoke = async (provider: GrantableProvider) => {
     setError("");
     try {
-      const result = await api(
+      const { trust } = await api(
         `/api/project/tool-grants/${provider}`,
-        savedProjectResponseSchema.parse,
+        trustResponseSchema.parse,
         {
           method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ revision: state.revision }),
         },
       );
       focusAfterRevoke.current = provider;
-      onProjectChanged(result);
+      onProjectChanged({ trust });
       setMessage(`${permissionName[provider]} revoked. New steps use the default tools.`);
     } catch (caught) {
       setError(
@@ -77,16 +120,12 @@ export const ToolPermissionsSection = ({
     }
     setPrompt({ ...prompt, pending: true, error: "" });
     try {
-      const result = await api("/api/project/tool-grants", savedProjectResponseSchema.parse, {
+      const { trust } = await api("/api/project/tool-grants", trustResponseSchema.parse, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: prompt.provider,
-          revision: state.revision,
-          acknowledged: true,
-        }),
+        body: JSON.stringify({ provider: prompt.provider, acknowledged: true }),
       });
-      onProjectChanged(result);
+      onProjectChanged({ trust });
       setMessage(`${permissionName[prompt.provider]} allowed for new steps.`);
       setPrompt(null);
     } catch (caught) {
@@ -104,7 +143,7 @@ export const ToolPermissionsSection = ({
     <SetupSection
       number={4}
       title="Agent tool permission"
-      description="Granted once per project and provider; every new step reuses it until revoked"
+      description="Trust the project first; tool permission is granted once per provider and reused until revoked"
     >
       <div ref={fallback} tabIndex={-1} aria-label="Agent tool permission" className="space-y-3">
         <output aria-live="polite" className="sr-only">
@@ -115,6 +154,37 @@ export const ToolPermissionsSection = ({
             {error}
           </p>
         )}
+        {state.project?.toolGrants && (
+          <p className="text-sm text-muted-foreground">
+            Tool permissions saved in this project&apos;s files are ignored; grant them again here.
+          </p>
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
+          <span>
+            Project trust:{" "}
+            {trusted && trustedAt
+              ? `trusted since ${new Date(trustedAt).toLocaleString()}`
+              : "not trusted. Code Factory runs nothing in this project until you trust it."}
+          </span>
+          {trusted ? (
+            <Button type="button" size="sm" variant="outline" onClick={() => void untrust()}>
+              Stop trusting
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              ref={trustTrigger}
+              onClick={() => {
+                setError("");
+                setTrustPrompt({ review: state.trust.review, pending: false, error: "" });
+              }}
+            >
+              Trust project…
+            </Button>
+          )}
+        </div>
         <ul className="space-y-2">
           {GRANTABLE_PROVIDERS.map((provider) => {
             const grant = grants?.[provider];
@@ -153,10 +223,12 @@ export const ToolPermissionsSection = ({
                       }
                     }}
                     aria-label={`Allow ${permissionName[provider]}…`}
+                    disabled={!trusted}
+                    title={trusted ? undefined : "Trust the project first"}
                     onClick={() => {
                       setError("");
                       lastProvider.current = provider;
-                      setPrompt({ provider, revision: state.revision, pending: false, error: "" });
+                      setPrompt({ provider, pending: false, error: "" });
                     }}
                   >
                     Allow…
@@ -174,6 +246,12 @@ export const ToolPermissionsSection = ({
         returnFocus={() =>
           lastProvider.current ? (allowTriggers.current[lastProvider.current] ?? null) : null
         }
+        fallbackFocus={fallback}
+      />
+      <TrustDialog
+        prompt={trustPrompt}
+        onAnswer={(choice) => void answerTrust(choice)}
+        returnFocus={() => trustTrigger.current}
         fallbackFocus={fallback}
       />
     </SetupSection>

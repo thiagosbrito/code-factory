@@ -13,6 +13,7 @@ import type {
 } from "../../src/adapters/contract.js";
 import { ConnectionRegistry } from "../../src/runtime/connections.js";
 import { startLocalServer } from "../../src/runtime/server.js";
+import { trustProject } from "../../src/runtime/trust.js";
 
 type Harness = {
   origin: string;
@@ -231,6 +232,8 @@ const test = base.extend<{ harness: Harness }>({
         },
       }),
     );
+    // Journeys run in a project the user already trusts, unless a journey revokes it first.
+    await trustProject(projectDirectory);
     let ui: Awaited<ReturnType<typeof createViteServer>> | undefined;
     const runtime = await startLocalServer({
       projectDirectory,
@@ -295,8 +298,17 @@ const test = base.extend<{ harness: Harness }>({
 });
 
 /** Codex steps ask for tool permission once per page session; these journeys keep the default. */
-const executeWithDefaultTools = async (page: import("@playwright/test").Page) => {
+const executeWithDefaultTools = async (
+  page: import("@playwright/test").Page,
+  options: { trustFirst?: boolean } = {},
+) => {
   await page.getByRole("button", { name: "Execute run" }).click();
+  if (options.trustFirst) {
+    const trust = page.getByRole("dialog", { name: "Trust this project?" });
+    await expect(trust).toContainText("Code Factory will run this project's check");
+    await trust.getByRole("button", { name: "Trust project" }).click();
+    await expect(trust).toHaveCount(0);
+  }
   const prompt = page.getByRole("dialog", {
     name: "Allow Codex to run commands outside its sandbox?",
   });
@@ -560,6 +572,8 @@ test("verified model selection, loop controls, and run intake work as one keyboa
   page,
   harness,
 }) => {
+  // This journey starts untrusted, as a freshly cloned project would.
+  await page.request.delete(`${harness.origin}/api/project/trust`);
   await page.goto(harness.origin);
   await page.getByRole("textbox", { name: "Project name" }).fill("Browser project");
 
@@ -601,7 +615,7 @@ test("verified model selection, loop controls, and run intake work as one keyboa
   await expect(page.getByText("Complete browser acceptance")).toBeVisible();
   await page.getByRole("button", { name: "Start run" }).click();
   await expect(page.getByRole("heading", { name: "Complete browser acceptance" })).toBeVisible();
-  await executeWithDefaultTools(page);
+  await executeWithDefaultTools(page, { trustFirst: true });
 
   await expect(page.getByRole("button", { name: /Code quality review, running/ })).toBeVisible();
   await expect(
@@ -737,10 +751,15 @@ test("a run changes the project folder itself on a new branch, is promoted, and 
   await expect(prompt.getByRole("button", { name: "Cancel" })).toBeFocused();
   await prompt.getByRole("button", { name: "Allow and run" }).click();
   await expect(prompt).toHaveCount(0);
+  // The grant lives in the user's trust store, never in the project's own files.
+  const project = (await (await page.request.get(`${harness.origin}/api/project`)).json()) as {
+    trust: { toolGrants: { codex?: { scope: string[] } } };
+  };
+  expect(project.trust.toolGrants.codex?.scope).toEqual(["commandExecution"]);
   const config = JSON.parse(
     await readFile(join(harness.projectDirectory, ".code-factory", "project.json"), "utf8"),
-  ) as { toolGrants?: { codex?: { scope: string[] } } };
-  expect(config.toolGrants?.codex?.scope).toEqual(["commandExecution"]);
+  ) as { toolGrants?: unknown };
+  expect(config.toolGrants).toBeUndefined();
 
   // The run branch shows in the header; its panel opens from the floating icon over the canvas.
   await expect(page.getByText(/^code-factory\/[0-9a-f]{8}$/)).toBeVisible();

@@ -2,7 +2,7 @@ import type { AgentConnection } from "../adapters/contract.js";
 import type { ConnectRequest } from "./connection";
 import { Button } from "@/components/ui/button";
 import { Brand } from "./Brand";
-import type { ProjectResponse, SavedProjectResponse } from "./project-api";
+import type { ProjectPatch, ProjectResponse } from "./project-api";
 import { ToolPermissionsSection } from "./ToolPermissionsSection";
 import { AgentSetupSection } from "./AgentSetupSection";
 import { ModelSetupSection } from "./ModelSetupSection";
@@ -20,7 +20,7 @@ export const Setup = ({
   onCancel,
   onProjectChanged = () => undefined,
 }: {
-  onProjectChanged?: (next: SavedProjectResponse) => void;
+  onProjectChanged?: (next: ProjectPatch) => void;
   state: ProjectResponse;
   agents: AgentConnection[];
   agentError: string;

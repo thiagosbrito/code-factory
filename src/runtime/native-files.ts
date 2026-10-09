@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
+import { resolve as resolvePath } from "node:path";
 import { z } from "zod";
+import { systemCommand } from "./launch-safety.js";
 import { ProjectError } from "./project.js";
 
 type NativeFileRequest = {
@@ -83,23 +86,30 @@ finally:
         os.close(fd)
 `;
 
+const pythonUnavailable = () =>
+  new ProjectError("Native translation requires Python 3 with POSIX directory operations.", 501);
+
+/**
+ * The helper runs isolated (`-I`: no current or script directory on `sys.path`, no `PYTHON*`
+ * variables, no user site-packages) from a neutral directory, so a `json.py` or `os/` committed to
+ * the project is never imported. Every path it opens is absolute, from `request.project`.
+ */
 export const nativeFile = async (request: NativeFileRequest) => {
+  const python = await systemCommand("python3").catch(() => {
+    throw pythonUnavailable();
+  });
   const output = await new Promise<string>((resolve, reject) => {
-    const child = spawn("python3", ["-c", helper], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(python, ["-I", "-c", helper], {
+      cwd: tmpdir(),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     const chunks: Buffer[] = [];
     let errorOutput = "";
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
       errorOutput += chunk;
     });
-    child.on("error", () =>
-      reject(
-        new ProjectError(
-          "Native translation requires Python 3 with POSIX directory operations.",
-          501,
-        ),
-      ),
-    );
+    child.on("error", () => reject(pythonUnavailable()));
     child.stdin.on("error", () => {
       // A failed spawn closes stdin before the request can be written.
     });
@@ -108,7 +118,7 @@ export const nativeFile = async (request: NativeFileRequest) => {
         reject(new ProjectError(`Native file operation failed: ${errorOutput.trim()}`, 409));
       else resolve(Buffer.concat(chunks).toString("utf8"));
     });
-    child.stdin.end(JSON.stringify(request));
+    child.stdin.end(JSON.stringify({ ...request, project: resolvePath(request.project) }));
   });
   const result = resultSchema.parse(JSON.parse(output));
   if (result.status === "error") {

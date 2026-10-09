@@ -37,6 +37,7 @@ import {
 } from "../src/runtime/run-branch.js";
 import { cancelRun, executeRun } from "../src/runtime/scheduler.js";
 import { startLocalServer } from "../src/runtime/server.js";
+import { trustProject } from "../src/runtime/trust.js";
 import { createRun, mutateRun, readRun } from "../src/runtime/storage.js";
 import { fileDigest, resolveRunWorkspace } from "../src/runtime/workspace.js";
 
@@ -951,6 +952,7 @@ describe("setup command", () => {
 
 describe("promotion and removal through the local API", () => {
   const withServer = async (root: string, work: (url: string) => Promise<void>) => {
+    await trustProject(root);
     const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
     try {
       await work(url);

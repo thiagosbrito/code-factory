@@ -6,6 +6,7 @@ import { App } from "../src/ui/App.js";
 import { ErrorBoundary } from "../src/ui/ErrorBoundary.js";
 import type { ProjectConfig } from "../src/runtime/project.js";
 import type { AgentConnection } from "../src/adapters/contract.js";
+import { trustState } from "./fixtures/trust.js";
 
 afterEach(() => {
   cleanup();
@@ -41,7 +42,7 @@ function runtime(initial: ProjectConfig | null = null) {
     let status = 200;
     let body: unknown;
     if (path === "/api/project" && method === "GET") {
-      body = { project, path: "/canonical/project", revision };
+      body = { project, path: "/canonical/project", revision, trust: trustState() };
     } else if (path === "/api/factory" && method === "GET") {
       body = { loops: 0, runs: 0 };
     } else if (path === "/api/loops" && method === "GET") {

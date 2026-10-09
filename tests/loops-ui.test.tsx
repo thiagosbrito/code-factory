@@ -11,11 +11,13 @@ import { NativeTranslation } from "../src/ui/NativeTranslation.js";
 import { importerGeneratedRole } from "../src/translators/contract.js";
 import { setParallelGroup } from "../src/ui/loop-editor-model.js";
 import type { ProjectResponse } from "../src/ui/project-api.js";
+import { trustState } from "./fixtures/trust.js";
 
 const project: ProjectResponse = {
   project: { schemaVersion: 1, name: "Project", defaultBinding: null },
   path: "/project",
   revision: "one",
+  trust: trustState(),
 };
 function draft(): LoopDefinition {
   return parseLoop({

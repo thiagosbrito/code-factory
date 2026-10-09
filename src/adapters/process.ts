@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
 
 export const PROBE_OUTPUT_LIMIT = 600;
 const PROBE_TIMEOUT_MS = 30_000;
@@ -15,7 +16,8 @@ export const parseJson = (text: string): unknown => {
 };
 
 /**
- * Run a short CLI command with stdin closed. A failure names the command and says whether it
+ * Run a short CLI command with stdin closed, from a neutral directory unless `cwd` says otherwise:
+ * a probe must not pick up configuration from whatever project the runtime was started in. A failure names the command and says whether it
  * timed out, exited with a code or was killed by a signal, followed by the CLI's own output, so
  * Settings can show the real cause instead of a bare "Command failed".
  */
@@ -35,7 +37,7 @@ export const probeCommand = (
     const command = `${options.label} ${args.join(" ")}`;
     const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
     const child = spawn(executable, args, {
-      ...(options.cwd ? { cwd: options.cwd } : {}),
+      cwd: options.cwd ?? tmpdir(),
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, NO_COLOR: "1" },
     });

@@ -25,8 +25,13 @@ import {
   retryBlocker,
 } from "../src/domain/scheduler.js";
 import type { StepExecutionInput } from "../src/adapters/contract.js";
-import { initializeProject, projectRevision } from "../src/runtime/project.js";
-import { grantToolPermission, revokeToolPermission } from "../src/runtime/tool-grant.js";
+import { initializeProject } from "../src/runtime/project.js";
+import {
+  grantToolPermission,
+  revokeToolPermission,
+  trustDirectory,
+  trustProject,
+} from "../src/runtime/trust.js";
 
 const step = (id: string, stage: "implementation" | "review" = "review", groupId?: string) => ({
   id,
@@ -426,6 +431,7 @@ describe("portable scheduler", () => {
   });
   it("acknowledges the same HTTP retry key after the new attempt starts", async () => {
     const root = await mkdtemp(join(tmpdir(), "factory-retry-http-"));
+    await trustProject(root);
     const initial = run();
     await createRun(root, initial);
     const claimed = await updateRun(root, claim(initial, "build"));
@@ -1356,12 +1362,8 @@ describe("agent tool permission per attempt", () => {
       expect(permissionEvent(defaulted)).toEqual([
         "Kiro default: trusted tools fs_read, fs_write. Shell (execute_bash) is not trusted.",
       ]);
-      await grantToolPermission(
-        root,
-        "kiro",
-        await projectRevision(root),
-        new Date("2026-10-07T10:00:00.000Z"),
-      );
+      await trustProject(root);
+      await grantToolPermission(root, "kiro", new Date("2026-10-07T10:00:00.000Z"));
       const second = await legacyRun(root, singleStep, "kiro");
       const granted = await executeRun(root, second.snapshot.id, () => recording(inputs));
       expect(inputs[1]?.toolGrant).toEqual({
@@ -1372,18 +1374,32 @@ describe("agent tool permission per attempt", () => {
       expect(permissionEvent(granted)).toEqual([
         "Kiro project grant from 2026-10-07T10:00:00.000Z: trusted tools fs_read, fs_write, execute_bash.",
       ]);
-      await revokeToolPermission(root, "kiro", await projectRevision(root));
+      await revokeToolPermission(root, "kiro");
       const third = await legacyRun(root, singleStep, "kiro");
       await executeRun(root, third.snapshot.id, () => recording(inputs));
       expect(inputs[2]?.toolGrant).toBeUndefined();
-      await writeFile(join(root, ".code-factory", "project.json"), "{ not json");
+      // A grant in the project's own file is ignored: only the user's trust store grants tools.
+      const config = join(root, ".code-factory", "project.json");
+      const saved = JSON.parse(await readFile(config, "utf8")) as Record<string, unknown>;
+      await writeFile(
+        config,
+        JSON.stringify({
+          ...saved,
+          toolGrants: { kiro: { scope: ["execute_bash"], grantedAt: "2026-10-07T10:00:00.000Z" } },
+        }),
+      );
       const fourth = await legacyRun(root, singleStep, "kiro");
-      const broken = await executeRun(root, fourth.snapshot.id, () => recording(inputs));
+      await executeRun(root, fourth.snapshot.id, () => recording(inputs));
       expect(inputs[3]?.toolGrant).toBeUndefined();
+      await writeFile(join(trustDirectory(), "trust.json"), "{ not json");
+      const fifth = await legacyRun(root, singleStep, "kiro");
+      const broken = await executeRun(root, fifth.snapshot.id, () => recording(inputs));
+      expect(inputs[4]?.toolGrant).toBeUndefined();
       expect(permissionEvent(broken)[0]).toMatch(
-        /^Kiro default: .* Tool permission unavailable: Invalid project configuration/,
+        /^Kiro default: .* Tool permission unavailable: Invalid trust file/,
       );
     } finally {
+      await rm(join(trustDirectory(), "trust.json"), { force: true });
       await rm(root, { recursive: true, force: true });
     }
   });

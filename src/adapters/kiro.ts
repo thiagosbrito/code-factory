@@ -97,7 +97,7 @@ export class KiroAdapter implements AgentAdapter {
     private readonly version: string,
   ) {}
 
-  async inspect(projectDirectory: string): Promise<AgentConnection> {
+  async inspect(_projectDirectory: string): Promise<AgentConnection> {
     const whoami = await probeKiro(this.executable, ["whoami", "--format", "json"]);
     // SSO accounts print the JSON identity followed by profile lines, so read the JSON line only.
     const identityLine = whoami.split(/\r?\n/).find((line) => line.trim().startsWith("{"));
@@ -108,11 +108,13 @@ export class KiroAdapter implements AgentAdapter {
       throw new Error(
         `kiro-cli whoami --format json did not print a Kiro identity: ${stripAnsi(whoami.trim()).slice(0, PROBE_OUTPUT_LIMIT) || "no output"}`,
       );
-    const catalogOutput = await probeKiro(
-      this.executable,
-      ["chat", "--list-models", "--format", "json"],
-      { cwd: projectDirectory },
-    );
+    // The catalog is the account's; listing it from the project would read the project's `.kiro`.
+    const catalogOutput = await probeKiro(this.executable, [
+      "chat",
+      "--list-models",
+      "--format",
+      "json",
+    ]);
     const catalog = z
       .object({
         models: z.array(z.object({ model_id: z.string().min(1), model_name: z.string().min(1) })),

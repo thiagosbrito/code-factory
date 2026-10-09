@@ -38,6 +38,7 @@ export const RunDetail = ({
   connected,
   streamConnected,
   executing,
+  interrupted = false,
   onExecute,
   onCancel,
   onRetry,
@@ -61,6 +62,8 @@ export const RunDetail = ({
   connected: boolean;
   streamConnected?: boolean | null;
   executing: boolean;
+  /** Unfinished, but the runtime is not executing it (for example after a restart). */
+  interrupted?: boolean;
   onExecute: () => void;
   onCancel: () => void;
   onRetry?: (stepId: string, attemptId: string, focusTarget?: HTMLElement | null) => void;
@@ -140,15 +143,18 @@ export const RunDetail = ({
   const canCancel =
     connected &&
     (executing || ["pending", "running", "waiting-input", "paused"].includes(run.status));
+  // Nothing resumes on its own after a restart; the user resumes an interrupted run explicitly.
+  const resumable = interrupted && ["running", "waiting-input", "paused"].includes(run.status);
+  const executeLabel = resumable ? "Resume run" : "Execute run";
   const runControls = (
     <div className="flex items-center gap-1">
-      {(run.status === "pending" || canCancel || retryable) && (
+      {(run.status === "pending" || resumable || canCancel || retryable) && (
         <div className="flex items-center gap-1 border-r pr-1">
-          {run.status === "pending" && (
+          {(run.status === "pending" || resumable) && (
             <Button
               size="sm"
-              aria-label="Execute run"
-              title={executing ? "Executing…" : "Execute run"}
+              aria-label={executeLabel}
+              title={executing ? "Executing…" : executeLabel}
               aria-busy={executing || undefined}
               className="h-9 w-9 p-0"
               disabled={executing || !connected}
