@@ -112,12 +112,40 @@ export const jsonPost = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+const API_PREFIX = "/api/";
+
+const decodedSegment = (segment: string): string => {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+};
+
+/**
+ * Accepts only a path under the runtime's `/api/`, so a segment built from an id, direction or
+ * hash can never retarget the request: no scheme or host, and no empty, `.` or `..` segment or
+ * separator in any segment, percent-encoded or not. The string is returned untouched.
+ */
+export const runtimeApiPath = (path: string): string => {
+  const pathname = path.split(/[?#]/, 1)[0] ?? "";
+  const segments = pathname.slice(API_PREFIX.length).split("/");
+  const outside =
+    !pathname.startsWith(API_PREFIX) ||
+    segments.some((segment) => {
+      const value = decodedSegment(segment);
+      return value === "" || value === "." || value === ".." || /[\\/]/.test(value);
+    });
+  if (outside) throw new Error(`Refusing to call a path outside the runtime API: ${path}`);
+  return path;
+};
+
 export const api = async <T>(
   path: string,
   parse: (data: unknown) => T,
   options?: RequestInit,
 ): Promise<T> => {
-  const response = await fetch(path, options);
+  const response = await fetch(runtimeApiPath(path), options);
   const data: unknown = await response.json();
   if (!response.ok) {
     const message =
