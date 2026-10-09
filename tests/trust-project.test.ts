@@ -1,21 +1,8 @@
-import { execFile, execFileSync } from "node:child_process";
-import {
-  access,
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { chmod, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentConnection } from "../src/adapters/contract.js";
+import { type AgentConnection } from "../src/adapters/contract.js";
 import { parseLoop, type LoopDefinition } from "../src/domain/loop.js";
 import { createRunRecord, createRunSnapshot, type RunRecord } from "../src/domain/run.js";
 import { ConnectionRegistry } from "../src/runtime/connections.js";
@@ -23,15 +10,9 @@ import { initializeProject } from "../src/runtime/project.js";
 import { startLocalServer } from "../src/runtime/server.js";
 import { nativeFormats } from "../src/runtime/native-translation.js";
 import { createRun } from "../src/runtime/storage.js";
-import {
-  readProjectTrust,
-  trustDirectory,
-  trustProject,
-  untrustProject,
-} from "../src/runtime/trust.js";
+import { trustDirectory } from "../src/runtime/trust.js";
+import { exists, roots, servers, temporary } from "./support/trust.js";
 
-const roots: string[] = [];
-const servers: Awaited<ReturnType<typeof startLocalServer>>[] = [];
 afterEach(async () => {
   for (const { server } of servers.splice(0)) {
     server.closeAllConnections();
@@ -53,16 +34,7 @@ const git = (root: string, ...args: string[]) =>
       encoding: "utf8",
     },
   ).trim();
-const exists = (path: string) =>
-  access(path).then(
-    () => true,
-    () => false,
-  );
-const temporary = async (prefix: string) => {
-  const directory = await mkdtemp(join(tmpdir(), prefix));
-  roots.push(directory);
-  return directory;
-};
+
 const start = async (root: string, connections?: ConnectionRegistry) => {
   const local = await startLocalServer({
     sessionToken: null,
@@ -446,94 +418,4 @@ describe("project trust", () => {
     );
     expect(await readFile(file, "utf8")).toBe("{ not json");
   });
-});
-
-describe("trust file", () => {
-  const environment = (values: Record<string, string | undefined>) => {
-    const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
-    const apply = (next: Record<string, string | undefined>) => {
-      for (const [key, value] of Object.entries(next))
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-    };
-    apply(values);
-    return () => apply(previous);
-  };
-
-  it("ignores relative CODE_FACTORY_HOME and XDG_CONFIG_HOME, as the XDG specification says", () => {
-    const xdg = join(tmpdir(), "xdg");
-    let restore = environment({ CODE_FACTORY_HOME: "relative/home", XDG_CONFIG_HOME: xdg });
-    try {
-      expect(trustDirectory()).toBe(join(xdg, "code-factory"));
-    } finally {
-      restore();
-    }
-    restore = environment({ CODE_FACTORY_HOME: "", XDG_CONFIG_HOME: "relative/config" });
-    try {
-      expect(trustDirectory()).toBe(join(homedir(), ".config", "code-factory"));
-    } finally {
-      restore();
-    }
-  });
-
-  it("refuses a trust folder inside the project, which could then trust itself", async () => {
-    const root = await temporary("factory-self-trust-");
-    const inside = join(root, ".trust");
-    const restore = environment({ CODE_FACTORY_HOME: inside });
-    try {
-      await expect(trustProject(root)).rejects.toThrow(/is inside this project/);
-      await expect(readProjectTrust(root)).rejects.toThrow(/is inside this project/);
-      expect(await exists(inside)).toBe(false);
-    } finally {
-      restore();
-    }
-  });
-
-  it("keeps the trust folder private to the user", async () => {
-    const home = join(await temporary("factory-shared-home-"), "code-factory");
-    await mkdir(home, { mode: 0o777 });
-    await chmod(home, 0o777);
-    const project = await temporary("factory-private-");
-    const restore = environment({ CODE_FACTORY_HOME: home });
-    try {
-      await trustProject(project);
-      expect((await stat(home)).mode & 0o777).toBe(0o700);
-    } finally {
-      restore();
-    }
-  });
-
-  it("loses no decision when several Code Factory processes change it at once", async () => {
-    const home = await temporary("factory-shared-trust-");
-    const projects = await Promise.all(
-      Array.from({ length: 12 }, () => temporary("factory-concurrent-")),
-    );
-    const throwaways = await Promise.all(
-      Array.from({ length: 4 }, () => temporary("factory-throwaway-")),
-    );
-    const writer = fileURLToPath(new URL("./fixtures/trust-writer.ts", import.meta.url));
-    await Promise.all(
-      throwaways.map((throwaway, index) =>
-        promisify(execFile)(
-          process.execPath,
-          ["--import", "tsx", writer, throwaway, ...projects.slice(index * 3, index * 3 + 3)],
-          { env: { ...process.env, CODE_FACTORY_HOME: home } },
-        ),
-      ),
-    );
-    const restore = environment({ CODE_FACTORY_HOME: home });
-    try {
-      for (const project of projects)
-        expect(await readProjectTrust(project)).toMatchObject({
-          toolGrants: { kiro: { scope: ["execute_bash"] } },
-        });
-      for (const throwaway of throwaways) expect(await readProjectTrust(throwaway)).toBeUndefined();
-      // Concurrent calls in one process are serialized as well.
-      await Promise.all(projects.map((project) => untrustProject(project)));
-      for (const project of projects) expect(await readProjectTrust(project)).toBeUndefined();
-      expect(await exists(join(home, "trust.json.lock"))).toBe(false);
-    } finally {
-      restore();
-    }
-  }, 30_000);
 });
