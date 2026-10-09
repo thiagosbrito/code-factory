@@ -682,6 +682,21 @@ it("shows simultaneous active nodes and isolates the drawer to selected attempt"
   expect(screen.getAllByText("Build message").length).toBeGreaterThan(0);
 });
 
+it("centers a lone step vertically on its parallel neighbours without moving it sideways", () => {
+  const run = makeRun();
+  // Without saved positions the graph lays steps out itself: plan alone, then two in parallel.
+  const steps = run.snapshot.loop.steps.map(({ position: _position, ...step }) => step);
+  const laidOut = { ...run, snapshot: { ...run.snapshot, loop: { ...run.snapshot.loop, steps } } };
+  render(<RunGraph run={laidOut} selectedStepId={null} onSelect={vi.fn<(id: string) => void>()} />);
+  const at = (id: string) => {
+    const node = document.getElementById(`run-node-${id}`);
+    return { left: node?.style.left, top: node?.style.top };
+  };
+  expect(at("build")).toEqual({ left: "330px", top: "55px" });
+  expect(at("review")).toEqual({ left: "330px", top: "220px" });
+  expect(at("plan")).toEqual({ left: "40px", top: "137.5px" });
+});
+
 it("restores focus and supports keyboard tabs, resize, and explicit follow live", async () => {
   const run = makeRun();
   render(
