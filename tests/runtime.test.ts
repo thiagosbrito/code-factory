@@ -229,6 +229,43 @@ describe("local API", () => {
       );
     }
   });
+  it("sends anti-framing and content security headers on pages, API responses and errors", async () => {
+    const directory = await temporaryProject();
+    const ui = join(directory, "ui");
+    await mkdir(ui);
+    await writeFile(join(ui, "index.html"), "<h1>Test shell</h1>");
+    await mkdir(join(ui, "assets"));
+    await writeFile(join(ui, "assets", "app.js"), "export {};");
+    const { server, url } = await startLocalServer({
+      projectDirectory: directory,
+      uiDirectory: ui,
+      port: 0,
+    });
+    try {
+      for (const response of [
+        await fetch(url),
+        await fetch(`${url}/assets/app.js`),
+        await fetch(`${url}/assets/missing.js`),
+        await fetch(`${url}/api/health`),
+        await fetch(`${url}/api/unknown`),
+        await fetch(`${url}/api/project`, { headers: { Origin: "https://foreign.example" } }),
+      ]) {
+        const csp = response.headers.get("content-security-policy") ?? "";
+        expect(csp).toContain("frame-ancestors 'none'");
+        expect(csp).toContain("script-src 'self'");
+        expect(csp).not.toMatch(/unsafe-eval|script-src[^;]*unsafe-inline/);
+        expect(response.headers.get("x-frame-options")).toBe("DENY");
+        expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+        expect(response.headers.get("cross-origin-opener-policy")).toBe("same-origin");
+        expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+      }
+    } finally {
+      await new Promise<void>((resolveClosed, reject) =>
+        server.close((error) => (error ? reject(error) : resolveClosed())),
+      );
+    }
+  });
   it("rejects foreign origins, host rebinding, and unsupported mutations", async () => {
     const { server, url } = await startLocalServer({
       projectDirectory: await temporaryProject(),

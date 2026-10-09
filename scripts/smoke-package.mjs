@@ -88,7 +88,11 @@ try {
     (await fetch(`${url}/api/health`).then((response) => response.json())).executionAvailable,
     true,
   );
-  const html = await fetch(url).then((response) => response.text());
+  const page = await fetch(url);
+  // The packaged UI can never be framed by another site and runs only its own scripts.
+  assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  assert.equal(page.headers.get("x-frame-options"), "DENY");
+  const html = await page.text();
   assert.match(html, /Code Factory/);
   const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
   assert(assets.length >= 2, "Packaged HTML must reference built JS and CSS");
@@ -98,7 +102,7 @@ try {
   assert.equal((await exited)[0], 0);
   runtime = undefined;
   console.log(
-    "Package smoke passed: npm production install, public API, blank init, preservation, duplicate-init rejection, packaged UI/assets/API, and clean shutdown.",
+    "Package smoke passed: npm production install, public API, blank init, preservation, duplicate-init rejection, packaged UI/assets/API with security headers, and clean shutdown.",
   );
 } finally {
   if (runtime && runtime.exitCode === null && runtime.signalCode === null) {
