@@ -30,13 +30,6 @@
     "test:e2e": "playwright test",
     "test:e2e:native": "CODE_FACTORY_E2E_NATIVE=1 playwright test native-onboarding.spec.ts",
     "test:package": "node scripts/smoke-package.mjs",
-    "test:symphony": "node --test tests/symphony*.test.mjs",
-    "symphony:install": "node scripts/symphony/install.mjs",
-    "symphony:prepare": "node scripts/symphony/control.mjs prepare",
-    "symphony:doctor": "node scripts/symphony/control.mjs doctor",
-    "symphony:usage": "node scripts/symphony/usage.mjs",
-    "symphony:dashboard": "node scripts/symphony/usage-dashboard.mjs",
-    "symphony:start": "node scripts/symphony/control.mjs start",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "prepack": "pnpm build",
     "prove:codex": "pnpm build && node scripts/prove-codex.mjs"

@@ -1,6 +1,6 @@
 # Agent guide for Code Factory
 
-This file is the entry point for agents working in this repository. Read `README.md`, `CONTRIBUTING.md`, and the relevant parts of `docs/architecture.md` before changing behavior. For work dispatched by the external Symphony service, also follow `WORKFLOW.md` and `docs/symphony.md`; that workflow's branch, tracker, and publication rules apply to those assigned worktrees.
+This file is the entry point for agents working in this repository. Read `README.md`, `CONTRIBUTING.md`, and the relevant parts of `docs/architecture.md` before changing behavior.
 
 ## Project overview
 
@@ -18,8 +18,8 @@ Current stack: Node >=22.12, pnpm 11.8.0, strict TypeScript, React 19, Vite 8, T
 | `src/translators/` | Explicit import/export of agent-native configuration, with loss reporting.                          |
 | `src/ui/`          | React screens, hooks, API clients, and presentation; `src/ui/components/ui/` holds shared controls. |
 | `tests/`           | Vitest domain/runtime/UI tests, provider fixtures, and `tests/e2e/` browser journeys.               |
-| `scripts/`         | Development, package smoke, native proof, and external Symphony tooling.                            |
-| `docs/`            | Architecture decisions, Symphony setup, and dated evidence.                                         |
+| `scripts/`         | Development, package smoke, and native proof tooling.                                               |
+| `docs/`            | Architecture decisions and dated evidence.                                                          |
 
 Trace a behavior through domain contract, runtime route/storage/scheduler, API client, and UI before editing. Keep rendering, state orchestration, domain decisions, persistence, and provider protocol code in their respective modules. Add or change a portable contract before teaching multiple layers a new state.
 
@@ -45,7 +45,7 @@ pnpm test:package        # packed CLI/UI installation smoke test
 
 Use `pnpm format` for formatting. Run focused Vitest or Playwright cases while developing, then `pnpm check` before considering a change ready. Add behavior tests at the layer where the rule lives: domain validation and scheduling in Vitest; persistence, API and adapter contracts with disposable projects/fixtures; React interactions with Testing Library; complete browser journeys in Playwright. Exercise failure, retry, and preservation paths when those semantics change. UI tests should assert visible behavior rather than component internals.
 
-Run `pnpm test:package` when the CLI, build output, package contents, or static serving changes. Run `pnpm test:symphony` for Symphony scripts. `pnpm test:e2e` uses fixture providers and needs no agent credentials or Linear key. `pnpm test:e2e:native` requires an installed, authenticated Codex CLI. Native proof scripts such as `pnpm prove:codex` make real model calls; run them only when the task calls for native verification and record the environment and limits of the result. A fixture pass is not proof of a live provider connection.
+Run `pnpm test:package` when the CLI, build output, package contents, or static serving changes. `pnpm test:e2e` uses fixture providers and needs no agent credentials or Linear key. `pnpm test:e2e:native` requires an installed, authenticated Codex CLI. Native proof scripts such as `pnpm prove:codex` make real model calls; run them only when the task calls for native verification and record the environment and limits of the result. A fixture pass is not proof of a live provider connection.
 
 ## Working safely in this repository
 
