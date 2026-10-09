@@ -243,6 +243,30 @@ describe("run branch panel", () => {
     );
   });
 
+  it("keeps the remove dialog open and shows why when removal is refused", async () => {
+    render(
+      <RunWorkspacePanel
+        workspace={workspace()}
+        summary={summary("accepted")}
+        connected
+        busy={false}
+        onPromote={async () => ({})}
+        onReturn={async () => null}
+        onRemove={async () => "The worktree has uncommitted changes."}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Remove worktree…" }));
+    await user.click(screen.getByRole("button", { name: "Remove worktree" }));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("alert").textContent).toBe(
+        "The worktree has uncommitted changes.",
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Remove worktree" })).toBeTruthy();
+  });
+
   it("selects the visible open command when copying it fails", async () => {
     const user = userEvent.setup();
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("denied"));

@@ -697,6 +697,26 @@ it("centers a lone step vertically on its parallel neighbours without moving it 
   expect(at("plan")).toEqual({ left: "40px", top: "137.5px" });
 });
 
+it("wraps arrow-key navigation across the inspector tabs and moves focus with it", () => {
+  render(
+    <RunInspector
+      run={makeRun()}
+      scope={{ kind: "run" }}
+      onScopeChange={vi.fn<(scope: RunScope) => void>()}
+      onClose={vi.fn<() => void>()}
+      connected
+    />,
+  );
+  const first = screen.getByRole("tab", { name: "Activity" });
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowLeft" });
+  const details = screen.getByRole("tab", { name: "Details" });
+  expect(details.getAttribute("aria-selected")).toBe("true");
+  expect(document.activeElement).toBe(details);
+  fireEvent.keyDown(details, { key: "ArrowRight" });
+  expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("true");
+});
+
 it("restores focus and supports keyboard tabs, resize, and explicit follow live", async () => {
   const run = makeRun();
   render(
