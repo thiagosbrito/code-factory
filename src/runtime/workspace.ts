@@ -10,13 +10,14 @@ import {
   missingWorktreeMessage,
   removedWorktreeMessage,
 } from "../domain/run-branch.js";
+import { systemCommand } from "./launch-safety.js";
 import { ProjectError } from "./project.js";
 
 const exec = promisify(execFile);
 /** Read-only probes never take optional locks, so polling cannot race a step commit. */
 const readGit = async (directory: string, ...args: string[]): Promise<string> =>
   (
-    await exec("git", ["-C", directory, "--no-optional-locks", ...args], {
+    await exec(await systemCommand("git"), ["-C", directory, "--no-optional-locks", ...args], {
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },

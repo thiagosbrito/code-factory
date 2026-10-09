@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
 import { z } from "zod";
 import { extname, join, resolve, sep } from "node:path";
-import { ConnectionRegistry, connectionRequestSchema } from "./connections.js";
+import {
+  ConnectionRegistry,
+  connectionRequestSchema,
+  type LaunchAuthorizer,
+} from "./connections.js";
+import { canonicalPath, isWithin } from "./launch-safety.js";
 import { listLoops, readDraft, readPublishedVersion, saveDraft, publishDraft } from "./storage.js";
 import { parseLoop } from "../domain/loop.js";
 import { startRun, startRunInputSchema } from "./intake.js";
@@ -190,6 +195,23 @@ export const startLocalServer = async (options: {
       )
       .map((step) => run.snapshot.bindings[step.id]?.provider)
       .find((provider) => provider !== undefined && !connections.adapter(provider));
+  /**
+   * Until the project is trusted, an agent executable that is the project's content does not run:
+   * one inside the project (a committed `node_modules/.bin/claude` that npx put on PATH, or a path
+   * typed into the form) or the custom executable the project's own files saved, however spelled.
+   * Paths compare by real path, so `./`, `//` and symlinked spellings find the same file.
+   */
+  const authorizeLaunch: LaunchAuthorizer = async (provider, executable) => {
+    if (await isProjectTrusted(projectDirectory)) return;
+    const [target, root] = await Promise.all([
+      canonicalPath(executable),
+      canonicalPath(projectDirectory),
+    ]);
+    if (isWithin(root, target)) throw projectNotTrusted();
+    if (provider !== "custom") return;
+    const saved = (await readProjectConfig(projectDirectory))?.customAgent?.executable;
+    if (saved && (await canonicalPath(saved)) === target) throw projectNotTrusted();
+  };
   const server = createServer((request, response) => {
     void (async () => {
       const address = server.address();
@@ -221,16 +243,9 @@ export const startLocalServer = async (options: {
           return json(response, 400, {
             error: parsed.error.issues[0]?.message ?? "Invalid connection request.",
           });
-        // The saved custom executable comes from the project's own files, which may be someone
-        // else's; launch that path only once the project is trusted. A path the user types is theirs.
-        if (
-          parsed.data.provider === "custom" &&
-          parsed.data.executable ===
-            (await readProjectConfig(projectDirectory))?.customAgent?.executable &&
-          !(await isProjectTrusted(projectDirectory))
-        )
-          throw projectNotTrusted();
-        return json(response, 200, { connection: await connections.connect(parsed.data) });
+        return json(response, 200, {
+          connection: await connections.connect(parsed.data, authorizeLaunch),
+        });
       }
       if (pathname === "/api/loops" && request.method === "GET")
         return json(response, 200, { loops: await listLoops(projectDirectory) });
@@ -355,6 +370,19 @@ export const startLocalServer = async (options: {
       }
       if (pathname === "/api/project/trust" && request.method === "DELETE") {
         await untrustProject(projectDirectory);
+        // Withdrawing trust also cancels the runs this runtime is executing in the project now, the
+        // same as Cancel on each; their evidence stays.
+        const active = (await listRuns(projectDirectory)).filter((run) =>
+          isRunActive(projectDirectory, run.snapshot.id),
+        );
+        const results = await Promise.allSettled(
+          active.map((run) => cancelRun(projectDirectory, run.snapshot.id)),
+        );
+        for (const result of results)
+          if (result.status === "rejected")
+            console.error(
+              result.reason instanceof Error ? result.reason.message : "Run cancellation failed",
+            );
         return json(response, 200, { trust: await describeProjectTrust(projectDirectory) });
       }
       const revokePath = /^\/api\/project\/tool-grants\/([a-z-]+)$/.exec(pathname);

@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -113,6 +113,28 @@ describe("Kiro v2 stream adapter", () => {
         /* consume */
       }
     }).rejects.toThrow("does not advertise supported effort choices");
+  });
+
+  it("probes the CLI from a neutral directory, never the project's", async () => {
+    const { directory, executable } = await fixture([]);
+    const log = join(directory, "cwd.log");
+    const script = await readFile(executable, "utf8");
+    await writeFile(
+      executable,
+      script.replace(
+        "\n",
+        `\nrequire('node:fs').appendFileSync(${JSON.stringify(log)}, process.cwd() + '\\n');\n`,
+      ),
+    );
+    try {
+      const adapter = await createKiroAdapter(executable);
+      await adapter.inspect(directory);
+      const directories = (await readFile(log, "utf8")).trim().split("\n");
+      expect(directories).toHaveLength(3);
+      for (const cwd of directories) expect(await realpath(cwd)).toBe(await realpath(tmpdir()));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("connects an explicitly selected detected Kiro CLI through the shared registry", async () => {

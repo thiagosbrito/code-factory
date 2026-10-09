@@ -154,6 +154,11 @@ export const ToolPermissionsSection = ({
             {error}
           </p>
         )}
+        {state.project?.toolGrants && (
+          <p className="text-sm text-muted-foreground">
+            Tool permissions saved in this project&apos;s files are ignored; grant them again here.
+          </p>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
           <span>
             Project trust:{" "}

@@ -3,6 +3,7 @@ import type { ProjectTrust, TrustReview } from "../../src/domain/trust.js";
 
 export const emptyTrustReview: TrustReview = {
   setupCommand: null,
+  runSetupCommands: [],
   customExecutable: null,
   checkCommands: [],
   interruptedRuns: 0,

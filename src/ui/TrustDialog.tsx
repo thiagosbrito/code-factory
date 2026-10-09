@@ -18,6 +18,7 @@ export const TRUST_TEXT = {
 const Commands = ({ review }: { review: TrustReview }) => {
   const nothing =
     !review.setupCommand &&
+    !review.runSetupCommands.length &&
     !review.customExecutable &&
     !review.checkCommands.length &&
     !review.interruptedRuns;
@@ -36,6 +37,12 @@ const Commands = ({ review }: { review: TrustReview }) => {
             Setup command: <code className="break-all">{review.setupCommand.join(" ")}</code>
           </li>
         )}
+        {review.runSetupCommands.map((item) => (
+          <li key={[item.loop, ...item.command].join("\u0000")}>
+            Setup command saved in a run of {item.loop}:{" "}
+            <code className="break-all">{item.command.join(" ")}</code>
+          </li>
+        ))}
         {review.customExecutable && (
           <li>
             Custom agent executable: <code className="break-all">{review.customExecutable}</code>

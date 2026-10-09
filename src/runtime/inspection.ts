@@ -6,6 +6,7 @@ import { join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { RunRecord } from "../domain/run.js";
 import { projectRelativePathSchema } from "../domain/evidence.js";
+import { systemCommand } from "./launch-safety.js";
 import { ProjectError } from "./project.js";
 import { resolveRunWorkspace } from "./workspace.js";
 
@@ -21,9 +22,11 @@ const indexPaths = new Map<string, Promise<string>>();
 const indexPathOf = (workspace: string): Promise<string> => {
   const cached = indexPaths.get(workspace);
   if (cached) return cached;
-  const pending = exec("git", ["-C", workspace, "rev-parse", "--git-path", "index"], {
-    encoding: "utf8",
-  }).then((result) => resolve(workspace, result.stdout.trim()));
+  const pending = systemCommand("git")
+    .then((git) =>
+      exec(git, ["-C", workspace, "rev-parse", "--git-path", "index"], { encoding: "utf8" }),
+    )
+    .then((result) => resolve(workspace, result.stdout.trim()));
   // A failed lookup is not cached, so a later call can succeed once the workspace exists.
   pending.catch(() => indexPaths.delete(workspace));
   indexPaths.set(workspace, pending);
@@ -31,8 +34,8 @@ const indexPathOf = (workspace: string): Promise<string> => {
 };
 
 const git = async (workspace: string, ...args: string[]): Promise<string> => {
-  const run = (env: NodeJS.ProcessEnv) =>
-    exec("git", ["-C", workspace, "--no-optional-locks", ...args], {
+  const run = async (env: NodeJS.ProcessEnv) =>
+    exec(await systemCommand("git"), ["-C", workspace, "--no-optional-locks", ...args], {
       encoding: "utf8",
       maxBuffer: 8_000_000,
       env,
@@ -199,7 +202,7 @@ const diffForChange = async (
 ) =>
   change.change === "added" && !(await git(workspace, "ls-files", "--", change.path)).trim()
     ? await exec(
-        "git",
+        await systemCommand("git"),
         [
           "-C",
           workspace,

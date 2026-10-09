@@ -4,8 +4,22 @@ import { readProjectConfig } from "./project.js";
 import { listPublishedLoops, listRuns } from "./storage.js";
 import { readProjectTrust } from "./trust.js";
 
-const UNFINISHED = new Set(["pending", "running", "waiting-input", "paused"]);
+/**
+ * Runs whose commands a trusted project can still reach: Execute starts or resumes the unfinished
+ * ones, and Retry restarts a failed run or a blocked review (`retryBlocker` in the run domain).
+ */
+const REACHABLE = new Set(["pending", "running", "waiting-input", "paused", "failed", "blocked"]);
 const INTERRUPTED = new Set(["running", "waiting-input", "paused"]);
+
+const unique = <T>(items: T[], key: (item: T) => string): T[] => {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const value = key(item);
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+};
 
 /**
  * Everything the project's own `.code-factory` files would make Code Factory run on this machine,
@@ -17,25 +31,30 @@ export const reviewProjectTrust = async (project: string): Promise<TrustReview> 
     listPublishedLoops(project),
     listRuns(project),
   ]);
-  const unfinished = runs.filter((run) => UNFINISHED.has(run.status));
-  const sources: LoopDefinition[] = [...loops, ...unfinished.map((run) => run.snapshot.loop)];
-  const seen = new Set<string>();
-  const checkCommands = sources.flatMap((loop) =>
-    loop.steps
-      .filter((step) => step.kind === "check")
-      .map((step) => ({ loop: loop.name, step: step.name, command: step.instruction }))
-      .filter((item) => {
-        const key = `${item.loop}\u0000${item.step}\u0000${item.command}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      }),
+  const reachable = runs.filter((run) => REACHABLE.has(run.status));
+  const sources: LoopDefinition[] = [...loops, ...reachable.map((run) => run.snapshot.loop)];
+  const checkCommands = unique(
+    sources.flatMap((loop) =>
+      loop.steps
+        .filter((step) => step.kind === "check")
+        .map((step) => ({ loop: loop.name, step: step.name, command: step.instruction })),
+    ),
+    (item) => `${item.loop}\u0000${item.step}\u0000${item.command}`,
+  );
+  const runSetupCommands = unique(
+    reachable.flatMap((run) =>
+      run.snapshot.setupCommand
+        ? [{ loop: run.snapshot.loop.name, command: run.snapshot.setupCommand }]
+        : [],
+    ),
+    (item) => [item.loop, ...item.command].join("\u0000"),
   );
   return {
     setupCommand: config?.setupCommand ?? null,
+    runSetupCommands,
     customExecutable: config?.customAgent?.executable ?? null,
     checkCommands,
-    interruptedRuns: unfinished.filter((run) => INTERRUPTED.has(run.status)).length,
+    interruptedRuns: reachable.filter((run) => INTERRUPTED.has(run.status)).length,
   };
 };
 

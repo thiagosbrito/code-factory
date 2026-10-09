@@ -20,6 +20,8 @@ export type TrustFile = z.infer<typeof trustFileSchema>;
 /** What the project's own files would make Code Factory run once trusted. */
 export const trustReviewSchema = z.strictObject({
   setupCommand: z.array(z.string()).nullable(),
+  /** Setup commands frozen into run snapshots, which can differ from the project's current one. */
+  runSetupCommands: z.array(z.strictObject({ loop: z.string(), command: z.array(z.string()) })),
   customExecutable: z.string().nullable(),
   checkCommands: z.array(
     z.strictObject({ loop: z.string(), step: z.string(), command: z.string() }),
