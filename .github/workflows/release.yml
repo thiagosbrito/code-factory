@@ -1,0 +1,68 @@
+name: Release
+
+# Runs when a v* tag is pushed. Publishing uses npm trusted publishing (OIDC): there is no npm
+# token anywhere. Configure the trusted publisher on npmjs.com first (package
+# @thiagosbrito/code-factory, repository thiagosbrito/code-factory, workflow release.yml,
+# environment npm).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Tag matches package version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${version}"; exit 1
+          fi
+      - name: Tag is on main
+        run: |
+          git fetch origin main --depth=1000
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - run: git config --global user.name "CI" && git config --global user.email "ci@example.invalid"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test:e2e
+      - run: pnpm test:package
+
+  publish:
+    name: Publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Add required reviewers to this environment in the repository settings for a manual gate.
+    environment: npm
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # npm trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install --global npm@^11.5.1
+      # prepublishOnly already ran in the verify job; skip it here to keep this job short.
+      - run: npm publish --provenance --access public --ignore-scripts
+      - run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
