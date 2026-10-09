@@ -68,7 +68,7 @@ jobs:
       # The Playwright config drives the Chrome that ships on GitHub's Ubuntu runners.
       - run: pnpm build
       - run: pnpm test:e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: playwright-report
