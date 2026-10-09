@@ -61,6 +61,7 @@ const temporary = async (prefix: string) => {
 };
 const start = async (root: string, connections?: ConnectionRegistry) => {
   const local = await startLocalServer({
+    sessionToken: null,
     projectDirectory: root,
     port: 0,
     ...(connections ? { connections } : {}),

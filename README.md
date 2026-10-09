@@ -26,7 +26,7 @@ node dist/node/cli.js init /path/to/project
 node dist/node/cli.js start --project /path/to/project
 ```
 
-The built package serves its bundled UI on http://127.0.0.1:4310. Use `--port 0` to select an available port automatically. Initialization exclusively creates `.code-factory/project.json`; it does not overwrite existing configuration or agent folders. No agent, model, or loop is preselected. `doctor` locates executable candidates without launching them; detection does not establish their identity, authentication, or capabilities.
+The built package serves its bundled UI on http://127.0.0.1:4310. Use `--port 0` to select an available port automatically. `start` prints a link with a one-time session token (`http://127.0.0.1:4310/?token=…`); open that link. It sets an HttpOnly cookie for this runtime and drops the token from the address bar. The API refuses requests without the session, so other processes and other accounts on the machine cannot drive your agents through it. Each start uses a new token; scripts can send it as `Authorization: Bearer <token>`. `pnpm dev` adds the token through its proxy, so no link is needed there. Initialization exclusively creates `.code-factory/project.json`; it does not overwrite existing configuration or agent folders. No agent, model, or loop is preselected. `doctor` locates executable candidates without launching them; detection does not establish their identity, authentication, or capabilities.
 
 `pnpm test:e2e` runs browser journeys against disposable projects and fixture adapters. They cover setup and Kiro model selection, loop editing and translation, ticket intake, parallel review, guidance, cancellation, reload, retry, evidence, and mobile controls. `pnpm test:e2e:native` separately checks an installed, authenticated Codex CLI; it does not execute a model turn. The regular browser suite does not require agent credentials or a Linear key.
 
@@ -69,7 +69,7 @@ A pending step of a blocked, failed, canceled or rejected run reads **Not reache
 
 Run activity is persisted with contiguous event sequence numbers and exposed at `/api/runs/:id/events` as cursor replay or a server sent event stream. The browser can reconnect without restarting execution. A service restart never resumes anything on its own. An unfinished run shows **Resume run**; resuming reconciles completed persisted work, and an active attempt continues only through an adapter that explicitly supports recovery. Otherwise the attempt is marked interrupted and the run remains unavailable for inspection, with no automatic retry.
 
-Optional Linear retrieval is configured by supplying `CODE_FACTORY_LINEAR_API_KEY` in the runtime process environment. The key is never written to the project or returned by the API. Without it, description-only intake remains available.
+Optional Linear retrieval is configured by supplying `CODE_FACTORY_LINEAR_API_KEY` in the runtime process environment. The key is never written to the project or returned by the API. The runtime removes it from its own environment as soon as it reads it, so agents, check and setup commands never inherit it. Without it, description-only intake remains available.
 
 ## Packaging
 

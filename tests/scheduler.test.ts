@@ -441,7 +441,11 @@ describe("portable scheduler", () => {
     const accepted = prepareStepRetry(failed, "build", attemptId);
     await updateRun(root, accepted);
     const running = await updateRun(root, claim(accepted, "build"));
-    const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
+    const { server, url } = await startLocalServer({
+      sessionToken: null,
+      projectDirectory: root,
+      port: 0,
+    });
     try {
       const response = await fetch(`${url}/api/runs/${accepted.snapshot.id}/retry`, {
         method: "POST",

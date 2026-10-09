@@ -2,6 +2,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, realpath, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
+import { hasSession, sessionCookie, tokenMatches } from "./session.js";
 import { z } from "zod";
 import { extname, join, resolve, sep } from "node:path";
 import {
@@ -193,6 +194,11 @@ const serveAsset = async (response: ServerResponse, pathname: string, uiDirector
 /** Bind only to loopback; project setup writes to the CLI-selected workspace. */
 export const startLocalServer = async (options: {
   projectDirectory: string;
+  /**
+   * Required: the API session token, or null for an in-process harness that owns the runtime
+   * (tests, a dev proxy that adds the token itself). See src/runtime/session.ts.
+   */
+  sessionToken: string | null;
   port?: number;
   uiDirectory?: string;
   devOrigin?: string;
@@ -201,11 +207,11 @@ export const startLocalServer = async (options: {
 }) => {
   const projectDirectory = await validateProjectDirectory(options.projectDirectory);
   const connections = options.connections ?? new ConnectionRegistry(projectDirectory);
-  const tracker =
-    options.tracker ??
-    (process.env.CODE_FACTORY_LINEAR_API_KEY
-      ? linearTracker(process.env.CODE_FACTORY_LINEAR_API_KEY)
-      : undefined);
+  // Agents, check and setup commands and Git all inherit this process's environment. The tracker
+  // key is read once and removed, so it reaches the tracker and nothing the project runs.
+  const linearKey = process.env.CODE_FACTORY_LINEAR_API_KEY;
+  delete process.env.CODE_FACTORY_LINEAR_API_KEY;
+  const tracker = options.tracker ?? (linearKey ? linearTracker(linearKey) : undefined);
   /**
    * The first agent provider that unfinished agent steps need but this runtime session has not
    * connected; checked before execute and retry so a run never starts work it cannot do.
@@ -249,9 +255,28 @@ export const startLocalServer = async (options: {
       if (options.devOrigin) allowedOrigins.push(options.devOrigin);
       if (request.headers.origin && !allowedOrigins.includes(request.headers.origin))
         return json(response, 403, { error: "Unrecognized origin" });
-      const pathname = decodeURIComponent(
-        new URL(request.url ?? "/", `http://${hosts[0]}`).pathname,
-      );
+      const requestUrl = new URL(request.url ?? "/", `http://${hosts[0]}`);
+      const pathname = decodeURIComponent(requestUrl.pathname);
+      const token = options.sessionToken;
+      if (token !== null) {
+        // The printed link exchanges its token for a cookie once, then leaves the address bar.
+        if (pathname === "/" && requestUrl.searchParams.has("token")) {
+          if (!tokenMatches(token, requestUrl.searchParams.get("token")))
+            return json(response, 403, {
+              error: "This link is not for the running Code Factory. Use the link it printed.",
+            });
+          response.writeHead(303, {
+            Location: "/",
+            "Set-Cookie": sessionCookie(token, address.port),
+            "Cache-Control": "no-store",
+          });
+          return response.end();
+        }
+        if (pathname.startsWith("/api/") && !hasSession(request, token, address.port))
+          return json(response, 401, {
+            error: "Open Code Factory from the link `code-factory start` printed in your terminal.",
+          });
+      }
       if (pathname === "/api/project/setup" && request.method === "PUT") {
         const parsed = projectSetupSchema.safeParse(await readBody(request));
         if (!parsed.success)
@@ -732,5 +757,11 @@ export const startLocalServer = async (options: {
   if (!address || typeof address === "string") throw new Error("Runtime has no TCP address.");
   // Unfinished runs are never resumed on start: the project's files may come from someone else.
   // The UI offers Resume for each interrupted run once the user trusts the project.
-  return { server, url: `http://127.0.0.1:${address.port}` };
+  const url = `http://127.0.0.1:${address.port}`;
+  return {
+    server,
+    url,
+    /** Where to open the UI: carries the session token when there is one. */
+    loginUrl: options.sessionToken === null ? url : `${url}/?token=${options.sessionToken}`,
+  };
 };

@@ -22,7 +22,12 @@ let local: Awaited<ReturnType<typeof startLocalServer>> | undefined;
 const registry = new ConnectionRegistry(root);
 try {
   await initializeProject(root);
-  local = await startLocalServer({ projectDirectory: root, port: 0, connections: registry });
+  local = await startLocalServer({
+    sessionToken: null,
+    projectDirectory: root,
+    port: 0,
+    connections: registry,
+  });
   const response = await fetch(`${local.url}/api/agents/connect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

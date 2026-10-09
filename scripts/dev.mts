@@ -1,9 +1,13 @@
 import { createServer, type ViteDevServer } from "vite";
 import { startLocalServer } from "../src/runtime/server.js";
+import { createSessionToken } from "../src/runtime/session.js";
 
 let ui: ViteDevServer | undefined;
+// The UI proxy adds the session token to every API request, so the browser needs no login link.
+const sessionToken = createSessionToken();
 const runtime = await startLocalServer({
   projectDirectory: process.cwd(),
+  sessionToken,
   port: 0,
   // Vite may choose the next free port; allow only the origin it actually bound.
   get devOrigin() {
@@ -18,7 +22,13 @@ function closeRuntime() {
 }
 
 try {
-  ui = await createServer({ server: { proxy: { "/api": runtime.url } } });
+  ui = await createServer({
+    server: {
+      proxy: {
+        "/api": { target: runtime.url, headers: { Authorization: `Bearer ${sessionToken}` } },
+      },
+    },
+  });
   await ui.listen();
   ui.printUrls();
   console.log(`Local API: ${runtime.url} (proxied through the UI)`);

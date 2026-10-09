@@ -79,6 +79,7 @@ describe("durable loop library and publication API", () => {
       async () => ({ inspect: async () => connected, close() {} }),
     );
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: path,
       port: 0,
       connections: registry,

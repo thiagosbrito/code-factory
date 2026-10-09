@@ -19,6 +19,7 @@ test.beforeAll(async () => {
   const uiDirectory = join(root, "ui");
   await build({ logLevel: "silent", build: { outDir: uiDirectory, emptyOutDir: true } });
   local = await startLocalServer({
+    sessionToken: null,
     projectDirectory: await mkdtemp(join(root, "project-")),
     uiDirectory,
     port: 0,

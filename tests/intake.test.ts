@@ -211,6 +211,7 @@ describe("protected run intake", () => {
     const root = await project();
     const connections = new ConnectionRegistry(root, async () => [agent]);
     const { server, url } = await startLocalServer({
+      sessionToken: null,
       projectDirectory: root,
       port: 0,
       connections,

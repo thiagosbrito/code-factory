@@ -23,19 +23,34 @@ export const taskSchema = z
     (task) => Boolean(task.description || task.ticketId || task.ticket),
     "Enter a description or ticket ID.",
   );
+/**
+ * A branch or revision read back from a run record and later passed to Git as an argument. Run
+ * records can come from someone else's repository, so a value Git would read as an option (a
+ * leading "-") or that is not a plausible ref is rejected when the record is parsed.
+ */
+const storedGitRefSchema = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .max(max)
+    // oxlint-disable-next-line no-control-regex -- control characters are exactly what is rejected.
+    .refine((value) => !value.startsWith("-") && !/[\s\u0000-\u001f\u007f]|\.\./.test(value), {
+      message: "Stored Git branch or revision is not a valid ref.",
+    });
+
 export const baselineSchema = z
   .strictObject({
     id: z.string().min(1),
     kind: z.enum(["git", "unversioned"]),
-    revision: z.string().min(1).optional(),
-    sourceRevision: z.string().min(1).optional(),
+    revision: storedGitRefSchema(255).optional(),
+    sourceRevision: storedGitRefSchema(255).optional(),
     workspace: z.string().min(1).optional(),
-    branch: z.string().min(1).max(255).optional(),
+    branch: storedGitRefSchema(255).optional(),
     /** In-project runs only: what the checkout was on before the run switched it to `branch`. */
     checkout: z
       .strictObject({
-        previousBranch: z.string().min(1).max(255).nullable(),
-        previousRevision: z.string().min(1),
+        previousBranch: storedGitRefSchema(255).nullable(),
+        previousRevision: storedGitRefSchema(255),
       })
       .optional(),
     changes: z.array(z.string()).optional(),

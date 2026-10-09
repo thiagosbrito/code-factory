@@ -106,7 +106,11 @@ describe("human acceptance", () => {
     };
     const fixture = successfulRun(digest, baseline);
     await persistRun(root, { ...fixture, revision: 0 });
-    const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
+    const { server, url } = await startLocalServer({
+      sessionToken: null,
+      projectDirectory: root,
+      port: 0,
+    });
     const endpoint = `${url}/api/runs/${fixture.snapshot.id}/evidence`;
     try {
       expect((await fetch(endpoint).then((response) => response.json())).summary).toMatchObject({

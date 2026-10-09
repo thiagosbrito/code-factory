@@ -22,7 +22,12 @@ const stop = async () => {
 try {
   await initializeProject(root);
   let registry = new ConnectionRegistry(root);
-  local = await startLocalServer({ projectDirectory: root, port: 0, connections: registry });
+  local = await startLocalServer({
+    sessionToken: null,
+    projectDirectory: root,
+    port: 0,
+    connections: registry,
+  });
   const connect = async () => {
     const response = await fetch(`${local?.url}/api/agents/connect`, {
       method: "POST",
@@ -46,7 +51,12 @@ try {
   await stop();
   registry.close();
   registry = new ConnectionRegistry(root);
-  local = await startLocalServer({ projectDirectory: root, port: 0, connections: registry });
+  local = await startLocalServer({
+    sessionToken: null,
+    projectDirectory: root,
+    port: 0,
+    connections: registry,
+  });
   receipt.restartRequiresVerification = Boolean(bindingError(binding, await registry.list()));
   const reconnected = await connect();
   receipt.selectedModelUsableAfterVerification = bindingError(binding, reconnected) === null;

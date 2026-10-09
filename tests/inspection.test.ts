@@ -220,7 +220,11 @@ it("serves read-only inspection for a persisted run and rejects unsafe or missin
   const { root, workspace, run } = await fixture();
   await createRun(root, run);
   await writeFile(join(workspace, "task.txt"), "task\n");
-  const { server, url } = await startLocalServer({ projectDirectory: root, port: 0 });
+  const { server, url } = await startLocalServer({
+    sessionToken: null,
+    projectDirectory: root,
+    port: 0,
+  });
   try {
     const base = `${url}/api/runs/${run.snapshot.id}/inspection`;
     const files = await fetch(base);

@@ -236,6 +236,7 @@ const test = base.extend<{ harness: Harness }>({
     await trustProject(projectDirectory);
     let ui: Awaited<ReturnType<typeof createViteServer>> | undefined;
     const runtime = await startLocalServer({
+      sessionToken: null,
       projectDirectory,
       port: 0,
       connections: registry,

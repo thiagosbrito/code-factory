@@ -65,6 +65,7 @@ try {
   // The disposable project is the proof's own; trust it so the local API will run its steps.
   await trustProject(root);
   local = await startLocalServer({
+    sessionToken: null,
     projectDirectory: root,
     port: 0,
     tracker: {
