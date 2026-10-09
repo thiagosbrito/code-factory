@@ -173,6 +173,52 @@ describe("first-use UI", () => {
     expect(local.requests.filter((item) => item.path === "/api/agents/connect")).toHaveLength(1);
   });
 
+  it("verifies Claude Code and saves one of its models and efforts as the default", async () => {
+    const local = runtime();
+    const claude: AgentConnection = {
+      provider: "claude-code",
+      executable: "/bin/claude",
+      installation: "detected",
+      authentication: "unknown",
+      capabilities: {
+        streaming: "unknown",
+        steering: "unknown",
+        resume: "unknown",
+        pause: "unknown",
+        waitingInput: "unknown",
+      },
+    };
+    local.setAgents([claude]);
+    local.setConnection({
+      ...claude,
+      identity: "Claude Code",
+      version: "2.1.295",
+      protocol: "claude-code-stream-json",
+      authentication: "authenticated",
+      models: [{ id: "opus", displayName: "Opus (latest)", efforts: ["low", "max"] }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      await screen.findByRole("button", { name: /Claude Code.*Detected; verification required/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Verify connection" }));
+    expect(await screen.findByText(/Claude Code 2.1.295 · Connected/)).toBeTruthy();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Project default model" }),
+      "opus",
+    );
+    await user.selectOptions(screen.getByRole("combobox", { name: "Effort" }), "max");
+    await user.type(screen.getByRole("textbox", { name: "Project name" }), "Claude project");
+    await user.click(screen.getByRole("button", { name: "Finish setup" }));
+    expect(await screen.findByRole("heading", { name: "No runs yet" })).toBeTruthy();
+    expect(local.getProject()?.defaultBinding).toEqual({
+      provider: "claude-code",
+      model: "opus",
+      effort: "max",
+    });
+  });
+
   it("recovers from a render error through the application error boundary", async () => {
     let failing = true;
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});

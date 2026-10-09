@@ -2,19 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../adapters/contract.js";
 import type { ProviderId } from "../domain/loop.js";
 import { formatCommandLine, parseCommandLine } from "../domain/project.js";
-import { bindingError, connectionViewModel } from "./connection";
+import {
+  bindingError,
+  connectionViewModel,
+  isNativeProvider,
+  type ConnectRequest,
+} from "./connection";
 import { api, savedProjectResponseSchema, type ProjectResponse } from "./project-api";
 
 export type SetupControllerOptions = {
   state: ProjectResponse;
   agents: AgentConnection[];
   onRefreshAgents: () => Promise<void>;
-  onConnect: (
-    request:
-      | { provider: "codex"; launch: true }
-      | { provider: "kiro"; launch: true }
-      | { provider: "custom"; launch: true; executable: string; protocol: "codex-app-server" },
-  ) => Promise<AgentConnection>;
+  onConnect: (request: ConnectRequest) => Promise<AgentConnection>;
   onSaved: (state: ProjectResponse) => void;
 };
 
@@ -147,12 +147,12 @@ export const useSetupController = ({
     }
   };
   const verify = async () => {
-    if (selected !== "codex" && selected !== "kiro" && selected !== "custom") return;
+    if (!selected || (!isNativeProvider(selected) && selected !== "custom")) return;
     setVerifying(true);
     setError("");
     try {
       const connection = await onConnect(
-        selected === "codex" || selected === "kiro"
+        isNativeProvider(selected)
           ? { provider: selected, launch: true }
           : {
               provider: "custom",

@@ -3,7 +3,7 @@ import type { ProviderId } from "../domain/loop.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { connectionViewModel } from "./connection";
+import { connectionViewModel, isNativeProvider } from "./connection";
 import { AgentCandidates } from "./AgentCandidates";
 import { AgentCapabilities } from "./AgentCapabilities";
 import { SetupSection } from "./SetupSection";
@@ -65,7 +65,7 @@ export const AgentSetupSection = ({
           </small>
         </div>
       )}
-      {(selected === "codex" || selected === "kiro" || selected === "custom") && (
+      {selected && (isNativeProvider(selected) || selected === "custom") && (
         <Button
           type="button"
           variant="outline"

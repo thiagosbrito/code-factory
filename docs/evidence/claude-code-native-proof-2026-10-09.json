@@ -1,0 +1,85 @@
+{
+  "startedAt": "2026-10-09T11:02:28.597Z",
+  "model": "haiku",
+  "effort": "low",
+  "connection": {
+    "authentication": "authenticated",
+    "version": "2.1.295",
+    "protocol": "claude-code-stream-json"
+  },
+  "writer": [
+    {
+      "type": "started"
+    },
+    {
+      "type": "tool",
+      "title": "Write",
+      "state": "started"
+    },
+    {
+      "type": "tool",
+      "title": "Write",
+      "state": "completed"
+    },
+    {
+      "type": "tool",
+      "title": "Bash",
+      "state": "started"
+    },
+    {
+      "type": "tool",
+      "title": "Bash",
+      "state": "failed"
+    },
+    {
+      "type": "message"
+    },
+    {
+      "type": "completed",
+      "outcome": "succeeded"
+    }
+  ],
+  "writerEdited": true,
+  "writerBashDenied": true,
+  "reviewer": [
+    {
+      "type": "started"
+    },
+    {
+      "type": "message"
+    },
+    {
+      "type": "completed",
+      "outcome": "succeeded"
+    }
+  ],
+  "reviewerWriteDenied": true,
+  "reviewerBashDenied": true,
+  "granted": [
+    {
+      "type": "started"
+    },
+    {
+      "type": "tool",
+      "title": "Bash",
+      "state": "started"
+    },
+    {
+      "type": "tool",
+      "title": "Bash",
+      "state": "completed"
+    },
+    {
+      "type": "message"
+    },
+    {
+      "type": "completed",
+      "outcome": "succeeded"
+    }
+  ],
+  "grantedBashRan": true,
+  "allStepsCompleted": true,
+  "version": "2.1.295 (Claude Code)",
+  "passed": true,
+  "finishedAt": "2026-10-09T11:02:41.758Z"
+}

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { decideCommandApproval, dispatchCodexMessage } from "../src/adapters/codex.js";
+import { claudeCodeArgs } from "../src/adapters/claude-code.js";
 import { kiroChatArgs } from "../src/adapters/kiro.js";
 import type { StepExecutionInput } from "../src/adapters/contract.js";
 import { parseLoop } from "../src/domain/loop.js";
@@ -42,6 +43,11 @@ const codexGrant: ToolGrantInEffect = {
   scope: ["commandExecution"],
   grantedAt: "2026-10-07T10:00:00.000Z",
 };
+const claudeGrant: ToolGrantInEffect = {
+  provider: "claude-code",
+  scope: ["Bash"],
+  grantedAt: "2026-10-07T10:00:00.000Z",
+};
 
 describe("tool grant schemas and helpers", () => {
   it("accepts only the exact scopes and keeps old configurations valid", () => {
@@ -62,6 +68,16 @@ describe("tool grant schemas and helpers", () => {
     expect(
       toolGrantsSchema.safeParse({
         kiro: { scope: ["execute_bash"], grantedAt: kiroGrant.grantedAt, extra: 1 },
+      }).success,
+    ).toBe(false);
+    expect(
+      toolGrantsSchema.safeParse({
+        "claude-code": { scope: ["Bash"], grantedAt: claudeGrant.grantedAt },
+      }).success,
+    ).toBe(true);
+    expect(
+      toolGrantsSchema.safeParse({
+        "claude-code": { scope: ["Bash", "WebFetch"], grantedAt: claudeGrant.grantedAt },
       }).success,
     ).toBe(false);
     expect(
@@ -132,7 +148,13 @@ describe("tool grant schemas and helpers", () => {
       "Codex default: command approval requests are declined. Tool permission unavailable: bad file.",
     );
     expect(describeToolGrant("claude-code", null, "/w")).toBe(
-      "No tool permission grant applies to provider claude-code.",
+      "Claude Code default: file tools allowed. Bash is denied.",
+    );
+    expect(describeToolGrant("claude-code", claudeGrant, "/w")).toBe(
+      "Claude Code project grant from 2026-10-07T10:00:00.000Z: file tools and Bash allowed.",
+    );
+    expect(describeToolGrant("cursor", null, "/w")).toBe(
+      "No tool permission grant applies to provider cursor.",
     );
   });
 
@@ -188,6 +210,50 @@ describe("adapter mapping", () => {
     for (const args of [input(), input(kiroGrant)].map(kiroChatArgs)) {
       expect(args).not.toContain("--trust-all-tools");
       expect(args).not.toContain("-a");
+    }
+  });
+
+  it("allows Bash to Claude Code only with a Claude Code grant", () => {
+    const claude = (toolGrant?: ToolGrantInEffect) =>
+      claudeCodeArgs({
+        ...input(toolGrant),
+        binding: { provider: "claude-code", model: "opus", effort: "high" },
+      });
+    const base = [
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--permission-mode",
+      "acceptEdits",
+      "--permission-prompts",
+      "none",
+      "--no-session-persistence",
+      "--model",
+      "opus",
+      "--effort",
+      "high",
+    ];
+    expect(claude()).toEqual([...base, "--disallowedTools", "Bash", "--", "Review it"]);
+    expect(claude(claudeGrant)).toEqual([...base, "--allowedTools", "Bash", "--", "Review it"]);
+    expect(claude(kiroGrant)).toEqual(claude());
+    for (const args of [claude(), claude(claudeGrant)]) {
+      expect(args).not.toContain("bypassPermissions");
+      expect(args).not.toContain("--dangerously-skip-permissions");
+    }
+  });
+
+  it("denies Claude Code every write tool for a read-only reviewer, even with a grant", () => {
+    for (const grant of [undefined, claudeGrant]) {
+      const args = claudeCodeArgs({ ...input(grant), readOnly: true });
+      expect(args).not.toContain("--allowedTools");
+      expect(args.slice(args.indexOf("--disallowedTools"), args.indexOf("--"))).toEqual([
+        "--disallowedTools",
+        "Bash",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+      ]);
     }
   });
 

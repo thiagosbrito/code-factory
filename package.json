@@ -32,7 +32,8 @@
     "test:package": "node scripts/smoke-package.mjs",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "prepack": "pnpm build",
-    "prove:codex": "pnpm build && node scripts/prove-codex.mjs"
+    "prove:codex": "pnpm build && node scripts/prove-codex.mjs",
+    "prove:claude": "tsx scripts/prove-claude.mts"
   },
   "dependencies": {
     "zod": "4.6.5"

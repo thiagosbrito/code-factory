@@ -8,6 +8,16 @@ export type ConnectionViewModel = {
   connected: boolean;
   models: NonNullable<AgentConnection["models"]>;
 };
+/** Providers verified from their detected CLI; "custom" names its own executable. */
+export const NATIVE_PROVIDERS = ["codex", "kiro", "claude-code"] as const;
+export type NativeProvider = (typeof NATIVE_PROVIDERS)[number];
+export const isNativeProvider = (provider: string): provider is NativeProvider =>
+  (NATIVE_PROVIDERS as readonly string[]).includes(provider);
+export type ConnectRequest =
+  | { provider: NativeProvider; launch: true }
+  | { provider: "custom"; launch: true; executable: string; protocol: "codex-app-server" };
+
+export const providerName = (provider: AgentConnection["provider"]): string => names[provider];
 const names: Record<AgentConnection["provider"], string> = {
   codex: "Codex",
   cursor: "Cursor",
@@ -38,8 +48,7 @@ const connectionDetail = (connection: AgentConnection, verified: boolean, connec
   if (connected) return `${connection.identity} ${connection.version} · Connected`;
   if (verified && connection.authentication === "unauthenticated")
     return `${connection.identity} ${connection.version} · Authentication required`;
-  if (connection.provider === "codex" || connection.provider === "kiro")
-    return "Detected; verification required";
+  if (isNativeProvider(connection.provider)) return "Detected; verification required";
   return "Detected; connection adapter unavailable";
 };
 

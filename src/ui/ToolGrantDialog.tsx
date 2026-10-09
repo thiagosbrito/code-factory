@@ -33,6 +33,14 @@ export const toolGrantText: Record<
     implication:
       "An approved command runs outside Codex's sandbox with your account's permissions, including network access and writes outside the project. It can change your repository's branches, stash and config.",
   },
+  "claude-code": {
+    title: "Allow Claude Code to run shell commands?",
+    decline: "Run without shell",
+    scope:
+      "Code Factory will start every Claude Code step in this project with `--allowedTools Bash` instead of `--disallowedTools Bash`.",
+    implication:
+      "The agent can run any command with your account's permissions, without asking, in any directory it chooses. Commands it runs work in your project checkout and can change its files, branches, stash and config.",
+  },
 };
 export const TOOL_GRANT_PERSISTENCE =
   "Saved for this project in .code-factory/project.json. Revoke it any time in Setup → Agent tool permission.";
