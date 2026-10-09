@@ -143,6 +143,10 @@ describe("first-use UI", () => {
     expect(screen.getByText("Claude Code")).toBeTruthy();
     expect(local.requests.filter((item) => item.path === "/api/agents/connect")).toHaveLength(0);
     const codex = screen.getByRole("button", { name: /Codex.*Executable detected/ });
+    // Setup moves focus to the name field on mount; wait for that so it cannot steal the focus.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Project name" })),
+    );
     codex.focus();
     await user.keyboard("{Enter}");
     expect(codex.getAttribute("aria-pressed")).toBe("true");
