@@ -338,6 +338,7 @@ export const useGraphEditor = ({
     onKeyDownCapture,
     onBlur,
     announcement,
+    announce,
     onBeforeDelete,
     onNodeDragStart,
     onNodeDragStop,

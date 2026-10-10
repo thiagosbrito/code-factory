@@ -1,6 +1,6 @@
 import { MarkerType, Position, type Edge, type Node } from "@xyflow/react";
 import type { LoopDefinition } from "../../../../domain/loop.js";
-import { stageOf, stages, type EditorStep } from "../loop-editor-model";
+import { stageOf, stages, type EditorStep, type Stage } from "../loop-editor-model";
 import { groupRegions } from "./graph-regions";
 import { continuations, edgeStructure, stepBadges, stepNotes } from "./graph-structure";
 import {
@@ -24,7 +24,7 @@ export type StepNodeData = {
   /** Screen-reader text for the groups, join and decision the step belongs to. */
   note: string;
 };
-export type LaneNodeData = { title: string; description: string };
+export type LaneNodeData = { stage: Stage; title: string; description: string };
 export type RegionNodeData = { label: string; kind: "parallel" | "repeat" };
 
 export type StepFlowNode = Node<StepNodeData, "step">;
@@ -120,7 +120,7 @@ const laneNodes = (loop: LoopDefinition): LaneFlowNode[] => {
     deletable: false,
     focusable: false,
     zIndex: -1,
-    data: { title: stage.name, description: stage.description },
+    data: { stage: stage.id, title: stage.name, description: stage.description },
   }));
 };
 

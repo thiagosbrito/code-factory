@@ -2,8 +2,8 @@ import type { LoopDefinition } from "../../../domain/loop.js";
 import { Button } from "@/shared/components/button";
 import { StepFactsLines } from "../../shared/StepFactsLines";
 import type { ResolveStepFacts } from "./graph/StepFactsContext";
-import { completePositions } from "./loop-editor-placement";
-import { addStep, semanticDrop, stageOf, stages } from "./loop-editor-model";
+import { addStepToLane } from "./loop-editor-add";
+import { semanticDrop, stageOf, stages } from "./loop-editor-model";
 
 export const LoopStageBoard = ({
   loop,
@@ -148,13 +148,7 @@ export const LoopStageBoard = ({
               size="sm"
               variant="outline"
               className="w-full"
-              onClick={() =>
-                apply((current) =>
-                  completePositions(
-                    addStep(current, stage.id, stage.id === "validation" ? "check" : "agent"),
-                  ),
-                )
-              }
+              onClick={() => apply((current) => addStepToLane(current, stage.id))}
             >
               + Add step
             </Button>
