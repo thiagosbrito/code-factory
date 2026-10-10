@@ -98,11 +98,13 @@ describe("pre-paint theme script", () => {
 describe("index.html and the Content-Security-Policy", () => {
   it("loads scripts only from files, never inline, because the runtime sends script-src 'self'", () => {
     const html = readFileSync("index.html", "utf8");
-    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
+    const scripts = [
+      ...new DOMParser().parseFromString(html, "text/html").querySelectorAll("script"),
+    ];
     expect(scripts.length).toBeGreaterThan(0);
-    for (const [, attributes, body] of scripts) {
-      expect(attributes).toMatch(/\bsrc="/);
-      expect(body?.trim()).toBe("");
+    for (const script of scripts) {
+      expect(script.getAttribute("src")).toBeTruthy();
+      expect(script.textContent?.trim()).toBe("");
     }
     expect(html).toContain('src="/theme-init.js"');
   });
