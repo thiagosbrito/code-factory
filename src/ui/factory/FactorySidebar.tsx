@@ -51,7 +51,7 @@ export const FactorySidebar = ({
   return (
     <aside
       id="factory-sidebar"
-      className={`flex min-h-screen w-full flex-col bg-graphite p-5 text-white ${
+      className={`flex min-h-screen w-full flex-col bg-graphite p-5 text-white md:sticky md:top-0 md:h-screen md:self-start md:overflow-y-auto ${
         collapsed ? "md:w-16 md:px-2" : "md:w-60"
       }`}
     >
