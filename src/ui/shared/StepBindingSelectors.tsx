@@ -1,6 +1,9 @@
 import type { AgentConnection } from "../../adapters/contract.js";
 import { providerIdSchema, type ExecutionBinding, type ProviderId } from "../../domain/loop.js";
 import { NativeSelect } from "@/shared/components/native-select";
+import { effortChoices } from "../../domain/binding-catalog.js";
+import { EffortSlider } from "./EffortSlider";
+import { ModelField } from "./ModelField";
 import { bindingError, connectionViewModel } from "./connection";
 
 /** A null draft inherits the project default. THI-17 can place this in the step drawer. */
@@ -19,11 +22,13 @@ export const StepBindingSelectors = ({
   agents: AgentConnection[];
   projectDefault: ExecutionBinding | null;
 }) => {
-  const connection = agents.find((item) => item.provider === value?.provider);
-  const connected = connection && connectionViewModel(connection).connected;
-  const model = connection?.models?.find((item) => item.id === value?.model);
-  const effortOptions = model?.efforts ?? [];
-  const error = bindingError(value, agents);
+  // A step that inherits the project agent still gets its own model and effort: choosing either
+  // makes the step's binding from the inherited one.
+  const effective = value ?? projectDefault;
+  const connection = agents.find((item) => item.provider === effective?.provider);
+  const connected = Boolean(connection && connectionViewModel(connection).connected);
+  const efforts = effortChoices(connection, effective?.model ?? "agent-default");
+  const error = bindingError(effective, agents);
   return (
     <div className="grid gap-3">
       <label className="grid gap-1 text-sm font-medium">
@@ -52,56 +57,50 @@ export const StepBindingSelectors = ({
             ))}
         </NativeSelect>
       </label>
-      {value && (
+      {effective && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="grid gap-1 text-sm font-medium">
+          <div className="grid gap-1 text-sm font-medium">
             Model
-            <NativeSelect
-              aria-label="Step model"
-              value={value.model}
+            <ModelField
+              key={effective.provider}
+              ariaLabel="Step model"
+              value={effective.model}
+              models={connected ? (connection?.models ?? []) : []}
+              allowCustom={Boolean(connection?.customModels)}
               disabled={!connected}
-              onChange={(event) =>
-                onChange({ provider: value.provider, model: event.target.value })
-              }
-            >
-              <option value="agent-default">Agent default</option>
-              {connected &&
-                connection.models?.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.displayName}
-                  </option>
-                ))}
-              {value.model !== "agent-default" &&
-                !connection?.models?.some((item) => item.id === value.model) && (
-                  <option value={value.model}>{value.model} (unavailable)</option>
-                )}
-            </NativeSelect>
-          </label>
-          <label className="grid gap-1 text-sm font-medium">
+              onChange={(model) => {
+                // Keep the effort when the new model still offers it.
+                const kept =
+                  effective.effort && effortChoices(connection, model).includes(effective.effort)
+                    ? { effort: effective.effort }
+                    : {};
+                onChange({ provider: effective.provider, model, ...kept });
+              }}
+            />
+          </div>
+          <div className="grid gap-1 text-sm font-medium">
             Effort
-            <NativeSelect
-              aria-label="Step effort"
-              value={value.effort ?? ""}
-              disabled={!connected || !effortOptions.length}
-              onChange={(event) =>
+            <EffortSlider
+              ariaLabel="Step effort"
+              efforts={connected ? efforts : []}
+              value={effective.effort}
+              disabled={!connected || efforts.length === 0}
+              onChange={(effort) =>
                 onChange({
-                  ...value,
-                  ...(event.target.value ? { effort: event.target.value } : { effort: undefined }),
+                  provider: effective.provider,
+                  model: effective.model,
+                  ...(effort ? { effort } : {}),
                 })
               }
-            >
-              <option value="">Agent default</option>
-              {effortOptions.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-              {value.effort && !effortOptions.includes(value.effort) && (
-                <option value={value.effort}>{value.effort} (unavailable)</option>
-              )}
-            </NativeSelect>
-          </label>
+            />
+          </div>
         </div>
+      )}
+      {!value && effective && (
+        <p className="text-xs text-muted-foreground">
+          Changing the model or effort gives this step its own agent and model; it then stops
+          following the project default.
+        </p>
       )}
       {error && (
         <p role="alert" className="text-sm text-red-700">

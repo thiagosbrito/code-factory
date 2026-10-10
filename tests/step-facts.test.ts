@@ -15,7 +15,13 @@ describe("step card facts", () => {
         projectDefault: null,
         agents: [claude],
       }),
-    ).toEqual({ agent: "Claude Code", model: "Claude Opus", effort: "High", inherited: false });
+    ).toEqual({
+      agent: "Claude Code",
+      model: "Claude Opus",
+      effort: "High",
+      effortScale: { position: 2, total: 2 },
+      inherited: false,
+    });
   });
 
   it("falls back to the model id when the adapter does not list it, and says Default effort", () => {
@@ -52,7 +58,23 @@ describe("step card facts", () => {
       agent: NOT_CONFIGURED,
       model: NOT_CONFIGURED,
       effort: NOT_CONFIGURED,
+      effortScale: null,
       inherited: true,
     });
+  });
+
+  it("draws no meter for a saved effort the model no longer offers, and none for Default", () => {
+    const stale = stepFacts({
+      binding: { provider: "claude-code", model: "opus", effort: "max" },
+      projectDefault: null,
+      agents: [claude],
+    });
+    expect(stale.effortScale).toBeNull();
+    const unset = stepFacts({
+      binding: { provider: "claude-code", model: "opus" },
+      projectDefault: null,
+      agents: [claude],
+    });
+    expect(unset.effortScale).toEqual({ position: 0, total: 2 });
   });
 });

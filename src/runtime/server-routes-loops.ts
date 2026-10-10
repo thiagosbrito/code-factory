@@ -1,4 +1,5 @@
 import { parseLoop } from "../domain/loop.js";
+import { catalogProblem } from "../domain/binding-catalog.js";
 import {
   nativeCandidates,
   nativeFormats,
@@ -83,11 +84,8 @@ export const handleLoopRoutes: RouteHandler = async (ctx) => {
         const connection = agents.find((agent) => agent.provider === binding.provider);
         if (!connection?.protocol || connection.authentication !== "authenticated")
           throw new ProjectError(`${step.name} needs a verified, authenticated agent.`, 422);
-        const model = connection.models?.find((item) => item.id === binding.model);
-        if (binding.model !== "agent-default" && !model)
-          throw new ProjectError(`${step.name} selects an unavailable model.`, 422);
-        if (binding.effort && !model?.efforts?.includes(binding.effort))
-          throw new ProjectError(`${step.name} selects an unavailable effort.`, 422);
+        const problem = catalogProblem(connection, binding);
+        if (problem) throw new ProjectError(`${step.name} selects an unavailable ${problem}.`, 422);
       }
       json(response, 200, { loop: await publishDraft(projectDirectory, id) });
       return true;

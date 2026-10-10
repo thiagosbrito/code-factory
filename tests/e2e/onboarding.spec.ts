@@ -290,7 +290,7 @@ test("a machine with only Claude Code verifies it and persists model and effort"
   const model = page.getByRole("combobox", { name: "Project default model" });
   await expect(model).toBeEnabled();
   await model.selectOption("sonnet");
-  await page.getByRole("combobox", { name: "Effort" }).selectOption("xhigh");
+  await page.getByRole("slider", { name: "Project default effort" }).fill("4");
   await page.getByRole("button", { name: "Finish setup" }).click();
   await expect
     .poll(() => harness.config())
@@ -309,7 +309,7 @@ test("verified model and effort are saved and survive reload", async ({ page, ha
   await page.getByRole("button", { name: "Verify connection" }).click();
   await expect(page.getByRole("combobox", { name: "Project default model" })).toBeEnabled();
   await page.getByRole("combobox", { name: "Project default model" }).selectOption("model-a");
-  await page.getByRole("combobox", { name: "Effort" }).selectOption("high");
+  await page.getByRole("slider", { name: "Project default effort" }).fill("2");
   await page.getByRole("button", { name: "Finish setup" }).click();
   await expect(page.getByRole("heading", { name: "No runs yet" })).toBeVisible();
   await expect
@@ -323,7 +323,7 @@ test("verified model and effort are saved and survive reload", async ({ page, ha
   await expect(page.getByRole("combobox", { name: "Project default model" })).toHaveValue(
     "model-a",
   );
-  await expect(page.getByRole("combobox", { name: "Effort" })).toHaveValue("high");
+  await expect(page.getByRole("slider", { name: "Project default effort" })).toHaveValue("2");
 });
 
 test("a saved model missing from a refreshed catalog stays visible until changed", async ({
@@ -363,12 +363,12 @@ test("switching provider clears an incompatible draft model", async ({ page, har
   await page.getByRole("button", { name: /Codex.*Executable detected/ }).click();
   await page.getByRole("button", { name: "Verify connection" }).click();
   await page.getByRole("combobox", { name: "Project default model" }).selectOption("model-a");
-  await page.getByRole("combobox", { name: "Effort" }).selectOption("high");
+  await page.getByRole("slider", { name: "Project default effort" }).fill("2");
   await page.getByRole("button", { name: /Kiro.*Executable detected/ }).click();
   await expect(page.getByRole("combobox", { name: "Project default model" })).toHaveValue(
     "agent-default",
   );
-  await expect(page.getByRole("combobox", { name: "Effort" })).toHaveCount(0);
+  await expect(page.getByRole("slider", { name: "Project default effort" })).toHaveCount(0);
   await page.getByRole("textbox", { name: "Project name" }).fill("Cannot bind Kiro yet");
   await page.getByRole("button", { name: "Finish setup" }).click();
   await expect(page.getByRole("heading", { name: "Connect your first project" })).toBeVisible();

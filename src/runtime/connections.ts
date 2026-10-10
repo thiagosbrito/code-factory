@@ -1,27 +1,17 @@
 import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { z } from "zod";
 import { createClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { createCodexAdapter } from "../adapters/codex.js";
 import { createKiroAdapter } from "../adapters/kiro.js";
 import type { AgentAdapter, AgentConnection } from "../adapters/contract.js";
 import { mockAdapter } from "../adapters/mock.js";
 import { discoverAgents } from "../adapters/discovery.js";
+import type { ConnectionMemory } from "./connection-memory.js";
+import { connectionRequestSchema, type ConnectionRequest } from "./connection-request.js";
 import { ProjectError } from "./project.js";
 
-export const connectionRequestSchema = z.discriminatedUnion("provider", [
-  z.strictObject({ provider: z.literal("codex"), launch: z.literal(true) }),
-  z.strictObject({ provider: z.literal("kiro"), launch: z.literal(true) }),
-  z.strictObject({ provider: z.literal("claude-code"), launch: z.literal(true) }),
-  z.strictObject({
-    provider: z.literal("custom"),
-    launch: z.literal(true),
-    executable: z.string().trim().min(1),
-    protocol: z.literal("codex-app-server"),
-  }),
-]);
-export type ConnectionRequest = z.infer<typeof connectionRequestSchema>;
+export { connectionRequestSchema, type ConnectionRequest };
 /** Providers with an execution adapter that Code Factory launches from their detected CLI. */
 export const NATIVE_PROVIDERS = ["codex", "kiro", "claude-code"] as const;
 type NativeProvider = (typeof NATIVE_PROVIDERS)[number];
@@ -75,6 +65,9 @@ const resolveExecutable = async (
   }
 };
 
+/** How long a listing waits for restored connections before showing what is connected so far. */
+const RESTORE_WAIT_MS = 20_000;
+
 /** Discovery is read-only. Only an explicit connect request may launch a provider process. */
 export class ConnectionRegistry {
   private readonly active = new Map<
@@ -94,7 +87,32 @@ export class ConnectionRegistry {
     private readonly createClaudeCode: (
       executable: string,
     ) => Promise<InspectableAdapter> = createClaudeCodeAdapter,
+    private readonly memory?: ConnectionMemory,
   ) {}
+
+  /** Connections being restored after a start; the first listing waits for them, briefly. */
+  private restoring: Promise<unknown> | undefined;
+
+  /**
+   * Connects again every agent the user connected for this project before. Each goes through the
+   * same launch authorization as a click on Verify; one that fails (uninstalled, signed out,
+   * project not yet trusted) stays disconnected and the others are unaffected.
+   */
+  restore(authorize: LaunchAuthorizer): Promise<void> {
+    const memory = this.memory;
+    if (!memory) return Promise.resolve();
+    const restoring = (async () => {
+      const requests = await memory.read().catch((error: unknown) => {
+        console.warn(`Code Factory could not restore agent connections: ${String(error)}`);
+        return [];
+      });
+      await Promise.allSettled(requests.map((request) => this.connect(request, authorize)));
+    })().finally(() => {
+      if (this.restoring === restoring) this.restoring = undefined;
+    });
+    this.restoring = restoring;
+    return restoring;
+  }
 
   private create(provider: ConnectionRequest["provider"], executable: string) {
     if (provider === "kiro") return this.createKiro(executable);
@@ -104,6 +122,18 @@ export class ConnectionRegistry {
   }
 
   async list(): Promise<AgentConnection[]> {
+    if (this.restoring) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        this.restoring,
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, RESTORE_WAIT_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+      // Only the first listing waits; a restore that is still stuck never slows the next ones.
+      this.restoring = undefined;
+    }
     const candidates = await this.discover();
     return candidates.map((candidate) => {
       const active = this.active.get(candidate.provider)?.connection;
@@ -144,10 +174,15 @@ export class ConnectionRegistry {
     };
   }
 
+  /** Counts connect requests per provider, so a slow older one cannot replace a newer one. */
+  private readonly latestConnect = new Map<string, number>();
+
   async connect(
     request: ConnectionRequest,
     authorize: LaunchAuthorizer = async () => undefined,
   ): Promise<AgentConnection> {
+    const ticket = (this.latestConnect.get(request.provider) ?? 0) + 1;
+    this.latestConnect.set(request.provider, ticket);
     const candidates = await this.discover();
     const executable = await resolveExecutable(request, candidates, authorize);
     let adapter: InspectableAdapter | undefined;
@@ -169,8 +204,14 @@ export class ConnectionRegistry {
               identity: inspected.identity ?? "Codex CLI",
             }
           : inspected;
+      if (this.latestConnect.get(request.provider) !== ticket)
+        throw new Error("A newer connection request for this agent replaced this one.");
       this.active.get(request.provider)?.adapter.close();
       this.active.set(request.provider, { adapter, connection });
+      // Remembering is a convenience: a connection that works is not undone by a failed write.
+      await this.memory?.remember(request).catch((error: unknown) => {
+        console.warn(`Code Factory could not remember this connection: ${String(error)}`);
+      });
       return connection;
     } catch (error) {
       adapter?.close();

@@ -14,6 +14,7 @@ export const AgentSetupSection = ({
   selected,
   customExecutable,
   verifying,
+  connectPending,
   refreshing,
   onSelect,
   onCustomExecutableChange,
@@ -25,6 +26,7 @@ export const AgentSetupSection = ({
   selected: ProviderId | null;
   customExecutable: string;
   verifying: boolean;
+  connectPending: boolean;
   refreshing: boolean;
   onSelect: (provider: ProviderId | null) => void;
   onCustomExecutableChange: (value: string) => void;
@@ -76,6 +78,11 @@ export const AgentSetupSection = ({
           {verifying ? "Verifying…" : active?.verified ? "Recheck connection" : "Verify connection"}
         </Button>
       )}
+      {connectPending && (
+        <output className="mt-2 block text-sm text-muted-foreground">
+          Connecting in a moment. Choose another option to cancel, or verify now.
+        </output>
+      )}
       {activeConnection?.authentication === "unauthenticated" && (
         <p className="mt-3 text-sm text-amber-800">
           Authentication required. Sign in with the selected agent CLI, then recheck. Credentials
@@ -95,8 +102,9 @@ export const AgentSetupSection = ({
         {refreshing ? "Rechecking…" : "Recheck agents"}
       </Button>
       <p className="mt-3 text-xs text-muted-foreground">
-        Discovery does not launch an agent. Verify only when you intend to connect. You can finish
-        without an agent.
+        Choosing a detected agent connects it after a short pause, so you can still change your
+        mind. Connect as many agents as you like; they stay connected after a restart. You can
+        finish without an agent.
       </p>
     </SetupSection>
   );

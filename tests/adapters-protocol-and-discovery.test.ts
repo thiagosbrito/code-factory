@@ -137,6 +137,25 @@ describe("portable adapter conformance", () => {
     });
   });
 
+  it("follows model/list cursors so the whole catalog is offered", async () => {
+    class PagedRpc extends FixtureRpc {
+      override async request(method: string, params: Record<string, unknown>) {
+        if (method !== "model/list") return super.request(method, params);
+        this.calls.push({ method, params });
+        return params.cursor
+          ? { data: [{ model: "model-c", displayName: "Model C", hidden: false }] }
+          : {
+              data: [{ model: "model-b", displayName: "Model B", hidden: false }],
+              nextCursor: "page-2",
+            };
+      }
+    }
+    const rpc = new PagedRpc();
+    const connection = await new CodexAdapter(rpc, "/bin/codex", "0.160.0").inspect("/");
+    expect(connection.models?.map((model) => model.id)).toEqual(["model-b", "model-c"]);
+    expect(rpc.calls.filter((call) => call.method === "model/list")).toHaveLength(2);
+  });
+
   it("sends catalog-supported effort at turn start and leaves agent default model to Codex", async () => {
     const rpc = new FixtureRpc();
     await collect(new CodexAdapter(rpc, "/bin/codex", "0.160.0"), {

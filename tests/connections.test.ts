@@ -1,11 +1,12 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentConnection } from "../src/adapters/contract.js";
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 import { startLocalServer } from "../src/runtime/server.js";
-import { trustProject } from "../src/runtime/trust.js";
+import { userConnectionMemory } from "../src/runtime/connection-memory.js";
+import { trustDirectory, trustProject } from "../src/runtime/trust.js";
 import { readProjectConfig } from "../src/runtime/project.js";
 import { createLoopDraft, parseLoop } from "../src/domain/loop.js";
 import { createRunSnapshot } from "../src/domain/run.js";
@@ -349,5 +350,102 @@ describe("connection registry and local handoff", () => {
     } finally {
       server.close();
     }
+  });
+});
+
+describe("remembered connections", () => {
+  const makeAdapter = (provider: "codex" | "kiro") => async () => ({
+    inspect: async (): Promise<AgentConnection> => ({
+      ...detected("/bin/x")[0]!,
+      provider,
+      executable: `/bin/${provider}`,
+      identity: provider,
+      version: "1.0.0",
+      protocol: "fixture",
+      authentication: "authenticated",
+    }),
+    close: () => undefined,
+  });
+  const candidates = (): AgentConnection[] =>
+    (["codex", "kiro"] as const).map((provider) => ({
+      ...detected("/bin/x")[0]!,
+      provider,
+      executable: `/bin/${provider}`,
+    }));
+
+  it("connects remembered agents again after a restart and keeps the rest unaffected", async () => {
+    const project = await temporaryProject();
+    const memory = userConnectionMemory(project);
+    const first = new ConnectionRegistry(
+      project,
+      async () => candidates(),
+      makeAdapter("codex"),
+      makeAdapter("kiro"),
+      undefined,
+      memory,
+    );
+    await first.connect({ provider: "codex", launch: true });
+    await first.connect({ provider: "kiro", launch: true });
+    first.close();
+
+    // Codex no longer starts; Kiro still does.
+    const second = new ConnectionRegistry(
+      project,
+      async () => candidates(),
+      async () => {
+        throw new Error("codex is gone");
+      },
+      makeAdapter("kiro"),
+      undefined,
+      userConnectionMemory(project),
+    );
+    await second.restore(async () => undefined);
+    const listed = await second.list();
+    expect(listed.find((item) => item.provider === "kiro")?.protocol).toBe("fixture");
+    expect(listed.find((item) => item.provider === "codex")?.protocol).toBeUndefined();
+    second.close();
+  });
+
+  it("restores through the launch authorization, so an untrusted launch stays disconnected", async () => {
+    const project = await temporaryProject();
+    const first = new ConnectionRegistry(
+      project,
+      async () => candidates(),
+      makeAdapter("codex"),
+      makeAdapter("kiro"),
+      undefined,
+      userConnectionMemory(project),
+    );
+    await first.connect({ provider: "codex", launch: true });
+    first.close();
+    const second = new ConnectionRegistry(
+      project,
+      async () => candidates(),
+      makeAdapter("codex"),
+      makeAdapter("kiro"),
+      undefined,
+      userConnectionMemory(project),
+    );
+    await second.restore(async () => {
+      throw new Error("project not trusted");
+    });
+    expect(
+      (await second.list()).find((item) => item.provider === "codex")?.protocol,
+    ).toBeUndefined();
+    second.close();
+  });
+
+  it("reports a corrupt connections file instead of overwriting it", async () => {
+    const project = await temporaryProject();
+    const path = join(trustDirectory(), "connections.json");
+    await mkdir(trustDirectory(), { recursive: true });
+    await writeFile(path, "{ not json");
+    const memory = userConnectionMemory(project);
+    await expect(memory.read()).rejects.toThrow("Invalid connections file");
+    await expect(memory.remember({ provider: "codex", launch: true })).rejects.toThrow(
+      "Invalid connections file",
+    );
+    expect(await readFile(path, "utf8")).toBe("{ not json");
+    await rm(path);
   });
 });

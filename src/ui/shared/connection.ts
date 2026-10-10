@@ -1,4 +1,5 @@
 import type { AgentConnection } from "../../adapters/contract.js";
+import { catalogProblem } from "../../domain/binding-catalog.js";
 
 export type ConnectionViewModel = {
   id: AgentConnection["provider"];
@@ -7,6 +8,8 @@ export type ConnectionViewModel = {
   verified: boolean;
   connected: boolean;
   models: NonNullable<AgentConnection["models"]>;
+  /** True when the agent takes a model name it does not list. */
+  customModels: boolean;
 };
 /** Providers verified from their detected CLI; "custom" names its own executable. */
 export const NATIVE_PROVIDERS = ["codex", "kiro", "claude-code"] as const;
@@ -64,6 +67,7 @@ export const connectionViewModel = (connection: AgentConnection): ConnectionView
     verified,
     connected,
     models: connected ? (connection.models ?? []) : [],
+    customModels: connected && Boolean(connection.customModels),
   };
 };
 
@@ -79,10 +83,8 @@ export const bindingError = (
   const connection = agents.find((item) => item.provider === binding.provider);
   if (!connection || !connectionViewModel(connection).connected)
     return `${binding.provider} binding is unavailable until its connection is verified and authenticated.`;
-  const model = connection.models?.find((item) => item.id === binding.model);
-  if (binding.model !== "agent-default" && !model)
-    return `Model ${binding.model} is unavailable in the current catalog.`;
-  if (binding.effort && !model?.efforts?.includes(binding.effort))
-    return `Effort ${binding.effort} is unavailable for this model.`;
+  const problem = catalogProblem(connection, binding);
+  if (problem === "model") return `Model ${binding.model} is unavailable in the current catalog.`;
+  if (problem) return `Effort ${binding.effort} is unavailable for this model.`;
   return null;
 };

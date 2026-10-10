@@ -20,7 +20,16 @@ export interface AgentConnection {
   protocol?: string | undefined;
   identity?: string | undefined;
   reason?: string | undefined;
-  models?: { id: string; displayName: string; efforts?: string[] | undefined }[] | undefined;
+  models?:
+    | {
+        id: string;
+        displayName: string;
+        description?: string | undefined;
+        efforts?: string[] | undefined;
+      }[]
+    | undefined;
+  /** Set when the agent takes any model name; `efforts` apply to unlisted models and the agent default. */
+  customModels?: { efforts: string[] } | undefined;
 }
 export interface StepExecutionInput {
   runId: string;

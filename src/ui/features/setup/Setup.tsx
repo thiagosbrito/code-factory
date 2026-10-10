@@ -43,6 +43,7 @@ export const Setup = ({
     customExecutable,
     setBindingChanged,
     verifying,
+    connectPending,
     error,
     setError,
     busy,
@@ -105,6 +106,7 @@ export const Setup = ({
             selected={selected}
             customExecutable={customExecutable}
             verifying={verifying}
+            connectPending={connectPending}
             refreshing={refreshing}
             onSelect={selectAgent}
             onCustomExecutableChange={changeCustomExecutable}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { catalogProblem } from "../domain/binding-catalog.js";
 import { createRunRecord, createRunSnapshot, type RunRecord } from "../domain/run.js";
 import { runBranchNameSchema, shortRunBranch } from "../domain/run-branch.js";
 import { createKeyedLock } from "./keyed-lock.js";
@@ -90,11 +91,9 @@ const startOnce = async (
     const connection = agents.find((agent) => agent.provider === binding.provider);
     if (!connection?.protocol || connection.authentication !== "authenticated")
       throw new ProjectError(`Verify and authenticate ${binding.provider} before starting.`, 422);
-    const model = connection.models?.find((item) => item.id === binding.model);
-    if (binding.model !== "agent-default" && !model)
-      throw new ProjectError(`Model ${binding.model} is unavailable.`, 422);
-    if (binding.effort && !model?.efforts?.includes(binding.effort))
-      throw new ProjectError(`Effort ${binding.effort} is unavailable.`, 422);
+    const problem = catalogProblem(connection, binding);
+    if (problem === "model") throw new ProjectError(`Model ${binding.model} is unavailable.`, 422);
+    if (problem) throw new ProjectError(`Effort ${binding.effort} is unavailable.`, 422);
   }
   const ticket = input.ticketId && tracker ? await tracker.retrieve(input.ticketId) : undefined;
   const ticketId = ticket?.id ?? input.ticketId?.toUpperCase() ?? "";

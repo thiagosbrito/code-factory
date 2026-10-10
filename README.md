@@ -15,7 +15,7 @@ cd your-repo
 npx @thiagosbrito/code-factory start
 ```
 
-Open the printed link (it opens automatically in an interactive terminal; pass `--no-open` to skip), then go to Setup → Verify connection. `--version` prints the installed version; `--port 0` picks a free port.
+Open the printed link (it opens automatically in an interactive terminal; pass `--no-open` to skip), then go to Setup and choose a detected agent: it connects after half a second (or press Verify connection). Connected agents are remembered per project in `connections.json` next to `trust.json` and connect again on the next start. `--version` prints the installed version; `--port 0` picks a free port.
 
 Safety, in plain words:
 

@@ -9,6 +9,7 @@ import type {
   StepExecutionInput,
   StepSession,
 } from "./contract.js";
+import { listClaudeCodeModels } from "./claude-code-models.js";
 import {
   parseJson,
   PROBE_OUTPUT_LIMIT,
@@ -20,8 +21,9 @@ import {
 /** Efforts listed by `claude --help` for `--effort`. */
 export const CLAUDE_CODE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 /**
- * The CLI has no model catalog command; these are the aliases it documents for `--model`, each
- * resolving to the latest model of that family. Listing an alias is not proof of entitlement.
+ * What a connection offers when the CLI cannot list its models: the aliases it documents for
+ * `--model`, each resolving to the latest model of that family. Listing a model is not proof of
+ * entitlement.
  */
 export const CLAUDE_CODE_MODELS = [
   { id: "fable", displayName: "Fable (latest)", efforts: [...CLAUDE_CODE_EFFORTS] },
@@ -151,7 +153,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       version: this.version,
       protocol: "claude-code-stream-json",
       capabilities: this.capabilities,
-      models: CLAUDE_CODE_MODELS,
+      models: await listClaudeCodeModels(this.executable).catch(() => CLAUDE_CODE_MODELS),
+      customModels: { efforts: [...CLAUDE_CODE_EFFORTS] },
     };
   }
 
