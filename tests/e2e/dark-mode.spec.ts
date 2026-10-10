@@ -8,7 +8,12 @@ const isDark = (page: Page) =>
 
 /** WCAG contrast of an element's text against the first opaque background above it. */
 const contrastOf = (locator: Locator) =>
-  locator.evaluate((element) => {
+  locator.evaluate(async (element) => {
+    // Buttons animate their colors for 150 ms after a theme switch; measuring mid-transition reads
+    // colors that belong to neither theme (a slow runner once saw 1.4:1).
+    await Promise.all(
+      document.getAnimations().map((animation) => animation.finished.catch(() => null)),
+    );
     const parse = (value: string) => {
       // Tailwind 4 emits oklch/color-mix; the canvas converts any CSS color to sRGB.
       const canvas = document.createElement("canvas").getContext("2d");

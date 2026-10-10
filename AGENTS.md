@@ -10,16 +10,16 @@ Current stack: Node >=22.12, pnpm 11.8.0, strict TypeScript, React 19, Vite 8, T
 
 ## Where changes belong
 
-| Path               | Responsibility                                                                                                                        |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/domain/`      | Portable schemas, types, validation, and run/loop rules; no provider or UI assumptions.                                               |
-| `src/adapters/`    | Provider discovery, verification, capabilities, and execution behind `contract.ts`.                                                   |
-| `src/runtime/`     | Local API, persistence, Git worktrees, scheduling, intake, events, and provider coordination.                                         |
-| `src/translators/` | Explicit import/export of agent-native configuration, with loss reporting.                                                            |
-| `src/ui/`          | React UI by area: `app/`, `factory/`, `features/{runs,loops,setup}/`, and `shared/` (`shared/components/` holds the shadcn controls). |
-| `tests/`           | Vitest tests, provider fixtures, shared builders in `tests/support/`, and `tests/e2e/` journeys (harness in `e2e/support/`).          |
-| `scripts/`         | Development, package smoke, and native proof tooling.                                                                                 |
-| `docs/`            | Architecture decisions and dated evidence.                                                                                            |
+| Path               | Responsibility                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/`      | Portable schemas, types, validation, and run/loop rules; no provider or UI assumptions.                                                                                                           |
+| `src/adapters/`    | Provider discovery, verification, capabilities, and execution behind `contract.ts`.                                                                                                               |
+| `src/runtime/`     | Local API, persistence, Git worktrees, scheduling, intake, events, and provider coordination.                                                                                                     |
+| `src/translators/` | Explicit import/export of agent-native configuration, with loss reporting.                                                                                                                        |
+| `src/ui/`          | React UI by area: `app/`, `factory/`, `features/{runs,loops,setup}/` (`features/loops/graph/` is the lazily loaded Graph editor), and `shared/` (`shared/components/` holds the shadcn controls). |
+| `tests/`           | Vitest tests, provider fixtures, shared builders in `tests/support/`, and `tests/e2e/` journeys (harness in `e2e/support/`).                                                                      |
+| `scripts/`         | Development, package smoke, and native proof tooling.                                                                                                                                             |
+| `docs/`            | Architecture decisions and dated evidence.                                                                                                                                                        |
 
 Files stay under 500 lines (oxlint `max-lines`, no exceptions); a larger module becomes a small entry file over sibling modules, for example `runtime/scheduler.ts`, `runtime/server.ts`, `runtime/run-branch.ts` and `domain/run.ts`. Layers import inward only and UI features do not import each other; see `CONTRIBUTING.md` and `docs/architecture.md`.
 

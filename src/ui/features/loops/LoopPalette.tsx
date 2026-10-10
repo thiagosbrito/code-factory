@@ -1,5 +1,6 @@
 import type { LoopDefinition } from "../../../domain/loop.js";
 import { Button } from "@/shared/components/button";
+import { completePositions } from "./loop-editor-placement";
 import { addStep } from "./loop-editor-model";
 import { LoopGroups } from "./LoopGroups";
 
@@ -23,14 +24,18 @@ export const LoopPalette = ({
       <Button
         className="mt-4 w-full"
         variant="outline"
-        onClick={() => apply((current) => addStep(current, "implementation", "agent"))}
+        onClick={() =>
+          apply((current) => completePositions(addStep(current, "implementation", "agent")))
+        }
       >
         + Agent step
       </Button>
       <Button
         className="mt-2 w-full"
         variant="outline"
-        onClick={() => apply((current) => addStep(current, "validation", "check"))}
+        onClick={() =>
+          apply((current) => completePositions(addStep(current, "validation", "check")))
+        }
       >
         + Check step
       </Button>

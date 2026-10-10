@@ -10,6 +10,7 @@ import { FactorySidebar, type Screen } from "./FactorySidebar";
 import { ProjectSettingsCard } from "./ProjectSettingsCard";
 import { RunsScreen } from "./RunsScreen";
 import { SelectedRunDetail } from "./SelectedRunDetail";
+import { useSidebarCollapsed } from "./useSidebarCollapsed";
 
 export const Factory = ({
   project,
@@ -35,6 +36,7 @@ export const Factory = ({
   onEditSetup: () => void;
 }) => {
   const [newRunOpen, setNewRunOpen] = useState(false);
+  const sidebar = useSidebarCollapsed();
   const factory = useFactoryRuns(demo, onProjectChanged ? { onProjectChanged } : {});
   const { notice, setNotice, setPublishedLoops, runs } = factory;
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -61,6 +63,8 @@ export const Factory = ({
         runs={demo ? 2 : runs.length}
         demo={demo}
         onExitDemo={onExitDemo}
+        collapsed={sidebar.collapsed}
+        onToggleCollapsed={sidebar.toggle}
       />
       <main className="min-w-0 flex-1 p-6 md:p-10">
         <FactoryPageHeader

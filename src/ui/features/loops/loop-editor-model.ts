@@ -326,6 +326,18 @@ export const commit = (history: History, next: LoopDefinition): History => {
   if (JSON.stringify(history.present) === JSON.stringify(next)) return history;
   return { present: next, past: [...history.past, history.present], future: [] };
 };
+/**
+ * Folds a change into the latest undo entry instead of adding one: consecutive keyboard moves of
+ * the same steps then undo together. Folding back to the entry's own starting point removes it.
+ */
+export const amend = (history: History, next: LoopDefinition): History => {
+  const serialized = JSON.stringify(next);
+  if (JSON.stringify(history.present) === serialized) return history;
+  const previous = history.past.at(-1);
+  if (previous && JSON.stringify(previous) === serialized)
+    return { present: next, past: history.past.slice(0, -1), future: [] };
+  return { present: next, past: history.past, future: [] };
+};
 export const undo = (history: History): History => {
   const previous = history.past.at(-1);
   return previous

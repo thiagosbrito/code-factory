@@ -23,7 +23,11 @@
   --canvas: #f5f6f3;
   --graph-bg: #f4f5f1;
   --graph-dot: #c9d0c9;
-  --graph-edge: #8b9690;
+  --graph-edge: #6f7a74;
+  --graph-join: #3a5ba0;
+  --graph-continue: #855c16;
+  --graph-region-parallel: #116b64;
+  --graph-region-repeat: #855c16;
   --status-bg: #edf0ec;
   --status-fg: #47534c;
   --status-active-bg: #e1f3f0;
@@ -88,6 +92,10 @@
   --graph-bg: #1b201f;
   --graph-dot: #38413d;
   --graph-edge: #7f8b85;
+  --graph-join: #8fb0f0;
+  --graph-continue: #f0c978;
+  --graph-region-parallel: #7fd8cf;
+  --graph-region-repeat: #f0c978;
   --status-bg: #2c3330;
   --status-fg: #c3ccc6;
   --status-active-bg: #123b38;
@@ -178,6 +186,143 @@
   background-color: var(--graph-bg);
   background-image: radial-gradient(var(--graph-dot) 0.8px, transparent 0.8px);
   background-size: 18px 18px;
+}
+/* Editor Graph view (React Flow): theme tokens drive the library variables, so the light/dark
+   switch needs no per-theme rules here. */
+.react-flow {
+  --xy-background-color: var(--graph-bg);
+  --xy-edge-stroke: var(--graph-edge);
+  --xy-edge-stroke-width: 1.5;
+  --xy-edge-stroke-selected: var(--primary);
+  --xy-connectionline-stroke: var(--primary);
+  --xy-connectionline-stroke-width: 2;
+  --xy-handle-background-color: var(--primary);
+  --xy-handle-border-color: var(--card);
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--accent);
+  --xy-controls-button-color: var(--foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-attribution-background-color: var(--card);
+  --xy-edge-label-background-color: var(--card);
+  --xy-edge-label-color: var(--foreground);
+}
+.react-flow__attribution a {
+  color: var(--muted-foreground);
+}
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+.graph-handle {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+}
+.graph-handle.react-flow__handle-left {
+  left: -6px;
+}
+.graph-handle.react-flow__handle-right {
+  right: -6px;
+}
+/* The library removes the focus outline from nodes; keyboard users still need to see where they are. */
+.react-flow .react-flow__node.react-flow__node-step:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.graph-handle[aria-disabled="true"] {
+  background: var(--muted-foreground);
+  cursor: not-allowed;
+}
+/* A target the model would refuse turns destructive while a connection is dragged over it. */
+.graph-handle.connectingto:not(.valid) {
+  background: var(--destructive);
+}
+/* Group regions are frames only: parallel is dashed, repeat is solid, so colour is not the only cue. */
+.graph-region {
+  border: 2px solid var(--region-color);
+  background-color: color-mix(in oklab, var(--region-color) 7%, transparent);
+  position: relative;
+}
+.graph-region-parallel {
+  --region-color: var(--graph-region-parallel);
+  border-style: dashed;
+}
+.graph-region-repeat {
+  --region-color: var(--graph-region-repeat);
+  border-style: solid;
+}
+.graph-region-label {
+  position: absolute;
+  left: 8px;
+  bottom: 4px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--card);
+  color: var(--region-color);
+  border: 1px solid var(--region-color);
+}
+/* Join connections are drawn heavier and in their own colour; the target carries the mode badge. */
+.react-flow__edge.graph-edge-join .react-flow__edge-path {
+  stroke: var(--graph-join);
+  stroke-width: 2.5;
+}
+.graph-outcome-label,
+.graph-continue-label {
+  position: absolute;
+  pointer-events: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+.graph-continue-label {
+  color: var(--graph-continue);
+  border-color: var(--graph-continue);
+}
+/* The continuation is dashed on purpose and keeps its dashes under reduced motion: it is static. */
+.graph-continue-path {
+  stroke: var(--graph-continue);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+.graph-lane {
+  background-color: color-mix(in oklab, var(--card) 55%, transparent);
+}
+.graph-edge-delete {
+  position: absolute;
+  pointer-events: all;
+  width: 24px;
+  height: 24px;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--destructive);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.graph-edge-delete:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+/* Edges are never animated by the editor; this also covers library defaults. */
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__edge.animated path,
+  .react-flow__edge-path {
+    animation: none !important;
+    stroke-dasharray: none;
+  }
 }
 .run-graph-node-running {
   border-color: #f08a24;

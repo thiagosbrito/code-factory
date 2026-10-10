@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import type { AgentConnection } from "../../../adapters/contract.js";
 import type { RunRecord } from "../../../domain/run.js";
 import { Button } from "@/shared/components/button";
 import { RetryIcon } from "../../shared/icons";
+import { StepFactsLines } from "../../shared/StepFactsLines";
+import { stepFacts } from "../../shared/step-facts";
 import { NOT_REACHED, stepDisplayStatus } from "./run-view-model";
+import { StepElapsed } from "./StepElapsed";
 
 type Point = { x: number; y: number };
 const nodeWidth = 210;
-const nodeHeight = 102;
+export const nodeHeight = 172;
+export const rowSpacing = 192;
 const positions = (run: RunRecord): Map<string, Point> => {
   const depths = new Map<string, number>();
   const visiting = new Set<string>();
@@ -35,7 +40,7 @@ const positions = (run: RunRecord): Map<string, Point> => {
       rows.set(column, row + 1);
       // A column shorter than the tallest one is centered on it; x is unchanged.
       const centered = row + (tallest - (columnSizes.get(column) ?? 1)) / 2;
-      return [step.id, step.position ?? { x: 40 + column * 290, y: 55 + centered * 165 }];
+      return [step.id, { x: 40 + column * 290, y: 55 + centered * rowSpacing }];
     }),
   );
 };
@@ -46,6 +51,7 @@ export const RunGraph = ({
   onSelect,
   overlay,
   retry,
+  agents = [],
 }: {
   run: RunRecord;
   selectedStepId: string | null;
@@ -54,6 +60,8 @@ export const RunGraph = ({
   retry?: { stepId: string; label: string; disabled: boolean; onRetry: () => void } | null;
   /** Floating controls over the canvas's top-right corner; they never scroll with the graph. */
   overlay?: React.ReactNode;
+  /** Connected agents, used to show model display names. */
+  agents?: AgentConnection[];
 }) => {
   // "fit" follows the canvas width, so the whole graph shows without scrolling until the user
   // zooms by hand; the buttons switch to a fixed zoom and "Fit view" returns to following.
@@ -208,14 +216,22 @@ export const RunGraph = ({
                 if (!point) return null;
                 const status = step?.status ?? "pending";
                 const shown = stepDisplayStatus(run, step);
+                const facts =
+                  definition.kind === "check"
+                    ? null
+                    : stepFacts({
+                        binding: definition.binding,
+                        projectDefault: run.snapshot.bindings[definition.id],
+                        agents,
+                      });
                 return (
                   <button
                     key={definition.id}
                     id={`run-node-${definition.id}`}
                     type="button"
-                    style={{ left: point.x, top: point.y, width: nodeWidth, minHeight: nodeHeight }}
-                    className={`run-graph-node run-graph-node-${status} absolute rounded-lg border bg-card p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
-                    aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts`}
+                    style={{ left: point.x, top: point.y, width: nodeWidth, height: nodeHeight }}
+                    className={`run-graph-node run-graph-node-${status} absolute overflow-hidden rounded-lg border bg-card p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
+                    aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts${facts ? `, agent ${facts.agent}, model ${facts.model}, effort ${facts.effort}` : ""}`}
                     aria-pressed={selectedStepId === definition.id}
                     onClick={() => onSelect(definition.id)}
                     onKeyDown={(event) => {
@@ -229,15 +245,25 @@ export const RunGraph = ({
                       }
                     }}
                   >
-                    <span
-                      className={`run-status ${shown === NOT_REACHED ? "run-status-not-reached" : `run-status-${status}`}`}
-                    >
-                      {shown}
+                    <span className="flex items-center justify-between gap-2">
+                      <span
+                        className={`run-status ${shown === NOT_REACHED ? "run-status-not-reached" : `run-status-${status}`}`}
+                      >
+                        {shown}
+                      </span>
+                      <StepElapsed
+                        key={
+                          step?.attempts.find((attempt) => attempt.status === "running")?.id ??
+                          "idle"
+                        }
+                        step={step}
+                      />
                     </span>
-                    <strong className="mt-2 block text-sm">{definition.name}</strong>
-                    <span className="block text-xs text-muted-foreground">
+                    <strong className="mt-2 line-clamp-2 block text-sm">{definition.name}</strong>
+                    <span className="block truncate text-xs text-muted-foreground">
                       {definition.role} · {step?.attempts.length ?? 0} attempts
                     </span>
+                    {facts && <StepFactsLines inline facts={facts} className="mt-1.5" />}
                   </button>
                 );
               })}

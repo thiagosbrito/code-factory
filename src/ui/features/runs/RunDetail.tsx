@@ -81,6 +81,7 @@ export const RunDetail = ({
       )}
       <RunInputPrompt run={run} agents={agents} connected={connected} onReply={onReplyToInput} />
       <RunGraph
+        agents={agents}
         overlay={
           <div className="flex items-center gap-1">
             <RunControls

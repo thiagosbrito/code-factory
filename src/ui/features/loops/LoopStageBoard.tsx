@@ -1,17 +1,22 @@
 import type { LoopDefinition } from "../../../domain/loop.js";
 import { Button } from "@/shared/components/button";
-import { addStep, semanticDrop, stageOf, stages } from "./loop-editor-model";
+import { StepFactsLines } from "../../shared/StepFactsLines";
+import type { ResolveStepFacts } from "./graph/StepFactsContext";
+import { addStepToLane } from "./loop-editor-add";
+import { semanticDrop, stageOf, stages } from "./loop-editor-model";
 
 export const LoopStageBoard = ({
   loop,
   apply,
   openDrawer,
   setMessage,
+  stepFacts,
 }: {
   loop: LoopDefinition;
   apply: (action: (current: LoopDefinition) => LoopDefinition) => boolean;
   openDrawer: (id: string, origin?: HTMLElement) => void;
   setMessage: (message: string) => void;
+  stepFacts: ResolveStepFacts;
 }) => {
   return (
     <div className="overflow-x-auto bg-[radial-gradient(var(--graph-dot)_.6px,transparent_.6px)] bg-[length:17px_17px] bg-[var(--graph-bg)] p-4">
@@ -40,6 +45,7 @@ export const LoopStageBoard = ({
                 .filter((step) => stageOf(step) === stage.id)
                 .map((step) => {
                   const group = loop.groups.find((item) => item.id === step.groupId);
+                  const facts = stepFacts(step.id);
                   const predecessors = loop.dependencies
                     .filter((edge) => edge.to === step.id)
                     .map(
@@ -62,6 +68,7 @@ export const LoopStageBoard = ({
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {step.kind} · {group ? `${group.kind}: ${group.name}` : "ungrouped"}
                       </p>
+                      {facts && <StepFactsLines facts={facts} className="mt-1" />}
                       {group?.kind === "repeat" && (
                         <p className="text-[10px] text-purple-700">
                           Up to {group.maxIterations} iterations · exit on {group.exitWhen.outcome}{" "}
@@ -76,14 +83,14 @@ export const LoopStageBoard = ({
                       {loop.joins
                         .filter((join) => join.stepId === step.id)
                         .map((join) => (
-                          <p key="join" className="text-[10px] text-purple-700">
+                          <p key={`join-${join.stepId}`} className="text-[10px] text-purple-700">
                             Join {join.mode}: {join.from.length} sources
                           </p>
                         ))}
                       {loop.decisions
                         .filter((item) => item.stepId === step.id)
                         .map((item) => (
-                          <p key="decision" className="text-[10px] text-amber-700">
+                          <p key={`decision-${item.stepId}`} className="text-[10px] text-amber-700">
                             Decision:{" "}
                             {item.branches
                               .map(
@@ -141,11 +148,7 @@ export const LoopStageBoard = ({
               size="sm"
               variant="outline"
               className="w-full"
-              onClick={() =>
-                apply((current) =>
-                  addStep(current, stage.id, stage.id === "validation" ? "check" : "agent"),
-                )
-              }
+              onClick={() => apply((current) => addStepToLane(current, stage.id))}
             >
               + Add step
             </Button>
