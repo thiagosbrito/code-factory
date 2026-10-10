@@ -69,3 +69,13 @@ it("counts a running step's time up every second and stops when nothing runs", (
   });
   expect(planCard().textContent).toContain("1m 10s");
 });
+
+it("lays cards out by dependency depth and ignores positions saved by the editor", () => {
+  const run = makeRun();
+  // Editor lanes put every step far to the right; the run must still flow left to right.
+  for (const step of run.snapshot.loop.steps) step.position = { x: 1056, y: 48 };
+  render(<RunGraph run={run} selectedStepId={null} onSelect={vi.fn<(id: string) => void>()} />);
+  const left = (name: RegExp) => Number.parseFloat(screen.getByRole("button", { name }).style.left);
+  expect(left(/^Plan, /u)).toBe(40);
+  expect(left(/^Build, /u)).toBeGreaterThan(left(/^Plan, /u));
+});

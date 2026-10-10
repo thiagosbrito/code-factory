@@ -4,10 +4,10 @@ import { stageOf, stages, type Stage } from "./loop-editor-model";
 export type Point = { x: number; y: number };
 
 export const LANE_WIDTH = 260;
-/** The Runs graph draws every node at least 210 x 102; overlap and row spacing use that size. */
+/** The editor draws every card at least 210 wide by NODE_HEIGHT; overlap and row spacing use that size. */
 export const RUN_NODE_WIDTH = 210;
-export const NODE_HEIGHT = 156;
-export const ROW_HEIGHT = 176;
+export const NODE_HEIGHT = 132;
+export const ROW_HEIGHT = 152;
 export const FIRST_ROW_Y = 48;
 export const DEFAULT_OFFSET_X = 16;
 

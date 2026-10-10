@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentConnection } from "../src/adapters/contract.js";
 import { NOT_CONFIGURED, stepFacts } from "../src/ui/shared/step-facts.js";
-import { NODE_HEIGHT } from "../src/ui/features/loops/loop-editor-placement.js";
-import { nodeHeight } from "../src/ui/features/runs/RunGraph.js";
 
 const claude = {
   provider: "claude-code",
@@ -56,11 +54,5 @@ describe("step card facts", () => {
       effort: NOT_CONFIGURED,
       inherited: true,
     });
-  });
-});
-
-describe("shared card size", () => {
-  it("draws the run card as tall as the editor card, because they share stored positions", () => {
-    expect(nodeHeight).toBe(NODE_HEIGHT);
   });
 });

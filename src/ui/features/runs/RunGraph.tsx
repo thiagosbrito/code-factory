@@ -11,9 +11,8 @@ import { useNow } from "./useNow";
 
 type Point = { x: number; y: number };
 const nodeWidth = 210;
-/** Matches NODE_HEIGHT in the loop editor (a test keeps them equal): the editor and the run share stored positions. */
-export const nodeHeight = 156;
-export const rowSpacing = 176;
+export const nodeHeight = 172;
+export const rowSpacing = 192;
 const positions = (run: RunRecord): Map<string, Point> => {
   const depths = new Map<string, number>();
   const visiting = new Set<string>();
@@ -42,7 +41,7 @@ const positions = (run: RunRecord): Map<string, Point> => {
       rows.set(column, row + 1);
       // A column shorter than the tallest one is centered on it; x is unchanged.
       const centered = row + (tallest - (columnSizes.get(column) ?? 1)) / 2;
-      return [step.id, step.position ?? { x: 40 + column * 290, y: 55 + centered * rowSpacing }];
+      return [step.id, { x: 40 + column * 290, y: 55 + centered * rowSpacing }];
     }),
   );
 };
@@ -225,8 +224,8 @@ export const RunGraph = ({
                     key={definition.id}
                     id={`run-node-${definition.id}`}
                     type="button"
-                    style={{ left: point.x, top: point.y, width: nodeWidth, minHeight: nodeHeight }}
-                    className={`run-graph-node run-graph-node-${status} absolute rounded-lg border bg-card p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
+                    style={{ left: point.x, top: point.y, width: nodeWidth, height: nodeHeight }}
+                    className={`run-graph-node run-graph-node-${status} absolute overflow-hidden rounded-lg border bg-card p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
                     aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts`}
                     aria-pressed={selectedStepId === definition.id}
                     onClick={() => onSelect(definition.id)}
@@ -241,15 +240,21 @@ export const RunGraph = ({
                       }
                     }}
                   >
-                    <span
-                      className={`run-status ${shown === NOT_REACHED ? "run-status-not-reached" : `run-status-${status}`}`}
-                    >
-                      {shown}
+                    <span className="flex items-center justify-between gap-2">
+                      <span
+                        className={`run-status ${shown === NOT_REACHED ? "run-status-not-reached" : `run-status-${status}`}`}
+                      >
+                        {shown}
+                      </span>
+                      {elapsed !== null && (
+                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                          {formatDuration(elapsed)}
+                        </span>
+                      )}
                     </span>
-                    <strong className="mt-2 block text-sm">{definition.name}</strong>
-                    <span className="block text-xs text-muted-foreground">
+                    <strong className="mt-2 line-clamp-2 block text-sm">{definition.name}</strong>
+                    <span className="block truncate text-xs text-muted-foreground">
                       {definition.role} · {step?.attempts.length ?? 0} attempts
-                      {elapsed !== null && ` · ${formatDuration(elapsed)}`}
                     </span>
                     <StepFactsLines
                       className="mt-1.5"
