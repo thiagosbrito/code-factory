@@ -8,7 +8,8 @@ import { Textarea } from "@/shared/components/textarea";
 import type { ProjectResponse } from "../../shared/project-api";
 import { StepBindingSelectors } from "../../shared/StepBindingSelectors";
 import { LoopJoinSection, LoopDecisionSection } from "./LoopGraphSections";
-import { deleteStep, moveVisual, stageOf, type EditorStep } from "./loop-editor-model";
+import { nudgeRightAction } from "./graph/graph-actions";
+import { deleteStep, stageOf, type EditorStep } from "./loop-editor-model";
 
 const label = "block w-full text-sm font-medium";
 export const LoopStepDrawer = ({
@@ -138,16 +139,7 @@ export const LoopStepDrawer = ({
                 <Button
                   className="mt-2"
                   variant="outline"
-                  onClick={() =>
-                    apply((current) =>
-                      moveVisual(
-                        current,
-                        selected.id,
-                        (selected.position?.x ?? 0) + 20,
-                        selected.position?.y ?? 0,
-                      ),
-                    )
-                  }
+                  onClick={() => apply(nudgeRightAction(selected.id))}
                 >
                   Nudge visual right
                 </Button>

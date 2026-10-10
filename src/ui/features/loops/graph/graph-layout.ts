@@ -1,4 +1,4 @@
-import type { LoopDefinition } from "../../../../domain/loop.js";
+import { parseLoop, type LoopDefinition } from "../../../../domain/loop.js";
 import { stageOf, stages, type Stage } from "../loop-editor-model";
 
 /**
@@ -13,7 +13,9 @@ export const LANE_WIDTH = 260;
 /** The visible lane is a little narrower than its slot so neighbouring lanes show a gutter. */
 export const LANE_DRAWN_WIDTH = LANE_WIDTH - 16;
 export const NODE_WIDTH = 200;
-export const NODE_HEIGHT = 88;
+/** The Runs graph draws every node at least 210 x 102; overlap and row spacing use that size. */
+export const RUN_NODE_WIDTH = 210;
+export const NODE_HEIGHT = 102;
 export const ROW_HEIGHT = 120;
 export const FIRST_ROW_Y = 48;
 export const DEFAULT_OFFSET_X = 16;
@@ -57,16 +59,20 @@ export const ranksOf = (loop: LoopDefinition): Map<string, number> => {
 
 const byId = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
+const orderedSteps = (loop: LoopDefinition): LoopDefinition["steps"] => {
+  const rank = ranksOf(loop);
+  return [...loop.steps].sort(
+    (left, right) =>
+      (rank.get(left.id) ?? 0) - (rank.get(right.id) ?? 0) || byId(left.id, right.id),
+  );
+};
+
 /**
  * The deterministic default position of every step: ordered by (rank, id), the n-th step of a
  * lane sits on row n at `y = 48 + row * 120`. A stored position does not change this order.
  */
 export const defaultPositions = (loop: LoopDefinition): Map<string, Point> => {
-  const rank = ranksOf(loop);
-  const ordered = [...loop.steps].sort(
-    (left, right) =>
-      (rank.get(left.id) ?? 0) - (rank.get(right.id) ?? 0) || byId(left.id, right.id),
-  );
+  const ordered = orderedSteps(loop);
   const rows = new Map<Stage, number>();
   const positions = new Map<string, Point>();
   for (const step of ordered) {
@@ -81,12 +87,51 @@ export const defaultPositions = (loop: LoopDefinition): Map<string, Point> => {
   return positions;
 };
 
+const overlaps = (left: Point, right: Point): boolean =>
+  Math.abs(left.x - right.x) < RUN_NODE_WIDTH && Math.abs(left.y - right.y) < NODE_HEIGHT;
+
+const storedHeight = (loop: LoopDefinition): number =>
+  Math.max(
+    MIN_LANE_HEIGHT,
+    ...loop.steps.flatMap((step) =>
+      step.position ? [step.position.y + NODE_HEIGHT + FIRST_ROW_Y] : [],
+    ),
+  );
+
+/**
+ * Where every step sits before the final lane clamp. With no stored position this is the default
+ * layout. Otherwise a stored position wins and each step without one takes the first free row of
+ * its lane (in rank order), so a step added later never lands on a stored one.
+ */
+const placedPositions = (loop: LoopDefinition): Map<string, Point> => {
+  const defaults = defaultPositions(loop);
+  if (!loop.steps.some((step) => step.position)) return defaults;
+  const height = storedHeight(loop);
+  const taken = new Map<Stage, Point[]>();
+  const positions = new Map<string, Point>();
+  const take = (stage: Stage, id: string, point: Point) => {
+    positions.set(id, point);
+    taken.set(stage, [...(taken.get(stage) ?? []), point]);
+  };
+  for (const step of loop.steps)
+    if (step.position)
+      take(stageOf(step), step.id, clampIntoLane(stageOf(step), step.position, height));
+  for (const step of orderedSteps(loop)) {
+    if (step.position) continue;
+    const stage = stageOf(step);
+    const x = defaults.get(step.id)?.x ?? toAbsoluteX(stage, DEFAULT_OFFSET_X);
+    const others = taken.get(stage) ?? [];
+    let y = FIRST_ROW_Y;
+    while (others.some((other) => overlaps({ x, y }, other))) y += ROW_HEIGHT;
+    take(stage, step.id, { x, y });
+  }
+  return positions;
+};
+
 /** Lanes grow with the busiest lane and with stored positions, never below the minimum. */
 export const laneHeight = (loop: LoopDefinition): number => {
-  const defaults = defaultPositions(loop);
-  const bottoms = loop.steps.map(
-    (step) => (step.position ?? defaults.get(step.id) ?? { x: 0, y: 0 }).y + NODE_HEIGHT,
-  );
+  const placed = placedPositions(loop);
+  const bottoms = loop.steps.map((step) => (placed.get(step.id)?.y ?? 0) + NODE_HEIGHT);
   return Math.max(MIN_LANE_HEIGHT, ...bottoms.map((bottom) => bottom + FIRST_ROW_Y));
 };
 
@@ -103,26 +148,36 @@ export const clampIntoLane = (stage: Stage, point: Point, height: number): Point
 };
 
 /**
- * The position each step is drawn at: the stored position when present, else the default, always
- * clamped into the step's own lane so a node never appears outside the lane that names its stage.
+ * The position each step is drawn at: the stored position when present, else a free row of its
+ * lane, always clamped into the step's own lane so a node never appears outside the lane that
+ * names its stage.
  */
 export const displayPositions = (loop: LoopDefinition): Map<string, Point> => {
-  const defaults = defaultPositions(loop);
+  const placed = placedPositions(loop);
   const height = laneHeight(loop);
   return new Map(
     loop.steps.map((step) => [
       step.id,
-      clampIntoLane(
-        stageOf(step),
-        step.position ?? defaults.get(step.id) ?? { x: 0, y: 0 },
-        height,
-      ),
+      clampIntoLane(stageOf(step), placed.get(step.id) ?? { x: 0, y: 0 }, height),
     ]),
   );
 };
 
-const overlaps = (left: Point, right: Point): boolean =>
-  Math.abs(left.x - right.x) < NODE_WIDTH && Math.abs(left.y - right.y) < NODE_HEIGHT;
+/**
+ * Keeps positions all-or-none: when any step has a stored position, every step without one is
+ * written at the position it is drawn at; a loop with no positions at all is returned unchanged.
+ * The Runs graph reads a stored position as absolute and lays out the rest on its own grid, so a
+ * partly positioned loop would overlap there.
+ */
+export const completePositions = (loop: LoopDefinition): LoopDefinition => {
+  if (!loop.steps.some((step) => step.position) || loop.steps.every((step) => step.position))
+    return loop;
+  const drawn = displayPositions(loop);
+  return parseLoop({
+    ...loop,
+    steps: loop.steps.map((step) => ({ ...step, position: step.position ?? drawn.get(step.id) })),
+  });
+};
 
 /**
  * Moves a point to the nearest free row of its lane when it would sit on another node; a free

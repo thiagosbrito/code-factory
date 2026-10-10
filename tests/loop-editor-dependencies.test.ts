@@ -465,7 +465,7 @@ describe("dependency operations", () => {
     row.expected(next);
     expect(parseLoop(next)).toEqual(next);
     expect(loop).toEqual(before);
-    expect(next.groups.map(({ id }) => id)).toEqual(loop.groups.map(({ id }) => id));
+    expect(next.groups).toEqual(loop.groups);
   });
 
   it.each(rejected)("rejects $op $from -> $to: $name", (row) => {

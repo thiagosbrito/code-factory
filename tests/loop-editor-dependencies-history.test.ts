@@ -15,7 +15,8 @@ import {
   repeated,
 } from "./support/loop-editor-builders.js";
 
-const groupMessage = "This step belongs to a group, join, or decision.";
+const groupMessage =
+  "This step belongs to a group, join, or decision. Edit its explicit connections instead.";
 
 describe("dependency history", () => {
   it("restores the exact previous dependency list through undo and redo", () => {
@@ -28,14 +29,32 @@ describe("dependency history", () => {
     expect(redo(undo(removed)).present.dependencies).toEqual(removed.present.dependencies);
   });
 
-  it("leaves history identical when a rejected add reaches commit", () => {
+  it("commits an unchanged stage as the very same history, with no undo entry", () => {
+    const initial = chain();
+    const history: History = { present: initial, past: [], future: [] };
+    expect(commit(history, setStage(initial, "a", "implementation"))).toBe(history);
+  });
+
+  it("leaves history untouched when the editor applies a rejected add", () => {
     const initial = chain();
     const history: History = { present: initial, past: [], future: [] };
     const snapshot = structuredClone(history);
-    expect(() => commit(history, addDependency(history.present, "c", "a"))).toThrow(
-      new Error(cycleMessage),
-    );
+    // The same pattern as the editor's apply: the action runs first, and a throw skips commit.
+    let current = history;
+    const apply = (action: (loop: typeof initial) => typeof initial) => {
+      try {
+        current = commit(current, action(current.present));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(apply((loop) => addDependency(loop, "c", "a"))).toBe(false);
+    expect(current).toBe(history);
     expect(history).toEqual(snapshot);
+    expect(() => addDependency(history.present, "c", "a")).toThrow(new Error(cycleMessage));
+    expect(apply((loop) => addDependency(loop, "a", "c"))).toBe(true);
+    expect(current.past).toEqual([initial]);
   });
 });
 
@@ -82,7 +101,7 @@ describe("setStage", () => {
   ] as const)("refuses a %s", (_name, make, id, message) => {
     const loop = make();
     const before = structuredClone(loop);
-    expect(() => setStage(loop, id, "review")).toThrow(message);
+    expect(() => setStage(loop, id, "review")).toThrow(new Error(message));
     expect(loop).toEqual(before);
   });
 

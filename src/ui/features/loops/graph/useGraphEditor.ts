@@ -27,6 +27,7 @@ import {
   type Apply,
   type ConnectEnd,
 } from "./graph-actions";
+import type { Point } from "./graph-layout";
 import {
   buildGraph,
   type DependencyFlowEdge,
@@ -47,10 +48,20 @@ const keepSelection = <T extends { id: string; selected?: boolean }>(
     : next;
 };
 
-/** Typing in a field must never be read as a graph shortcut. */
+/** Typing in a field, or pressing a button such as the zoom controls, is never a graph shortcut. */
 const isTextTarget = (target: EventTarget): boolean =>
   target instanceof HTMLElement &&
-  target.matches('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+  (target.matches('input, textarea, select, [contenteditable=""], [contenteditable="true"]') ||
+    target.closest("button, .react-flow__controls") !== null);
+
+/** The library moves a selected step by this many px per arrow press (Shift multiplies by 4). */
+const ARROW_STEP = 5;
+const ARROW_DIRECTION: Record<string, Point | undefined> = {
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+};
 
 /**
  * Flow state and handlers for the Graph view. The loop stays authoritative: every gesture becomes
@@ -71,10 +82,10 @@ export const useGraphEditor = ({
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphNode>(seed.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<DependencyFlowEdge>(seed.edges);
   // Handlers read the newest loop and graph through a ref, so they stay stable between renders.
-  const latest = useRef({ loop, seed, edges });
+  const latest = useRef({ loop, seed, edges, nodes });
   useLayoutEffect(() => {
-    latest.current = { loop, seed, edges };
-  }, [loop, seed, edges]);
+    latest.current = { loop, seed, edges, nodes };
+  }, [loop, seed, edges, nodes]);
   // A reseed during a drag (for example Undo pressed mid-drag) would yank the node from under the
   // pointer; the drop handler reconciles with the newest loop once the drag ends.
   const dragging = useRef(false);
@@ -116,7 +127,8 @@ export const useGraphEditor = ({
   );
 
   // Delete and Backspace are handled on the flow wrapper, not on the document, so they act only
-  // while focus is inside the graph and never while typing or on a toolbar button.
+  // while focus is inside the graph and never while typing or on a button (zoom controls, the
+  // edge delete control, which removes its edge on click).
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       if ((event.key !== "Delete" && event.key !== "Backspace") || isTextTarget(event.target))
@@ -124,7 +136,36 @@ export const useGraphEditor = ({
       const doomed = latest.current.edges.filter((edge) => edge.selected);
       if (!doomed.length) return;
       event.preventDefault();
-      apply(disconnectAction(doomed));
+      // The focused edge unmounts with its deletion; keep focus in the graph rather than losing it.
+      if (apply(disconnectAction(doomed))) event.currentTarget.focus();
+    },
+    [apply],
+  );
+
+  // The library moves selected steps on arrow keys inside its own flow state, where onNodeDragStop
+  // never fires: the step would be drawn where the loop does not record it and snap back on the
+  // next reseed. The capture phase sees the key first, so the move is routed through the same
+  // planner and `apply` as a drag instead and the library's handler never runs. Enter, Space and
+  // Escape (selection) are left to the library, which keeps keyboard selection working.
+  const onKeyDownCapture = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const direction = ARROW_DIRECTION[event.key];
+      if (!direction || isTextTarget(event.target) || !(event.target instanceof Element)) return;
+      if (!event.target.closest(".react-flow__node-step, .react-flow__nodesselection-rect")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const distance = ARROW_STEP * (event.shiftKey ? 4 : 1);
+      const moves = latest.current.nodes
+        .filter((node): node is StepFlowNode => isStepNode(node) && node.selected === true)
+        .map(({ id, position }) => ({
+          id,
+          position: {
+            x: position.x + direction.x * distance,
+            y: position.y + direction.y * distance,
+          },
+        }));
+      const drops = planDrops(latest.current.loop, moves);
+      if (drops.length) apply(dropAction(drops));
     },
     [apply],
   );
@@ -144,14 +185,30 @@ export const useGraphEditor = ({
     dragging.current = true;
   }, []);
 
-  const onNodeDragStop = useCallback<OnNodeDrag<GraphNode>>(
-    (_event, _node, dragged) => {
+  const commitDrag = useCallback(
+    (dragged: GraphNode[]) => {
       dragging.current = false;
       const moves = dragged.filter(isStepNode).map(({ id, position }) => ({ id, position }));
       const drops = planDrops(latest.current.loop, moves);
       if (!drops.length || !apply(dropAction(drops))) restore();
     },
     [apply, restore],
+  );
+
+  const onNodeDragStop = useCallback<OnNodeDrag<GraphNode>>(
+    (_event, _node, dragged) => commitDrag(dragged),
+    [commitDrag],
+  );
+
+  // Dragging a box-selected group moves it through the selection rectangle, which reports
+  // onSelectionDrag* instead of onNodeDrag*; it commits exactly like a node drag.
+  const onSelectionDragStart = useCallback((_event: unknown, _dragged: GraphNode[]) => {
+    dragging.current = true;
+  }, []);
+
+  const onSelectionDragStop = useCallback(
+    (_event: unknown, dragged: GraphNode[]) => commitDrag(dragged),
+    [commitDrag],
   );
 
   const onNodeClick = useCallback<NodeMouseHandler<GraphNode>>(
@@ -174,9 +231,12 @@ export const useGraphEditor = ({
     onConnect,
     reportConnectEnd,
     onKeyDown,
+    onKeyDownCapture,
     onBeforeDelete,
     onNodeDragStart,
     onNodeDragStop,
+    onSelectionDragStart,
+    onSelectionDragStop,
     onNodeClick,
   };
 };

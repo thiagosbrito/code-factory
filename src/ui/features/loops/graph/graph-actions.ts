@@ -92,6 +92,14 @@ export const planDrops = (loop: LoopDefinition, moves: StepMove[]): PlannedDrop[
   const occupied = new Map(
     loop.steps.map((step) => [step.id, { stage: stageOf(step), position: drawn.get(step.id) }]),
   );
+  // Every dragged step has left its old spot, so that spot is free; its clamped target stands in
+  // until the step itself is resolved, so dragged steps cannot be dropped onto each other.
+  for (const move of moves) {
+    const step = loop.steps.find((item) => item.id === move.id);
+    if (!step) continue;
+    const stage = laneAtX(move.position.x);
+    occupied.set(step.id, { stage, position: clampIntoLane(stage, move.position, height) });
+  }
   const placed: PlannedDrop[] = [];
   for (const move of moves) {
     const step = loop.steps.find((item) => item.id === move.id);
@@ -106,7 +114,10 @@ export const planDrops = (loop: LoopDefinition, moves: StepMove[]): PlannedDrop[
       height,
     );
     const current = drawn.get(step.id);
-    if (stage === stageOf(step) && current?.x === position.x && current.y === position.y) continue;
+    if (stage === stageOf(step) && current?.x === position.x && current.y === position.y) {
+      occupied.set(step.id, { stage, position });
+      continue;
+    }
     placed.push({ id: step.id, stage, position });
     occupied.set(step.id, { stage, position });
   }
@@ -135,3 +146,20 @@ export const dropAction =
         step && stageOf(step) !== drop.stage ? setStage(loop, drop.id, drop.stage) : loop;
       return moveVisual(staged, drop.id, drop.position.x, drop.position.y);
     }, current);
+
+const NUDGE = 20;
+
+/**
+ * Moves a step a little to the right of where it is drawn, through the same planner as a drop, so
+ * the result is clamped into its lane and positions stay all-or-none. A step already at the lane's
+ * right edge is refused with a message instead of storing a coordinate that is clamped away.
+ */
+export const nudgeRightAction =
+  (id: string): LoopAction =>
+  (current) => {
+    const drawn = displayPositions(current).get(id);
+    if (!drawn) throw new Error("Select an existing step.");
+    const drops = planDrops(current, [{ id, position: { x: drawn.x + NUDGE, y: drawn.y } }]);
+    if (!drops.length) throw new Error("This step is already at the right edge of its lane.");
+    return dropAction(drops)(current);
+  };

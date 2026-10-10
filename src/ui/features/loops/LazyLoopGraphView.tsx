@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useState, type ReactNode } from "react";
+import { Component, createRef, lazy, Suspense, useState, type ReactNode } from "react";
 import type { LoopGraphViewProps } from "./LoopGraphView";
 import { Button } from "@/shared/components/button";
 
@@ -12,21 +12,33 @@ class GraphErrorBoundary extends Component<
   { failed: boolean }
 > {
   state = { failed: false };
+  private alert = createRef<HTMLDivElement>();
+  private retried = false;
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+  componentDidUpdate(_previous: unknown, previousState: { failed: boolean }) {
+    // A failure after Retry is announced where the user just pressed: move focus to the new alert.
+    if (this.state.failed && !previousState.failed && this.retried) this.alert.current?.focus();
   }
   render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <div role="alert" className="m-6 rounded-lg border bg-card p-4 text-sm">
+      <div
+        ref={this.alert}
+        role="alert"
+        tabIndex={-1}
+        className="m-6 rounded-lg border bg-card p-4 text-sm focus-visible:outline-2 focus-visible:outline-ring"
+      >
         <p>
-          The graph view could not be loaded. Your draft is unchanged. If Retry keeps failing, save
-          the draft and reload the page.
+          The graph view could not be loaded. Your draft is unchanged. Retry may not help for a
+          failed download; save the draft and reload the page.
         </p>
         <div className="mt-3 flex gap-2">
           <Button
             variant="outline"
             onClick={() => {
+              this.retried = true;
               this.setState({ failed: false });
               this.props.onRetry();
             }}
@@ -45,14 +57,19 @@ class GraphErrorBoundary extends Component<
 type GraphView = ReturnType<typeof lazy<GraphModule["default"]>>;
 
 // One lazy component per loader, kept across Board/Graph toggles so a loaded view renders
-// without the loading fallback. Only a retry after a failure replaces it, because a rejected
-// lazy component stays rejected.
+// without the loading fallback. A rejected lazy component stays rejected, so a failed load evicts
+// its own entry (and Retry replaces it): the next mount imports again instead of showing a stale error.
 const views = new WeakMap<() => Promise<GraphModule>, GraphView>();
 
 const viewFor = (load: () => Promise<GraphModule>): GraphView => {
   const existing = views.get(load);
   if (existing) return existing;
-  const created = lazy(load);
+  const created: GraphView = lazy(() =>
+    load().catch((error: unknown) => {
+      if (views.get(load) === created) views.delete(load);
+      throw error;
+    }),
+  );
   views.set(load, created);
   return created;
 };

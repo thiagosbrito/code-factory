@@ -67,12 +67,15 @@ const LoopGraphView = ({ loop, apply, openDrawer }: LoopGraphViewProps) => {
           onBeforeDelete={graph.onBeforeDelete}
           onNodeDragStart={graph.onNodeDragStart}
           onNodeDragStop={graph.onNodeDragStop}
+          onSelectionDragStart={graph.onSelectionDragStart}
+          onSelectionDragStop={graph.onSelectionDragStop}
           onNodeClick={graph.onNodeClick}
           connectionRadius={CONNECTION_RADIUS}
           // The library listens for Delete on the whole document. It is off so the wrapper handler
           // below can limit it to focus inside the graph; steps are also marked non-deletable.
           deleteKeyCode={null}
           onKeyDown={graph.onKeyDown}
+          onKeyDownCapture={graph.onKeyDownCapture}
           tabIndex={-1}
           selectNodesOnDrag={false}
           onInit={openReadably}
