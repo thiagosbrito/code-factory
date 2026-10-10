@@ -109,6 +109,10 @@ Implemented in `.github/workflows`: `ci.yml` (check on Node 24 and tests on Node
 
 A GitHub Actions workflow on `v*` tags that runs `pnpm check`, `pnpm test:e2e` and `pnpm test:package`, then publishes with npm trusted publishing (OIDC) and provenance, so no long-lived npm token sits on a laptop or in repository secrets. Configure the trusted publisher on npmjs.com for the repository and workflow file first.
 
+### Prereleases (beta)
+
+A version with a prerelease part (for example `0.3.0-beta.0`) is published under its own dist-tag, taken from its first identifier (`beta`, `rc`, ...), and never as `latest`, so `npx @thiagosbrito/code-factory@latest` keeps installing the last stable release; users opt in with `npx @thiagosbrito/code-factory@beta start`. `release.yml` chooses the tag from the version and marks the GitHub release as a prerelease, because npm refuses to publish a prerelease without an explicit `--tag`. The rest is unchanged: bump `version` in a PR, merge to `main` (the tag must be on `main`), tag `vX.Y.Z-beta.N`, push the tag, approve the `npm` environment. Promote a beta to stable by publishing the plain version (`0.3.0`) later; do not move `latest` by hand.
+
 ## Verification for each step
 
 - `pnpm check`, `pnpm test:e2e` and `pnpm test:package` pass on the branch before it merges.
@@ -123,4 +127,5 @@ A GitHub Actions workflow on `v*` tags that runs `pnpm check`, `pnpm test:e2e` a
 - Step 7 (first CI release), 2026-10-09: tagged `v0.1.1`. The first `Release` run verified and then failed at `npm publish` with `403 OIDC permission denied for this action`, although provenance was signed. A new npm trusted publisher allows staged publishes only; enabling direct `npm publish` under Allowed actions on npmjs.com and re-running the publish job fixed it. After publishing, npm shows the version as Validating while an automated review runs, then Published.
 - npm created a `0.0.0-stage` placeholder version (README and `package.json` only) when the staged trusted publisher was set up; it is harmless.
 - Release `0.2.0`, 2026-10-10: tagged `v0.2.0` on the release commit; verify and publish passed, with provenance. `npm view` reports `latest` as `0.2.0` and `npx @thiagosbrito/code-factory@0.2.0 --version` prints `0.2.0`. The GitHub release notes were replaced with a short hand-written summary after publishing.
+- Release `0.2.1`, 2026-10-10: tagged `v0.2.1`; verify and publish passed. `npm view @thiagosbrito/code-factory dist-tags` reports `latest` as `0.2.1` (published 2026-10-10 02:20 UTC). It contains the dark mode only.
 - Later releases: bump `version` in a PR, merge, tag `vX.Y.Z` on the merge commit, push the tag, approve the `npm` environment, then wait for the review. A new trusted publisher must be validated by a first CI publish within a few days of being added.

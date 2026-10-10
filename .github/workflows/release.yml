@@ -62,7 +62,23 @@ jobs:
       # Trusted publishing needs npm 11.5.1 or newer.
       - run: npm install --global npm@^11.5.1
       # prepublishOnly already ran in the verify job; skip it here to keep this job short.
-      - run: npm publish --provenance --access public --ignore-scripts
-      - run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+      # A prerelease version (for example 0.3.0-beta.0) is published under its own dist-tag, taken
+      # from its first identifier (beta, rc, ...), never `latest`, so `npx ...@latest` keeps
+      # resolving to the last stable release. npm refuses a prerelease without an explicit tag.
+      - name: Publish to npm
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [[ "$version" == *-* ]]; then
+            tag=$(node -p "process.argv[1].split('-')[1].split('.')[0]" "$version")
+            npm publish --provenance --access public --ignore-scripts --tag "$tag"
+          else
+            npm publish --provenance --access public --ignore-scripts
+          fi
+      - name: Create the GitHub release
+        run: |
+          version=$(node -p "require('./package.json').version")
+          flags=""
+          if [[ "$version" == *-* ]]; then flags="--prerelease"; fi
+          gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag $flags
         env:
           GH_TOKEN: ${{ github.token }}
