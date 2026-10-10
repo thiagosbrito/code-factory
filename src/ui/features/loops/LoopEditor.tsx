@@ -9,6 +9,9 @@ import { LoopPalette } from "./LoopPalette";
 import { redo, undo } from "./loop-editor-model";
 import { useLoopEditorController } from "./useLoopEditorController";
 import { NativeTranslation } from "./NativeTranslation";
+import { LazyLoopGraphView } from "./LazyLoopGraphView";
+import { LoopViewSwitch } from "./LoopViewSwitch";
+import { useLoopEditorView } from "./loop-editor-view";
 
 export const LoopEditor = ({
   initial,
@@ -39,6 +42,7 @@ export const LoopEditor = ({
     save,
     publish,
   } = useLoopEditorController({ initial, project, agents, onPublished });
+  const { view, setView } = useLoopEditorView();
   return (
     <div className="mt-5 min-h-[680px] rounded-xl border bg-card shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
@@ -62,7 +66,8 @@ export const LoopEditor = ({
           </div>
           <span className="text-xs text-muted-foreground">Draft v{loop.version}</span>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <LoopViewSwitch view={view} onChange={setView} />
           <Button
             variant="outline"
             disabled={busy || !history.past.length}
@@ -93,7 +98,16 @@ export const LoopEditor = ({
       <NativeTranslation loop={loop} apply={apply} disabled={busy} />
       <fieldset disabled={busy} className="grid min-h-[590px] lg:grid-cols-[210px_minmax(0,1fr)]">
         <LoopPalette loop={loop} apply={apply} setMessage={setMessage} />
-        <LoopStageBoard loop={loop} apply={apply} openDrawer={openDrawer} setMessage={setMessage} />
+        {view === "board" ? (
+          <LoopStageBoard
+            loop={loop}
+            apply={apply}
+            openDrawer={openDrawer}
+            setMessage={setMessage}
+          />
+        ) : (
+          <LazyLoopGraphView loop={loop} onUseBoard={() => setView("board")} />
+        )}
       </fieldset>
       {selected && (
         <LoopStepDrawer
