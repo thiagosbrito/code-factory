@@ -134,4 +134,18 @@ describe("collapsible main sidebar", () => {
     expect(screen.getByRole("button", { name: "Exit demo" }).textContent).toBe("Exit demo");
     vi.unstubAllGlobals();
   });
+
+  it("gives the run count as the Runs button's description in both states, so its name stays Runs", async () => {
+    render(<Harness />);
+    const description = (name: string) => {
+      const button = screen.getByRole("button", { name });
+      return button.getAttribute("aria-describedby");
+    };
+    const id = description("Runs");
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id ?? "")?.textContent).toBe("3 runs");
+    await userEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(description("Runs")).toBe(id);
+    expect(document.getElementById(id ?? "")?.textContent).toBe("3 runs");
+  });
 });

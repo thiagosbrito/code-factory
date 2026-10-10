@@ -302,8 +302,8 @@
 .graph-edge-delete {
   position: absolute;
   pointer-events: all;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 9999px;
   border: 1px solid var(--border);
   background: var(--card);
@@ -314,6 +314,7 @@
 }
 .graph-edge-delete:focus-visible {
   outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 /* Edges are never animated by the editor; this also covers library defaults. */
 @media (prefers-reduced-motion: reduce) {

@@ -46,17 +46,61 @@ const removalWarnings = (
   return warnings;
 };
 
+/** Review and Validate steps receive the results of every upstream step on the same candidate. */
+const receivesUpstream = (stage: ReturnType<typeof stageOf>): boolean =>
+  stage === "review" || stage === "validation";
+
+/**
+ * True when the step has an ancestor that is not a direct dependency. The scheduler always gives a
+ * step its direct dependencies' results; a review or validation step additionally gets those of
+ * every further-upstream step, so only such a step's inputs depend on its lane.
+ */
+const hasIndirectAncestor = (loop: LoopDefinition, stepId: string): boolean => {
+  const direct = new Set(loop.dependencies.filter((edge) => edge.to === stepId).map((e) => e.from));
+  const seen = new Set<string>();
+  const queue = [...direct];
+  while (queue.length) {
+    const id = queue.pop();
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    for (const edge of loop.dependencies) if (edge.to === id) queue.push(edge.from);
+  }
+  return [...seen].some((id) => !direct.has(id));
+};
+
+const UPSTREAM_GAIN =
+  " It also receives the results of every upstream step on the same candidate, not only its direct dependencies.";
+const UPSTREAM_LOSS =
+  " It also stops receiving the results of every upstream step on the same candidate; it gets only its direct dependencies.";
+
 const stageWarnings = (loop: LoopDefinition, drops: PlannedDrop[]): string[] =>
   drops.flatMap((drop) => {
     const step = loop.steps.find((item) => item.id === drop.id);
     if (!step) return [];
     const from = stageOf(step);
-    if (from === drop.stage || (from !== "review" && drop.stage !== "review")) return [];
+    if (from === drop.stage) return [];
+    // The lane only changes the step's inputs when it has ancestors beyond its direct dependencies.
+    const inputsDiffer = hasIndirectAncestor(loop, step.id);
+    const gains = inputsDiffer && !receivesUpstream(from) && receivesUpstream(drop.stage);
+    const loses = inputsDiffer && receivesUpstream(from) && !receivesUpstream(drop.stage);
+    // Check steps are locked to Validate (stageOf maps an unstaged check there), so they never differ.
+    if (from !== "review" && drop.stage !== "review") {
+      // Validate is not Review, but the scheduler feeds its steps the same upstream results.
+      if (gains)
+        return [
+          `Moving ${step.name} into the Validate lane changes what it receives.${UPSTREAM_GAIN}`,
+        ];
+      if (loses)
+        return [
+          `Moving ${step.name} out of the Validate lane changes what it receives.${UPSTREAM_LOSS}`,
+        ];
+      return [];
+    }
     const into = drop.stage === "review";
     return [
       into
-        ? `Moving ${step.name} into the Review lane makes it a review step: it only reads the workspace and may run alongside other reviews, and a changes-requested outcome ends the run as rejected unless a repeat group continues it on that outcome.`
-        : `Moving ${step.name} out of the Review lane stops it being a review step: it may write to the workspace, so it runs on its own, and a changes-requested outcome no longer rejects the run.`,
+        ? `Moving ${step.name} into the Review lane makes it a review step: it only reads the workspace and may run alongside other reviews, and a changes-requested outcome ends the run as rejected unless a repeat group continues it on that outcome.${gains ? UPSTREAM_GAIN : ""}`
+        : `Moving ${step.name} out of the Review lane stops it being a review step: it may write to the workspace, so it runs on its own, and a changes-requested outcome no longer rejects the run.${loses ? UPSTREAM_LOSS : ""}`,
     ];
   });
 

@@ -1,3 +1,4 @@
+import type { LoopDefinition } from "../src/domain/loop.js";
 import { describe, expect, it } from "vitest";
 import { planDrops } from "../src/ui/features/loops/graph/graph-actions.js";
 import { laneOriginX } from "../src/ui/features/loops/graph/graph-layout.js";
@@ -141,14 +142,62 @@ describe("warnings before moving a step to another lane", () => {
     expect(warnings[0]).toContain("no longer rejects the run");
   });
 
-  it("does not warn for a move between two other lanes or within a lane", () => {
-    const loop = build(["a", "b"], { dependencies: [edge("a", "b")] });
-    const toValidate = planDrops(loop, [
-      { id: "b", position: { x: laneOriginX("validation") + 16, y: 400 } },
+  const chain = () => build(["a", "b", "c"], { dependencies: [edge("a", "b"), edge("b", "c")] });
+  const into = (
+    loop: LoopDefinition,
+    id: string,
+    lane: "validation" | "review" | "implementation",
+  ) =>
+    changeWarnings(loop, {
+      kind: "drop",
+      drops: planDrops(loop, [{ id, position: { x: laneOriginX(lane) + 16, y: 400 } }]),
+    });
+  const staged = (loop: LoopDefinition, id: string, stage: "validation" | "review") => ({
+    ...loop,
+    steps: loop.steps.map((item) => (item.id === id ? { ...item, stage } : item)),
+  });
+
+  it("warns when an agent step with indirect ancestors enters or leaves Validate", () => {
+    const entering = into(chain(), "c", "validation");
+    expect(entering).toHaveLength(1);
+    expect(entering[0]).toContain("into the Validate lane");
+    expect(entering[0]).toContain("results of every upstream step on the same candidate");
+    const leaving = into(staged(chain(), "c", "validation"), "c", "implementation");
+    expect(leaving).toHaveLength(1);
+    expect(leaving[0]).toContain("out of the Validate lane");
+    expect(leaving[0]).toContain("stops receiving");
+  });
+
+  it("does not warn about inputs when the step has only direct dependencies or none", () => {
+    // b's only ancestor is its direct dependency a; a has no ancestors: the lane changes nothing.
+    const direct = build(["a", "b"], { dependencies: [edge("a", "b")] });
+    expect(into(direct, "b", "validation")).toEqual([]);
+    expect(into(direct, "a", "validation")).toEqual([]);
+    // Review still explains what a review step is, without the inputs sentence.
+    const review = into(direct, "b", "review");
+    expect(review).toHaveLength(1);
+    expect(review[0]).toContain("into the Review lane");
+    expect(review[0]).not.toContain("upstream");
+  });
+
+  it("adds the inputs sentence when a move into Review gains upstream results, and not between Review and Validate", () => {
+    const gained = into(chain(), "c", "review");
+    expect(gained).toHaveLength(1);
+    expect(gained[0]).toContain("It also receives the results of every upstream step");
+    const across = into(staged(chain(), "c", "review"), "c", "validation");
+    expect(across).toHaveLength(1);
+    expect(across[0]).toContain("out of the Review lane");
+    expect(across[0]).not.toContain("upstream");
+  });
+
+  it("does not warn for a move between lanes that treat inputs alike, or within a lane", () => {
+    const loop = chain();
+    const toPlan = planDrops(loop, [
+      { id: "c", position: { x: laneOriginX("planning") + 16, y: 400 } },
     ]);
-    expect(changeWarnings(loop, { kind: "drop", drops: toValidate })).toEqual([]);
+    expect(changeWarnings(loop, { kind: "drop", drops: toPlan })).toEqual([]);
     const within = planDrops(loop, [
-      { id: "b", position: { x: laneOriginX("implementation") + 16, y: 600 } },
+      { id: "c", position: { x: laneOriginX("implementation") + 16, y: 600 } },
     ]);
     expect(changeWarnings(loop, { kind: "drop", drops: within })).toEqual([]);
   });
