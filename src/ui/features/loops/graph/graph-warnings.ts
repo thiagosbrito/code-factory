@@ -46,17 +46,40 @@ const removalWarnings = (
   return warnings;
 };
 
+/** Review and Validate steps receive the results of every upstream step on the same candidate. */
+const receivesUpstream = (stage: ReturnType<typeof stageOf>): boolean =>
+  stage === "review" || stage === "validation";
+
+const UPSTREAM_GAIN =
+  " It also receives the results of every upstream step on the same candidate, not only its direct dependencies.";
+const UPSTREAM_LOSS =
+  " It also stops receiving the results of every upstream step on the same candidate; it gets only its direct dependencies.";
+
 const stageWarnings = (loop: LoopDefinition, drops: PlannedDrop[]): string[] =>
   drops.flatMap((drop) => {
     const step = loop.steps.find((item) => item.id === drop.id);
     if (!step) return [];
     const from = stageOf(step);
-    if (from === drop.stage || (from !== "review" && drop.stage !== "review")) return [];
+    if (from === drop.stage) return [];
+    const gains = !receivesUpstream(from) && receivesUpstream(drop.stage);
+    const loses = receivesUpstream(from) && !receivesUpstream(drop.stage);
+    if (from !== "review" && drop.stage !== "review") {
+      // Validate is not Review, but the scheduler feeds its steps the same upstream results.
+      if (gains)
+        return [
+          `Moving ${step.name} into the Validate lane changes what it receives.${UPSTREAM_GAIN}`,
+        ];
+      if (loses)
+        return [
+          `Moving ${step.name} out of the Validate lane changes what it receives.${UPSTREAM_LOSS}`,
+        ];
+      return [];
+    }
     const into = drop.stage === "review";
     return [
       into
-        ? `Moving ${step.name} into the Review lane makes it a review step: it only reads the workspace and may run alongside other reviews, and a changes-requested outcome ends the run as rejected unless a repeat group continues it on that outcome.`
-        : `Moving ${step.name} out of the Review lane stops it being a review step: it may write to the workspace, so it runs on its own, and a changes-requested outcome no longer rejects the run.`,
+        ? `Moving ${step.name} into the Review lane makes it a review step: it only reads the workspace and may run alongside other reviews, and a changes-requested outcome ends the run as rejected unless a repeat group continues it on that outcome.${gains ? UPSTREAM_GAIN : ""}`
+        : `Moving ${step.name} out of the Review lane stops it being a review step: it may write to the workspace, so it runs on its own, and a changes-requested outcome no longer rejects the run.${loses ? UPSTREAM_LOSS : ""}`,
     ];
   });
 

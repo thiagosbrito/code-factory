@@ -87,6 +87,10 @@ describe("Board to Graph round trip keeps the run the scheduler sees", () => {
       ]),
     );
     expect(errors).toEqual([]);
+    // Validate steps receive every upstream result, so the move asks first and records nothing yet.
+    expect(hook.result.current.confirmation.warnings?.[0]).toContain("into the Validate lane");
+    expect(history().past).toHaveLength(0);
+    act(() => hook.result.current.confirmation.confirm());
     expect(history().past).toHaveLength(1);
     const after = history().present;
     expect(after).not.toBe(before);

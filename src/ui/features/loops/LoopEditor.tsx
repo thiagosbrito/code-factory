@@ -45,8 +45,8 @@ export const LoopEditor = ({
     publish,
   } = useLoopEditorController({ initial, project, agents, onPublished });
   const projectDefault = project.project?.defaultBinding ?? null;
-  // Stable between renders that change nothing it reads, so the Graph's step cards do not all
-  // re-render on every keystroke in the drawer.
+  // Stable while the steps, project default and agents are unchanged (an edit outside the steps,
+  // such as the title, does not re-render every Graph card). Editing a step does.
   const factsOf = useMemo(
     () => (stepId: string) => {
       const step = loop.steps.find((item) => item.id === stepId);
@@ -64,12 +64,12 @@ export const LoopEditor = ({
   return (
     <div className="mt-5 min-h-[680px] rounded-xl border bg-card shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
           <Button ref={backRef} variant="ghost" disabled={busy} onClick={onBack}>
             ← Loops
           </Button>
-          <span className="h-6 border-l" />
-          <div className="text-xs text-muted-foreground">
+          <span className="hidden h-6 border-l sm:block" />
+          <div className="min-w-0 text-xs text-muted-foreground">
             <label htmlFor="loop-title">Loop title</label>
             <Input
               id="loop-title"
@@ -79,7 +79,7 @@ export const LoopEditor = ({
               onChange={(event) =>
                 apply((current) => parseLoop({ ...current, name: event.target.value }))
               }
-              className="mt-1 w-64"
+              className="mt-1 w-64 max-w-full"
             />
           </div>
           <span className="text-xs text-muted-foreground">Draft v{loop.version}</span>

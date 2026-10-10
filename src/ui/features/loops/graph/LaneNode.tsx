@@ -15,7 +15,7 @@ export const LaneNode = ({ data }: NodeProps<LaneFlowNode>) => {
               type="button"
               aria-label={`Add step to ${data.title}`}
               // Lanes are not interactive nodes, so the library would otherwise swallow the pointer.
-              className="nodrag nopan pointer-events-auto rounded border bg-background px-1.5 text-[11px] font-medium hover:bg-accent"
+              className="nodrag nopan pointer-events-auto min-h-6 rounded border bg-background px-1.5 text-[11px] font-medium hover:bg-accent"
               onClick={() => actions.addStep(data.stage)}
             >
               + Add step

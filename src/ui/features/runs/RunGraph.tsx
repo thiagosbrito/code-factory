@@ -251,7 +251,13 @@ export const RunGraph = ({
                       >
                         {shown}
                       </span>
-                      <StepElapsed step={step} />
+                      <StepElapsed
+                        key={
+                          step?.attempts.find((attempt) => attempt.status === "running")?.id ??
+                          "idle"
+                        }
+                        step={step}
+                      />
                     </span>
                     <strong className="mt-2 line-clamp-2 block text-sm">{definition.name}</strong>
                     <span className="block truncate text-xs text-muted-foreground">

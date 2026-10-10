@@ -141,12 +141,58 @@ describe("warnings before moving a step to another lane", () => {
     expect(warnings[0]).toContain("no longer rejects the run");
   });
 
-  it("does not warn for a move between two other lanes or within a lane", () => {
+  it("warns when an agent step enters or leaves the Validate lane: it then receives all upstream results", () => {
     const loop = build(["a", "b"], { dependencies: [edge("a", "b")] });
     const toValidate = planDrops(loop, [
       { id: "b", position: { x: laneOriginX("validation") + 16, y: 400 } },
     ]);
-    expect(changeWarnings(loop, { kind: "drop", drops: toValidate })).toEqual([]);
+    const into = changeWarnings(loop, { kind: "drop", drops: toValidate });
+    expect(into).toHaveLength(1);
+    expect(into[0]).toContain("into the Validate lane");
+    expect(into[0]).toContain("results of every upstream step on the same candidate");
+    const validating = {
+      ...loop,
+      steps: loop.steps.map((item) =>
+        item.id === "b" ? { ...item, stage: "validation" as const } : item,
+      ),
+    };
+    const back = planDrops(validating, [
+      { id: "b", position: { x: laneOriginX("implementation") + 16, y: 400 } },
+    ]);
+    const out = changeWarnings(validating, { kind: "drop", drops: back });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain("out of the Validate lane");
+    expect(out[0]).toContain("stops receiving");
+  });
+
+  it("adds the upstream note when a move into Review gains it, and not between Review and Validate", () => {
+    const loop = build(["a", "b"], { dependencies: [edge("a", "b")] });
+    const toReview = planDrops(loop, [
+      { id: "b", position: { x: laneOriginX("review") + 16, y: 400 } },
+    ]);
+    const into = changeWarnings(loop, { kind: "drop", drops: toReview });
+    expect(into).toHaveLength(1);
+    expect(into[0]).toContain("It also receives the results of every upstream step");
+    const reviewing = {
+      ...loop,
+      steps: loop.steps.map((item) =>
+        item.id === "b" ? { ...item, stage: "review" as const } : item,
+      ),
+    };
+    const across = planDrops(reviewing, [
+      { id: "b", position: { x: laneOriginX("validation") + 16, y: 400 } },
+    ]);
+    const warnings = changeWarnings(reviewing, { kind: "drop", drops: across });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).not.toContain("upstream");
+  });
+
+  it("does not warn for a move between lanes that treat inputs alike, or within a lane", () => {
+    const loop = build(["a", "b"], { dependencies: [edge("a", "b")] });
+    const toPlan = planDrops(loop, [
+      { id: "b", position: { x: laneOriginX("planning") + 16, y: 400 } },
+    ]);
+    expect(changeWarnings(loop, { kind: "drop", drops: toPlan })).toEqual([]);
     const within = planDrops(loop, [
       { id: "b", position: { x: laneOriginX("implementation") + 16, y: 600 } },
     ]);

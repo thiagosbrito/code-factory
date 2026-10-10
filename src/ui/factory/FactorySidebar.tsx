@@ -68,6 +68,9 @@ export const FactorySidebar = ({
           </div>
         </>
       )}
+      <span id="factory-runs-count" className="sr-only">
+        {runs} {runs === 1 ? "run" : "runs"}
+      </span>
       <nav aria-label="Factory" className={`grid gap-1 ${collapsed ? "mt-6" : "mt-8"}`}>
         {(["runs", "loops", "settings"] as const).map((item) => {
           const ItemIcon = screenIcons[item];
@@ -76,6 +79,8 @@ export const FactorySidebar = ({
               key={item}
               onClick={() => setScreen(item)}
               aria-current={screen === item ? "page" : undefined}
+              // The count is a description, so the name stays "Runs" whether or not the rail is collapsed.
+              {...(item === "runs" ? { "aria-describedby": "factory-runs-count" } : {})}
               // The collapsed rail shows the icon only, so the label moves to the name and tooltip.
               {...(collapsed
                 ? {

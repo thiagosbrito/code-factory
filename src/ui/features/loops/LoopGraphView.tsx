@@ -88,13 +88,24 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
   };
   return (
     <section ref={section} aria-label="Graph view" className="flex min-w-0 flex-col">
-      <p className="border-b px-4 py-2 text-xs text-muted-foreground">
+      {/* On a phone the help would push the canvas down: it folds away below md. */}
+      <p className="hidden border-b px-4 py-2 text-xs text-muted-foreground md:block">
         Drag from a step&apos;s right handle to another step&apos;s left handle to connect them.
         Select a connection and press Delete to remove it. Drop a step in another lane to change its
         stage. By keyboard: Tab to a step, then Space selects it, C connects it, D disconnects it,
         Enter opens it, and Alt with an arrow moves to a neighbouring step. Groups, joins and
         decisions are shown here and edited in the Board view.
       </p>
+      <details className="border-b px-4 py-2 text-xs text-muted-foreground md:hidden">
+        <summary className="cursor-pointer font-medium">How to use the Graph</summary>
+        <p className="mt-1">
+          Drag from a step&apos;s right handle to another step&apos;s left handle to connect them.
+          Select a connection and press Delete to remove it. Drop a step in another lane to change
+          its stage. By keyboard: Tab to a step, then Space selects it, C connects it, D disconnects
+          it, Enter opens it, and Alt with an arrow moves to a neighbouring step. Groups, joins and
+          decisions are shown here and edited in the Board view.
+        </p>
+      </details>
       <fieldset className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 border-b px-4 py-2 text-sm">
         <legend className="sr-only">Step connections</legend>
         <span className="text-muted-foreground">

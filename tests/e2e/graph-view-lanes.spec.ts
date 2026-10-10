@@ -160,3 +160,19 @@ test("adding to a lane after positions are stored lands in the lane without over
   await reopenDraft(page);
   expect(await laneOf(page, "New agent step", "2. Plan")).toBe(true);
 });
+
+test("moving an agent step into Validate asks first, because it then receives every upstream result", async ({
+  page,
+  harness,
+}) => {
+  await openStarterInGraph(page, harness.origin);
+  const before = await insideLane(page, "Implement", "3. Implementation");
+  await dropInto(page, "Implement", "5. Validate");
+  const dialog = page.getByRole("dialog", { name: "Apply this change?" });
+  await expect(dialog).toContainText("into the Validate lane");
+  await expect(dialog).toContainText("results of every upstream step");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await insideLane(page, "Implement", "3. Implementation")).toEqual(before);
+  await expect(undo(page)).toBeDisabled();
+});

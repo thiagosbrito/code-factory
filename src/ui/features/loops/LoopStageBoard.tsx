@@ -83,14 +83,14 @@ export const LoopStageBoard = ({
                       {loop.joins
                         .filter((join) => join.stepId === step.id)
                         .map((join) => (
-                          <p key="join" className="text-[10px] text-purple-700">
+                          <p key={`join-${join.stepId}`} className="text-[10px] text-purple-700">
                             Join {join.mode}: {join.from.length} sources
                           </p>
                         ))}
                       {loop.decisions
                         .filter((item) => item.stepId === step.id)
                         .map((item) => (
-                          <p key="decision" className="text-[10px] text-amber-700">
+                          <p key={`decision-${item.stepId}`} className="text-[10px] text-amber-700">
                             Decision:{" "}
                             {item.branches
                               .map(
