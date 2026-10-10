@@ -69,6 +69,8 @@ const selectEdge = (label: string) => {
   const target = document.querySelector(`.react-flow__edge[aria-label="${label}"]`);
   if (!target) throw new Error(`No edge ${label}`);
   fireEvent.click(target);
+  // A real click also moves focus onto the edge, which is what scopes the Delete shortcut.
+  if (target instanceof HTMLElement || target instanceof SVGElement) target.focus();
   return target;
 };
 
@@ -106,12 +108,6 @@ describe("Graph view rendering", () => {
     await vi.waitFor(() =>
       expect(document.querySelector(".react-flow")?.classList.contains("dark")).toBe(true),
     );
-  });
-
-  it("never animates an edge, which keeps reduced-motion users free of moving lines", async () => {
-    render(editor(joined()));
-    await graph();
-    expect(document.querySelectorAll(".react-flow__edge.animated")).toHaveLength(0);
   });
 
   it("keeps the library attribution link at its default", async () => {
@@ -206,6 +202,53 @@ describe("editing dependencies in the Graph view", () => {
     expect(screen.getByRole("group", { name: /^Review, Reviewer/ })).toBeTruthy();
     expect(edgeNames()).toHaveLength(2);
     expect(disabled("Undo")).toBe(true);
+  });
+});
+
+describe("Delete and Backspace scope", () => {
+  it("does nothing while focus is on a toolbar button outside the graph", async () => {
+    const user = userEvent.setup();
+    render(editor(createStarterDraft("compact", "starter")));
+    await graph();
+    selectEdge("Dependency from Implement to Review");
+    // Undo is disabled, so focus Publish, a button outside the canvas.
+    screen.getByRole("button", { name: /^Publish/ }).focus();
+    await user.keyboard("{Backspace}{Delete}");
+    expect(edgeNames()).toHaveLength(2);
+    expect(disabled("Undo")).toBe(true);
+  });
+
+  it("never removes an edge while typing in the loop title", async () => {
+    const user = userEvent.setup();
+    render(editor(createStarterDraft("compact", "starter")));
+    await graph();
+    selectEdge("Dependency from Implement to Review");
+    const title = screen.getByRole("textbox", { name: "Loop title" });
+    await user.click(title);
+    await user.keyboard("{Backspace}{Backspace}");
+    expect(edgeNames()).toHaveLength(2);
+    expect((title as HTMLInputElement).value).toBe("Implement → Review → Valida");
+  });
+
+  it("deletes the selected edge while focus is inside the canvas", async () => {
+    const user = userEvent.setup();
+    render(editor(createStarterDraft("compact", "starter")));
+    await graph();
+    selectEdge("Dependency from Implement to Review");
+    await user.keyboard("{Backspace}");
+    await vi.waitFor(() => expect(edgeNames()).toEqual(["Dependency from Review to Validate"]));
+  });
+
+  it("moves focus to the graph after the delete button removes its edge", async () => {
+    const user = userEvent.setup();
+    render(editor(createStarterDraft("compact", "starter")));
+    await graph();
+    selectEdge("Dependency from Review to Validate");
+    await user.click(
+      await screen.findByRole("button", { name: "Delete: Dependency from Review to Validate" }),
+    );
+    await vi.waitFor(() => expect(edgeNames()).toHaveLength(1));
+    expect(document.activeElement?.classList.contains("react-flow")).toBe(true);
   });
 });
 

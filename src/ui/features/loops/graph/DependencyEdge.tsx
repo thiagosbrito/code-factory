@@ -46,7 +46,13 @@ export const DependencyEdge = ({
             aria-label={`Delete: ${label}`}
             className="nodrag nopan graph-edge-delete"
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
-            onClick={() => void deleteElements({ edges: [{ id }] })}
+            onClick={(event) => {
+              // The button unmounts with its edge; keep focus in the graph instead of losing it.
+              const region = event.currentTarget.closest(".react-flow");
+              void deleteElements({ edges: [{ id }] }).then(() => {
+                if (region instanceof HTMLElement) region.focus();
+              });
+            }}
           >
             ×
           </button>

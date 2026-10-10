@@ -71,17 +71,38 @@ export const laneBox = async (page: Page, title: string) => {
 };
 
 /** The canvas zoom, so pixel distances on screen can be stated in canvas units. */
-export const zoomOf = (page: Page): Promise<number> =>
+const currentZoom = (page: Page): Promise<number> =>
   page.locator(".react-flow__viewport").evaluate((viewport) => {
     const matrix = new DOMMatrixReadOnly(getComputedStyle(viewport).transform);
     return matrix.a;
   });
 
-/** Clicks the middle of a drawn connection with the real pointer, which selects it. */
+/** Waits until the opening fit has settled (two equal readings in a row), then returns the zoom. */
+export const zoomOf = async (page: Page): Promise<number> => {
+  let previous = -1;
+  await expect
+    .poll(async () => {
+      const zoom = await currentZoom(page);
+      const settled = zoom === previous;
+      previous = zoom;
+      return settled;
+    })
+    .toBe(true);
+  return currentZoom(page);
+};
+
+/** Clicks a point ON the drawn curve (its midpoint, in screen space), which selects the edge. */
 export const selectDependency = async (page: Page, from: string, to: string) => {
-  const box = await dependency(page, from, to).locator(".react-flow__edge-path").boundingBox();
-  if (!box) throw new Error("Edge has no layout");
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const path = dependency(page, from, to).locator(".react-flow__edge-path");
+  const point = await path.evaluate((element) => {
+    if (!(element instanceof SVGPathElement)) throw new Error("Not a path");
+    const middle = element.getPointAtLength(element.getTotalLength() / 2);
+    const matrix = element.getScreenCTM();
+    if (!matrix) throw new Error("Path is not rendered");
+    const screen = new DOMPoint(middle.x, middle.y).matrixTransform(matrix);
+    return { x: screen.x, y: screen.y };
+  });
+  await page.mouse.click(point.x, point.y);
 };
 
 /** A node's position relative to its lane, which does not change when the page layout shifts. */

@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type KeyboardEvent,
+} from "react";
 import {
   useEdgesState,
   useNodesState,
-  type FinalConnectionState,
   type IsValidConnection,
   type OnConnect,
-  type OnConnectEnd,
   type OnBeforeDelete,
   type OnNodeDrag,
   type NodeMouseHandler,
@@ -13,11 +18,14 @@ import {
 import type { LoopDefinition } from "../../../../domain/loop.js";
 import {
   connectAction,
+  connectEndRefusal,
   connectionError,
   disconnectAction,
   dropAction,
   planDrops,
+  refuse,
   type Apply,
+  type ConnectEnd,
 } from "./graph-actions";
 import {
   buildGraph,
@@ -28,26 +36,21 @@ import {
 
 const isStepNode = (node: GraphNode): node is StepFlowNode => node.type === "step";
 
-/** Keeps the previous graph object while the derived content is identical, so reseeding is rare. */
-const useStableGraph = (loop: LoopDefinition) => {
-  const built = buildGraph(loop);
-  const key = JSON.stringify(built);
-  const [stable, setStable] = useState({ key, built });
-  // Adjusting state during render is React's sanctioned way to derive state from props: React
-  // re-renders at once, before anything is committed, so the effect below sees one new graph.
-  if (stable.key !== key) setStable({ key, built });
-  return stable.key === key ? stable.built : built;
+/** Carries the current selection over to a freshly derived element list, matching by id. */
+const keepSelection = <T extends { id: string; selected?: boolean }>(
+  next: T[],
+  previous: T[],
+): T[] => {
+  const selected = new Set(previous.filter((item) => item.selected).map((item) => item.id));
+  return selected.size
+    ? next.map((item) => (selected.has(item.id) ? { ...item, selected: true } : item))
+    : next;
 };
 
-/** The endpoints of a finished connection gesture, in dependency direction (source to target). */
-const endpointsOf = (state: FinalConnectionState): { from: string; to: string } | null => {
-  const dragged = state.fromNode?.id;
-  const dropped = state.toNode?.id;
-  if (!dragged || !dropped) return null;
-  return state.fromHandle?.type === "target"
-    ? { from: dropped, to: dragged }
-    : { from: dragged, to: dropped };
-};
+/** Typing in a field must never be read as a graph shortcut. */
+const isTextTarget = (target: EventTarget): boolean =>
+  target instanceof HTMLElement &&
+  target.matches('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
 
 /**
  * Flow state and handlers for the Graph view. The loop stays authoritative: every gesture becomes
@@ -63,24 +66,30 @@ export const useGraphEditor = ({
   apply: Apply;
   openDrawer: (id: string, origin?: HTMLElement) => void;
 }) => {
-  const seed = useStableGraph(loop);
+  // Derived once per loop value; the flow is reseeded only when the loop itself changes.
+  const seed = useMemo(() => buildGraph(loop), [loop]);
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphNode>(seed.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<DependencyFlowEdge>(seed.edges);
   // Handlers read the newest loop and graph through a ref, so they stay stable between renders.
-  const latest = useRef({ loop, seed });
+  const latest = useRef({ loop, seed, edges });
   useLayoutEffect(() => {
-    latest.current = { loop, seed };
-  }, [loop, seed]);
+    latest.current = { loop, seed, edges };
+  }, [loop, seed, edges]);
+  // A reseed during a drag (for example Undo pressed mid-drag) would yank the node from under the
+  // pointer; the drop handler reconciles with the newest loop once the drag ends.
+  const dragging = useRef(false);
+
+  const reseed = useCallback(() => {
+    const { seed: next } = latest.current;
+    setNodes((previous) => keepSelection(next.nodes, previous));
+    setEdges((previous) => keepSelection(next.edges, previous));
+  }, [setNodes, setEdges]);
 
   useEffect(() => {
-    setNodes(seed.nodes);
-    setEdges(seed.edges);
-  }, [seed, setNodes, setEdges]);
+    if (!dragging.current) reseed();
+  }, [seed, reseed]);
 
-  const restore = useCallback(() => {
-    setNodes(latest.current.seed.nodes);
-    setEdges(latest.current.seed.edges);
-  }, [setNodes, setEdges]);
+  const restore = reseed;
 
   const isValidConnection = useCallback<IsValidConnection>(
     (connection) =>
@@ -95,12 +104,27 @@ export const useGraphEditor = ({
     [apply],
   );
 
-  // A drop on a target the dry run refused never reaches onConnect, so the reason is reported here
-  // through the same inline message by applying the refused action (it throws and changes nothing).
-  const onConnectEnd = useCallback<OnConnectEnd>(
-    (_event, state) => {
-      const ends = state.isValid === false ? endpointsOf(state) : null;
-      if (ends) apply(connectAction(ends.from, ends.to));
+  // A released connection the dry run refused never reaches onConnect, so the reason is reported
+  // here. This only explains: the refusal is shown inline through a throwing action, which records
+  // no history and never adds a dependency, even when the library resolved a handle of the wrong kind.
+  const reportConnectEnd = useCallback(
+    (end: ConnectEnd) => {
+      const message = connectEndRefusal(latest.current.loop, end);
+      if (message) apply(refuse(message));
+    },
+    [apply],
+  );
+
+  // Delete and Backspace are handled on the flow wrapper, not on the document, so they act only
+  // while focus is inside the graph and never while typing or on a toolbar button.
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if ((event.key !== "Delete" && event.key !== "Backspace") || isTextTarget(event.target))
+        return;
+      const doomed = latest.current.edges.filter((edge) => edge.selected);
+      if (!doomed.length) return;
+      event.preventDefault();
+      apply(disconnectAction(doomed));
     },
     [apply],
   );
@@ -116,8 +140,13 @@ export const useGraphEditor = ({
     [apply],
   );
 
+  const onNodeDragStart = useCallback<OnNodeDrag<GraphNode>>(() => {
+    dragging.current = true;
+  }, []);
+
   const onNodeDragStop = useCallback<OnNodeDrag<GraphNode>>(
     (_event, _node, dragged) => {
+      dragging.current = false;
       const moves = dragged.filter(isStepNode).map(({ id, position }) => ({ id, position }));
       const drops = planDrops(latest.current.loop, moves);
       if (!drops.length || !apply(dropAction(drops))) restore();
@@ -143,8 +172,10 @@ export const useGraphEditor = ({
     onEdgesChange,
     isValidConnection,
     onConnect,
-    onConnectEnd,
+    reportConnectEnd,
+    onKeyDown,
     onBeforeDelete,
+    onNodeDragStart,
     onNodeDragStop,
     onNodeClick,
   };

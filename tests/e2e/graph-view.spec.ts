@@ -122,6 +122,8 @@ test("one drag across lanes is a single undo entry", async ({ page, harness }) =
   const plan = await laneBox(page, "2. Plan");
   await dragStepTo(page, "Implement", { x: plan.x + plan.width / 2, y: plan.y + 300 });
   await expect(page.getByRole("button", { name: "Undo" })).toBeEnabled();
+  // A drag is not a click: the step drawer must stay closed.
+  await expect(page.getByRole("dialog", { name: "Step configuration" })).toHaveCount(0);
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save draft" })).toBeDisabled();

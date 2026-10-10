@@ -23,7 +23,7 @@
   --canvas: #f5f6f3;
   --graph-bg: #f4f5f1;
   --graph-dot: #c9d0c9;
-  --graph-edge: #8b9690;
+  --graph-edge: #6f7a74;
   --status-bg: #edf0ec;
   --status-fg: #47534c;
   --status-active-bg: #e1f3f0;
@@ -216,6 +216,11 @@
 }
 .graph-handle.react-flow__handle-right {
   right: -6px;
+}
+/* The library removes the focus outline from nodes; keyboard users still need to see where they are. */
+.react-flow__node-step:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .graph-lane {
   background-color: color-mix(in oklab, var(--card) 55%, transparent);

@@ -120,3 +120,24 @@ export const displayPositions = (loop: LoopDefinition): Map<string, Point> => {
     ]),
   );
 };
+
+const overlaps = (left: Point, right: Point): boolean =>
+  Math.abs(left.x - right.x) < NODE_WIDTH && Math.abs(left.y - right.y) < NODE_HEIGHT;
+
+/**
+ * Moves a point to the nearest free row of its lane when it would sit on another node; a free
+ * point is returned unchanged. `neighbours` are the other nodes of the same lane. With no free
+ * row left the point is kept (overlap is accepted rather than refusing the drop).
+ */
+export const nudgeToFreeRow = (point: Point, neighbours: Point[], height: number): Point => {
+  if (!neighbours.some((other) => overlaps(point, other))) return point;
+  const rows: Point[] = [];
+  for (let y = FIRST_ROW_Y; y + NODE_HEIGHT + LANE_PADDING <= height; y += ROW_HEIGHT)
+    rows.push({ x: point.x, y });
+  const free = rows.filter((row) => !neighbours.some((other) => overlaps(row, other)));
+  const nearest = free.reduce<Point | undefined>(
+    (best, row) => (!best || Math.abs(row.y - point.y) < Math.abs(best.y - point.y) ? row : best),
+    undefined,
+  );
+  return nearest ?? point;
+};
