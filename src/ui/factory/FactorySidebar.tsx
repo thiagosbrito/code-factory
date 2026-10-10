@@ -1,6 +1,7 @@
 import { Button } from "@/shared/components/button";
 import { Brand } from "../shared/Brand";
 import {
+  BookIcon,
   LoopsIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -11,16 +12,17 @@ import {
 } from "../shared/icons";
 import { ThemeToggle } from "../shared/ThemeToggle";
 
-export type Screen = "runs" | "loops" | "settings";
+export type Screen = "runs" | "loops" | "settings" | "manual";
 export const screenLabels: Record<Screen, string> = {
   runs: "Runs",
   loops: "Loops",
   settings: "Settings",
+  manual: "User manual",
 };
 
 const availabilityNotice = "Agent execution requires verified availability";
 
-const screenIcons: Record<Screen, () => React.ReactElement> = {
+const screenIcons: Record<Exclude<Screen, "manual">, () => React.ReactElement> = {
   runs: RunsIcon,
   loops: LoopsIcon,
   settings: SettingsIcon,
@@ -149,6 +151,18 @@ export const FactorySidebar = ({
         ) : (
           availabilityNotice
         )}
+        <button
+          type="button"
+          onClick={() => setScreen("manual")}
+          aria-current={screen === "manual" ? "page" : undefined}
+          {...(collapsed ? { "aria-label": screenLabels.manual, title: screenLabels.manual } : {})}
+          className={`flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${
+            collapsed ? "justify-center" : ""
+          } ${screen === "manual" ? "bg-white/15 text-white" : "hover:bg-white/10"}`}
+        >
+          <BookIcon />
+          {!collapsed && screenLabels.manual}
+        </button>
         <button
           type="button"
           onClick={onToggleCollapsed}
