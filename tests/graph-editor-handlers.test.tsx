@@ -83,6 +83,10 @@ describe("Graph editor handlers", () => {
         [{ ...b, position: { x: laneOriginX("review") + 20, y: 200 } }],
       ),
     );
+    // Moving into the Review lane changes scheduling, so it waits for a confirmation.
+    expect(history().past).toHaveLength(0);
+    expect(hook.result.current.confirmation.warnings?.[0]).toContain("Review lane");
+    act(() => hook.result.current.confirmation.confirm());
     expect(history().past).toHaveLength(1);
     expect(history().present.steps.find((step) => step.id === "b")).toMatchObject({
       stage: "review",

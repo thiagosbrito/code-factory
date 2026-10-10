@@ -21,6 +21,10 @@ export const parseEdited = (input: unknown): LoopDefinition => {
   }
 };
 
+/** The refusal for a plain connection out of a decision step; the Graph view shows it up front. */
+export const decisionSourceMessage = (from: string): string =>
+  `Step ${from} is a decision. Add a named branch to its decision instead of a plain connection.`;
+
 const requireSteps = (loop: LoopDefinition, ids: string[]): void => {
   if (ids.some((id) => !loop.steps.some((step) => step.id === id)))
     throw new Error("Select two existing steps.");
@@ -34,9 +38,7 @@ export const addDependency = (loop: LoopDefinition, from: string, to: string): L
   // A decision owns its outgoing edges: a plain edge would be an unnamed branch. Adding a branch
   // needs an outcome name, so it goes through setDecision rather than being guessed here.
   if (loop.decisions.some((decision) => decision.stepId === from))
-    throw new Error(
-      `Step ${from} is a decision. Add a named branch to its decision instead of a plain connection.`,
-    );
+    throw new Error(decisionSourceMessage(from));
   return parseEdited({
     ...loop,
     dependencies: [...loop.dependencies, { from, to }],
