@@ -13,12 +13,15 @@ import { useTheme } from "@/shared/theme";
 import { DependencyEdge } from "./graph/DependencyEdge";
 import { ConfirmPanel } from "./graph/ConfirmPanel";
 import { ContinuationEdge } from "./graph/ContinuationEdge";
+import { LaneActionsProvider } from "./graph/LaneActions";
 import { LaneNode } from "./graph/LaneNode";
 import { RegionNode } from "./graph/RegionNode";
 import { StepNode } from "./graph/StepNode";
 import type { Apply } from "./graph/graph-actions";
 import type { GraphEdge, GraphNode } from "./graph/graph-mapping";
 import { useGraphEditor } from "./graph/useGraphEditor";
+import { type Stage, stages } from "./loop-editor-model";
+import { addStepToLane } from "./loop-editor-add";
 
 const nodeTypes: NodeTypes = { step: StepNode, lane: LaneNode, region: RegionNode };
 const edgeTypes: EdgeTypes = { dependency: DependencyEdge, continuation: ContinuationEdge };
@@ -51,6 +54,12 @@ const LoopGraphView = ({ loop, apply, openDrawer }: LoopGraphViewProps) => {
   const graph = useGraphEditor({ loop, apply, openDrawer });
   const section = useRef<HTMLElement>(null);
   const { warnings, confirm, cancel } = graph.confirmation;
+  const laneActions = {
+    addStep: (stage: Stage) => {
+      if (apply((current) => addStepToLane(current, stage)))
+        graph.announce(`Added a step to ${stages.find((item) => item.id === stage)?.name}`);
+    },
+  };
   return (
     <section ref={section} aria-label="Graph view" className="flex min-w-0 flex-col">
       <p className="border-b px-4 py-2 text-xs text-muted-foreground">
@@ -62,37 +71,39 @@ const LoopGraphView = ({ loop, apply, openDrawer }: LoopGraphViewProps) => {
         {graph.announcement}
       </output>
       <div className="h-[clamp(480px,75vh,900px)] min-w-0">
-        <ReactFlow
-          nodes={graph.displayNodes}
-          edges={graph.displayEdges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          colorMode={theme}
-          onNodesChange={graph.onNodesChange}
-          onEdgesChange={graph.onEdgesChange}
-          onConnect={graph.onConnect}
-          onConnectEnd={(_event, state) => graph.reportConnectEnd(state)}
-          isValidConnection={graph.isValidConnection}
-          onBeforeDelete={graph.onBeforeDelete}
-          onNodeDragStart={graph.onNodeDragStart}
-          onNodeDragStop={graph.onNodeDragStop}
-          onSelectionDragStart={graph.onSelectionDragStart}
-          onSelectionDragStop={graph.onSelectionDragStop}
-          onNodeClick={graph.onNodeClick}
-          connectionRadius={CONNECTION_RADIUS}
-          // The library listens for Delete on the whole document. It is off so the wrapper handler
-          // below can limit it to focus inside the graph; steps are also marked non-deletable.
-          deleteKeyCode={null}
-          onKeyDown={graph.onKeyDown}
-          onKeyDownCapture={graph.onKeyDownCapture}
-          onBlur={graph.onBlur}
-          tabIndex={-1}
-          selectNodesOnDrag={false}
-          onInit={openReadably}
-          minZoom={0.3}
-        >
-          <Controls showInteractive={false} />
-        </ReactFlow>
+        <LaneActionsProvider value={laneActions}>
+          <ReactFlow
+            nodes={graph.displayNodes}
+            edges={graph.displayEdges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            colorMode={theme}
+            onNodesChange={graph.onNodesChange}
+            onEdgesChange={graph.onEdgesChange}
+            onConnect={graph.onConnect}
+            onConnectEnd={(_event, state) => graph.reportConnectEnd(state)}
+            isValidConnection={graph.isValidConnection}
+            onBeforeDelete={graph.onBeforeDelete}
+            onNodeDragStart={graph.onNodeDragStart}
+            onNodeDragStop={graph.onNodeDragStop}
+            onSelectionDragStart={graph.onSelectionDragStart}
+            onSelectionDragStop={graph.onSelectionDragStop}
+            onNodeClick={graph.onNodeClick}
+            connectionRadius={CONNECTION_RADIUS}
+            // The library listens for Delete on the whole document. It is off so the wrapper handler
+            // below can limit it to focus inside the graph; steps are also marked non-deletable.
+            deleteKeyCode={null}
+            onKeyDown={graph.onKeyDown}
+            onKeyDownCapture={graph.onKeyDownCapture}
+            onBlur={graph.onBlur}
+            tabIndex={-1}
+            selectNodesOnDrag={false}
+            onInit={openReadably}
+            minZoom={0.3}
+          >
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        </LaneActionsProvider>
       </div>
       <ConfirmPanel
         warnings={warnings}
