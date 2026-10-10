@@ -10,12 +10,15 @@ import {
 import {
   completePositions,
   displayPositions,
+  FIRST_ROW_Y,
   laneOriginX,
   overlaps,
+  ROW_HEIGHT,
 } from "../src/ui/features/loops/loop-editor-placement.js";
 import { build, edge } from "./support/loop-editor-builders.js";
 
 const impl = laneOriginX("implementation");
+const row = (index: number) => FIRST_ROW_Y + index * ROW_HEIGHT;
 
 const withStages = (loop: LoopDefinition, stages: Record<string, Stage>): LoopDefinition =>
   parseLoop({
@@ -40,7 +43,7 @@ describe("completePositions matches the Graph's placement", () => {
   it("clamps a stored position into its own lane before looking for a free row", () => {
     // b was dropped into the Review lane but kept its old Implementation-lane coordinates.
     let loop = withStages(build(["a", "b", "c", "d"]), { b: "review", c: "review", d: "review" });
-    loop = moveVisual(moveVisual(loop, "a", impl + 16, 48), "b", impl + 16, 48);
+    loop = moveVisual(moveVisual(loop, "a", impl + 16, row(0)), "b", impl + 16, row(0));
     expectWritesWhatTheGraphDraws(loop);
     expect(completePositions(loop).steps.every((step) => step.position)).toBe(true);
   });
@@ -48,17 +51,17 @@ describe("completePositions matches the Graph's placement", () => {
   it("orders unpositioned steps by rank, as the Graph does, not by their place in the file", () => {
     // File order a, b, c; dependency order c, b, a.
     let loop = build(["a", "b", "c"], { dependencies: [edge("c", "b"), edge("b", "a")] });
-    loop = moveVisual(loop, "a", impl + 16, 400);
+    loop = moveVisual(loop, "a", impl + 16, row(3));
     expectWritesWhatTheGraphDraws(loop);
     const written = completePositions(loop).steps;
-    expect(written.find((step) => step.id === "c")?.position?.y).toBe(48);
-    expect(written.find((step) => step.id === "b")?.position?.y).toBe(168);
+    expect(written.find((step) => step.id === "c")?.position?.y).toBe(row(0));
+    expect(written.find((step) => step.id === "b")?.position?.y).toBe(row(1));
   });
 
   it("leaves loops with no position or every position alone", () => {
     const none = build(["a", "b"]);
     expect(completePositions(none)).toBe(none);
-    const all = moveVisual(moveVisual(none, "a", impl + 16, 48), "b", impl + 16, 168);
+    const all = moveVisual(moveVisual(none, "a", impl + 16, row(0)), "b", impl + 16, row(1));
     expect(completePositions(all)).toBe(all);
   });
 
@@ -70,7 +73,7 @@ describe("completePositions matches the Graph's placement", () => {
           loop,
           step.id,
           laneOriginX(step.stage ?? "implementation") + 16,
-          step.id === "review" ? 168 : 48,
+          step.id === "review" ? row(1) : row(0),
         ),
       base,
     );
@@ -82,5 +85,19 @@ describe("completePositions matches the Graph's placement", () => {
     for (const [index, left] of points.entries())
       for (const right of points.slice(index + 1)) expect(overlaps(left, right)).toBe(false);
     expect(added.steps.every((step) => step.position)).toBe(true);
+  });
+});
+
+describe("loops saved before the cards grew", () => {
+  it("draws cards stored 120 px apart without overlapping, and writes nothing back", () => {
+    const old = ["a", "b", "c"].reduce(
+      (loop, id, index) => moveVisual(loop, id, impl + 16, 48 + index * 120),
+      build(["a", "b", "c"]),
+    );
+    const points = [...displayPositions(old).values()];
+    for (const [index, left] of points.entries())
+      for (const right of points.slice(index + 1)) expect(overlaps(left, right)).toBe(false);
+    expect(old.steps.map((step) => step.position?.y)).toEqual([48, 168, 288]);
+    expect(points.map((point) => point.y)).toEqual([row(0), row(1), row(2)]);
   });
 });

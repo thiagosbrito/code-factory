@@ -6,6 +6,7 @@ import type { LoopDefinition } from "../src/domain/loop.js";
 import { createStarterDraft } from "../src/domain/starter-templates.js";
 import { LoopEditor } from "../src/ui/features/loops/LoopEditor.js";
 import { loopEditorViewStorageKey } from "../src/ui/features/loops/loop-editor-view.js";
+import { NODE_HEIGHT, ROW_HEIGHT } from "../src/ui/features/loops/graph/graph-layout.js";
 import { build } from "./support/loop-editor-builders.js";
 import { project } from "./support/loops-ui.js";
 import { stubReactFlowGlobals } from "./support/react-flow.js";
@@ -154,14 +155,19 @@ describe("moving a selected step with the arrow keys", () => {
     const start = drawnAt(a());
     await selectStep(user, a());
     const seen: number[] = [];
-    for (let press = 0; press < 8; press += 1) {
+    // The blocked presses alternate the announcement text; keep their count odd, as it was.
+    const presses = Math.floor((ROW_HEIGHT - NODE_HEIGHT) / 10) + 7;
+    for (let press = 0; press < presses; press += 1) {
       await user.keyboard("{ArrowDown}");
       seen.push(drawnAt(a()).y);
     }
-    // 10 px down is still clear of b (110 px away); the next press would overlap it, and the
-    // nearest free row is the step's old one, which is UP: that press is blocked instead.
+    // Each press moves 10 px. Moves that keep a node's height clear of b (one row away) are fine;
+    // the next press would overlap it, and the nearest free row is the step's old one, which is
+    // UP: that press is blocked instead.
+    const clearMoves = Math.floor((ROW_HEIGHT - NODE_HEIGHT) / 10);
+    const clear = Array.from({ length: clearMoves }, (_, index) => start.y + 10 * (index + 1));
     expect(seen.every((y) => y >= start.y)).toBe(true);
-    expect(new Set(seen)).toEqual(new Set([start.y + 10]));
+    expect(new Set(seen)).toEqual(new Set(clear));
     expect(status()).toBe("a cannot move further down");
     await user.click(screen.getByRole("button", { name: "Undo" }));
     await vi.waitFor(() => expect(drawnAt(a())).toEqual(start));

@@ -5,7 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { parseLoop, type LoopDefinition } from "../src/domain/loop.js";
 import { createStarterDraft } from "../src/domain/starter-templates.js";
 import { LoopEditor } from "../src/ui/features/loops/LoopEditor.js";
-import { laneOriginX } from "../src/ui/features/loops/graph/graph-layout.js";
+import {
+  FIRST_ROW_Y,
+  laneOriginX,
+  ROW_HEIGHT,
+} from "../src/ui/features/loops/graph/graph-layout.js";
 import { addStep, moveVisual } from "../src/ui/features/loops/loop-editor-model.js";
 import { project } from "./support/loops-ui.js";
 
@@ -64,7 +68,7 @@ describe("adding a step on the Board", () => {
     const base = createStarterDraft("compact", "starter");
     const positioned = base.steps.reduce(
       (loop, step) =>
-        moveVisual(loop, step.id, laneOriginX(step.stage ?? "implementation") + 16, 48),
+        moveVisual(loop, step.id, laneOriginX(step.stage ?? "implementation") + 16, FIRST_ROW_Y),
       base,
     );
     const saves = captureSaves();
@@ -77,7 +81,10 @@ describe("adding a step on the Board", () => {
       expect(saved?.steps.find((item) => item.id === step.id)?.position).toEqual(step.position);
     const added = saved?.steps.find((step) => step.id.startsWith("step-"));
     // The implementation lane's first row is taken by the Implement step, so the next free row.
-    expect(added?.position).toEqual({ x: laneOriginX("implementation") + 16, y: 168 });
+    expect(added?.position).toEqual({
+      x: laneOriginX("implementation") + 16,
+      y: FIRST_ROW_Y + ROW_HEIGHT,
+    });
     await user.click(screen.getByRole("button", { name: "Undo" }));
     expect(isDisabled("Undo")).toBe(true);
   });

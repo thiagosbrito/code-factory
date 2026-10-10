@@ -1,5 +1,7 @@
 import type { LoopDefinition } from "../../../domain/loop.js";
 import { Button } from "@/shared/components/button";
+import { StepFactsLines } from "../../shared/StepFactsLines";
+import type { ResolveStepFacts } from "./graph/StepFactsContext";
 import { addStepToLane } from "./loop-editor-add";
 import { semanticDrop, stageOf, stages } from "./loop-editor-model";
 
@@ -8,11 +10,13 @@ export const LoopStageBoard = ({
   apply,
   openDrawer,
   setMessage,
+  stepFacts,
 }: {
   loop: LoopDefinition;
   apply: (action: (current: LoopDefinition) => LoopDefinition) => boolean;
   openDrawer: (id: string, origin?: HTMLElement) => void;
   setMessage: (message: string) => void;
+  stepFacts: ResolveStepFacts;
 }) => {
   return (
     <div className="overflow-x-auto bg-[radial-gradient(var(--graph-dot)_.6px,transparent_.6px)] bg-[length:17px_17px] bg-[var(--graph-bg)] p-4">
@@ -41,6 +45,7 @@ export const LoopStageBoard = ({
                 .filter((step) => stageOf(step) === stage.id)
                 .map((step) => {
                   const group = loop.groups.find((item) => item.id === step.groupId);
+                  const facts = stepFacts(step.id);
                   const predecessors = loop.dependencies
                     .filter((edge) => edge.to === step.id)
                     .map(
@@ -63,6 +68,7 @@ export const LoopStageBoard = ({
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {step.kind} · {group ? `${group.kind}: ${group.name}` : "ungrouped"}
                       </p>
+                      {facts && <StepFactsLines facts={facts} className="mt-1" />}
                       {group?.kind === "repeat" && (
                         <p className="text-[10px] text-purple-700">
                           Up to {group.maxIterations} iterations · exit on {group.exitWhen.outcome}{" "}

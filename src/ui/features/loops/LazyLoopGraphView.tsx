@@ -99,6 +99,7 @@ export const LazyLoopGraphView = ({
   loop,
   apply,
   openDrawer,
+  stepFacts,
   onUseBoard,
   onRetry,
   load = loadGraphModule,
@@ -132,7 +133,12 @@ export const LazyLoopGraphView = ({
           <output className="block p-6 text-sm text-muted-foreground">Loading graph view…</output>
         }
       >
-        <View loop={loop} apply={apply} openDrawer={openDrawer} />
+        <View
+          loop={loop}
+          apply={apply}
+          openDrawer={openDrawer}
+          {...(stepFacts ? { stepFacts } : {})}
+        />
         <Loaded
           onLoaded={() => {
             retrying.current = false;

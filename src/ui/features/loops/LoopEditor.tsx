@@ -1,9 +1,10 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { AgentConnection } from "../../../adapters/contract.js";
 import { parseLoop, type LoopDefinition } from "../../../domain/loop.js";
 import { Button } from "@/shared/components/button";
 import { Input } from "@/shared/components/input";
 import type { ProjectResponse } from "../../shared/project-api";
+import { stepFacts } from "../../shared/step-facts";
 import { LoopStepDrawer } from "./LoopStepDrawer";
 import { LoopStageBoard } from "./LoopStageBoard";
 import { LoopPalette } from "./LoopPalette";
@@ -43,6 +44,19 @@ export const LoopEditor = ({
     save,
     publish,
   } = useLoopEditorController({ initial, project, agents, onPublished });
+  const projectDefault = project.project?.defaultBinding ?? null;
+  // Stable between renders that change nothing it reads, so the Graph's step cards do not all
+  // re-render on every keystroke in the drawer.
+  const factsOf = useMemo(
+    () => (stepId: string) => {
+      const step = loop.steps.find((item) => item.id === stepId);
+      // A check step runs a shell command, never an agent, so it has no agent facts.
+      return step && step.kind !== "check"
+        ? stepFacts({ binding: step.binding, projectDefault, agents })
+        : null;
+    },
+    [loop.steps, projectDefault, agents],
+  );
   const { view, setView } = useLoopEditorView();
   const switchRef = useRef<HTMLFieldSetElement>(null);
   const focusSwitch = (target: LoopEditorView) =>
@@ -105,6 +119,7 @@ export const LoopEditor = ({
         {view === "board" ? (
           <LoopStageBoard
             loop={loop}
+            stepFacts={factsOf}
             apply={apply}
             openDrawer={openDrawer}
             setMessage={setMessage}
@@ -112,6 +127,7 @@ export const LoopEditor = ({
         ) : (
           <LazyLoopGraphView
             loop={loop}
+            stepFacts={factsOf}
             apply={apply}
             openDrawer={openDrawer}
             onRetry={() => focusSwitch("graph")}

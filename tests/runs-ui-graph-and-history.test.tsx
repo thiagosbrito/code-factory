@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { RunDetail } from "../src/ui/features/runs/RunDetail.js";
-import { RunGraph } from "../src/ui/features/runs/RunGraph.js";
+import { RunGraph, rowSpacing } from "../src/ui/features/runs/RunGraph.js";
 import { RunsList } from "../src/ui/features/runs/RunsList.js";
 import { makeRun } from "./support/runs-ui.js";
 
@@ -77,15 +77,15 @@ it("shows simultaneous active nodes and isolates the drawer to selected attempt"
 
 it("centers a lone step vertically on its parallel neighbours without moving it sideways", () => {
   const run = makeRun();
-  // Without saved positions the graph lays steps out itself: plan alone, then two in parallel.
-  const steps = run.snapshot.loop.steps.map(({ position: _position, ...step }) => step);
-  const laidOut = { ...run, snapshot: { ...run.snapshot, loop: { ...run.snapshot.loop, steps } } };
-  render(<RunGraph run={laidOut} selectedStepId={null} onSelect={vi.fn<(id: string) => void>()} />);
+  // The fixture carries editor positions (plan at 40,70; build at 340,20), which the run ignores:
+  // it lays steps out by dependency depth, plan alone then two in parallel.
+  expect(run.snapshot.loop.steps.every((step) => step.position)).toBe(true);
+  render(<RunGraph run={run} selectedStepId={null} onSelect={vi.fn<(id: string) => void>()} />);
   const at = (id: string) => {
     const node = document.getElementById(`run-node-${id}`);
     return { left: node?.style.left, top: node?.style.top };
   };
   expect(at("build")).toEqual({ left: "330px", top: "55px" });
-  expect(at("review")).toEqual({ left: "330px", top: "220px" });
-  expect(at("plan")).toEqual({ left: "40px", top: "137.5px" });
+  expect(at("review")).toEqual({ left: "330px", top: `${55 + rowSpacing}px` });
+  expect(at("plan")).toEqual({ left: "40px", top: `${55 + rowSpacing / 2}px` });
 });

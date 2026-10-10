@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildGraph } from "../src/ui/features/loops/graph/graph-mapping.js";
-import { laneOriginX } from "../src/ui/features/loops/graph/graph-layout.js";
+import { laneOriginX, ROW_HEIGHT } from "../src/ui/features/loops/graph/graph-layout.js";
 import { stages } from "../src/ui/features/loops/loop-editor-model.js";
 import { build, chain, decided, edge, joined, parallel } from "./support/loop-editor-builders.js";
 
@@ -54,7 +54,7 @@ describe("loop to graph mapping", () => {
   it("puts parallel members in the same lane on adjacent rows", () => {
     const nodes = buildGraph(parallel()).nodes;
     const y = (id: string) => nodes.find((node) => node.id === id)?.position.y ?? 0;
-    expect(Math.abs(y("b") - y("c"))).toBe(120);
+    expect(Math.abs(y("b") - y("c"))).toBe(ROW_HEIGHT);
     expect(nodes.find((node) => node.id === "b")?.position.x).toBe(
       nodes.find((node) => node.id === "c")?.position.x,
     );

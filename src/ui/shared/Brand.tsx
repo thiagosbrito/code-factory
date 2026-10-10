@@ -1,3 +1,4 @@
+import { LogoMark } from "./LogoMark";
 import { ThemeToggle } from "./ThemeToggle";
 
 /** The product mark; collapsed, only the mark remains (the sidebar then carries the theme toggle). */
@@ -13,11 +14,8 @@ export const Brand = ({
     <div
       className={`flex items-center text-lg font-semibold tracking-tight ${collapsed ? "justify-center" : "gap-3"}`}
     >
-      <span
-        title={title}
-        className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-teal-500 text-white"
-      >
-        ∞
+      <span title={title} className="flex shrink-0 text-teal-400">
+        <LogoMark />
       </span>
       {!collapsed && (
         <>

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { decisionSourceMessage } from "../src/ui/features/loops/loop-editor-dependencies.js";
-import { displayPositions } from "../src/ui/features/loops/graph/graph-layout.js";
+import {
+  displayPositions,
+  FIRST_ROW_Y,
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  ROW_HEIGHT,
+} from "../src/ui/features/loops/graph/graph-layout.js";
 import {
   buildGraph,
   continuationEdges,
@@ -42,8 +48,8 @@ describe("group region geometry", () => {
     for (const member of [b, c]) {
       expect(region.x).toBeLessThan(member.x);
       expect(region.y).toBeLessThan(member.y);
-      expect(region.x + region.width).toBeGreaterThan(member.x + 200);
-      expect(region.y + region.height).toBeGreaterThan(member.y + 102);
+      expect(region.x + region.width).toBeGreaterThan(member.x + NODE_WIDTH);
+      expect(region.y + region.height).toBeGreaterThan(member.y + NODE_HEIGHT);
     }
     expect(region).toMatchObject({ id: "g", kind: "parallel", label: "Parallel group: G" });
   });
@@ -51,7 +57,7 @@ describe("group region geometry", () => {
   it("follows the members when they move and never reads or writes the loop", () => {
     const loop = parallel();
     const moved = new Map(displayPositions(loop));
-    moved.set("c", { x: 500, y: 400 });
+    moved.set("c", { x: 500, y: FIRST_ROW_Y + 2 * ROW_HEIGHT + NODE_HEIGHT });
     const [before] = groupRegions(loop, displayPositions(loop));
     const [after] = groupRegions(loop, moved);
     expect(after?.width).toBeGreaterThan(before?.width ?? 0);
@@ -82,8 +88,8 @@ describe("group region geometry", () => {
     ) =>
       point.x >= region.x &&
       point.y >= region.y &&
-      point.x + 200 <= region.x + region.width &&
-      point.y + 102 <= region.y + region.height;
+      point.x + NODE_WIDTH <= region.x + region.width &&
+      point.y + NODE_HEIGHT <= region.y + region.height;
 
     it("draws one frame per lane around only that lane's members, labelled once", () => {
       const loop = spread();
