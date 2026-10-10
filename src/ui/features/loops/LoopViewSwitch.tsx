@@ -1,20 +1,25 @@
+import type { Ref } from "react";
 import { loopEditorViews, type LoopEditorView } from "./loop-editor-view";
 
 /** Board | Graph segmented control; native buttons keep Tab, Enter and Space working. */
 export const LoopViewSwitch = ({
   view,
   onChange,
+  switchRef,
 }: {
   view: LoopEditorView;
+  switchRef?: Ref<HTMLFieldSetElement>;
   onChange: (view: LoopEditorView) => void;
 }) => (
   <fieldset
+    ref={switchRef}
     aria-label="Editor view"
     className="m-0 inline-flex min-w-0 rounded-lg border bg-card p-0.5 text-sm"
   >
     {loopEditorViews.map(({ id, label }) => (
       <button
         key={id}
+        data-view={id}
         type="button"
         aria-pressed={view === id}
         onClick={() => onChange(id)}
