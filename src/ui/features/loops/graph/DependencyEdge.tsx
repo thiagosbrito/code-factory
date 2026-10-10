@@ -39,6 +39,18 @@ export const DependencyEdge = ({
         {...(markerEnd ? { markerEnd } : {})}
         {...(interactionWidth ? { interactionWidth } : {})}
       />
+      {data && data.outcomes.length > 0 && (
+        <EdgeLabelRenderer>
+          <span
+            className="graph-outcome-label"
+            style={{
+              transform: `translate(-50%, calc(-100% - 12px)) translate(${labelX}px, ${labelY}px)`,
+            }}
+          >
+            {data.outcomes.join(" / ")}
+          </span>
+        </EdgeLabelRenderer>
+      )}
       {selected && (
         <EdgeLabelRenderer>
           <button

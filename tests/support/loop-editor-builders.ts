@@ -96,3 +96,51 @@ export const repeated = () =>
       },
     ],
   });
+
+/**
+ * Every structure at once: a parallel group (b, c) fanning out from s and into the "any" join j,
+ * a repeat group (r1, r2) whose exit decision r2 continues back to r1, and a plain decision on z.
+ */
+export const structured = () =>
+  build(["s", "b", "c", "j", "r1", "r2", "z", "y1", "y2"], {
+    dependencies: [
+      edge("s", "b"),
+      edge("s", "c"),
+      edge("b", "j"),
+      edge("c", "j"),
+      edge("j", "r1"),
+      edge("r1", "r2"),
+      edge("r2", "z"),
+      edge("z", "y1"),
+      edge("z", "y2"),
+    ],
+    groups: [
+      { id: "p", name: "Fan", kind: "parallel", stepIds: ["b", "c"] },
+      {
+        ...repeatGroup,
+        id: "g",
+        name: "Again",
+        stepIds: ["r1", "r2"],
+        exitWhen: { stepId: "r2", outcome: "done" },
+        continueWhen: { outcome: "again", to: "r1" },
+      },
+    ],
+    grouped: { b: "p", c: "p", r1: "g", r2: "g" },
+    joins: [{ stepId: "j", from: ["b", "c"], mode: "any" }],
+    decisions: [
+      {
+        stepId: "r2",
+        branches: [
+          { outcome: "done", to: "z" },
+          { outcome: "again", to: "r1" },
+        ],
+      },
+      {
+        stepId: "z",
+        branches: [
+          { outcome: "pass", to: "y1" },
+          { outcome: "fail", to: "y2" },
+        ],
+      },
+    ],
+  });

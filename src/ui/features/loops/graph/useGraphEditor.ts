@@ -30,9 +30,13 @@ import {
   type ConnectEnd,
 } from "./graph-actions";
 import { displayPositions, type Point } from "./graph-layout";
+import { changeWarnings } from "./graph-warnings";
+import { useConfirmedChange } from "./useConfirmedChange";
 import {
   buildGraph,
-  type DependencyFlowEdge,
+  continuationEdges,
+  regionNodes,
+  type GraphEdge,
   type GraphNode,
   type StepFlowNode,
 } from "./graph-mapping";
@@ -88,7 +92,7 @@ export const useGraphEditor = ({
   // Derived once per loop value; the flow is reseeded only when the loop itself changes.
   const seed = useMemo(() => buildGraph(loop), [loop]);
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphNode>(seed.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<DependencyFlowEdge>(seed.edges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<GraphEdge>(seed.edges);
   // Handlers read the newest loop and graph through a ref, so they stay stable between renders.
   const latest = useRef({ loop, seed, edges, nodes });
   useLayoutEffect(() => {
@@ -118,6 +122,18 @@ export const useGraphEditor = ({
   }, [seed, reseed]);
 
   const restore = reseed;
+  const confirmation = useConfirmedChange(loop, apply, restore);
+  const { propose } = confirmation;
+
+  // Regions and continuation arrows are derived for display only: they follow the drawn
+  // positions, are never part of the flow state, and so cannot be selected, deleted or saved.
+  const displayNodes = useMemo(() => {
+    const drawn = new Map(nodes.filter(isStepNode).map((node) => [node.id, node.position]));
+    const regions = regionNodes(loop, drawn);
+    const lanes = nodes.filter((node) => node.type === "lane");
+    return [...lanes, ...regions, ...nodes.filter(isStepNode)];
+  }, [loop, nodes]);
+  const displayEdges = useMemo(() => [...edges, ...continuationEdges(loop)], [loop, edges]);
 
   const isValidConnection = useCallback<IsValidConnection>(
     (connection) =>
@@ -154,9 +170,15 @@ export const useGraphEditor = ({
       if (!doomed.length) return;
       event.preventDefault();
       // The focused edge unmounts with its deletion; keep focus in the graph rather than losing it.
-      if (apply(disconnectAction(doomed))) event.currentTarget.focus();
+      const removed = doomed.map((edge) => ({ source: edge.source, target: edge.target }));
+      const { loop: current } = latest.current;
+      if (
+        propose(current, disconnectAction(removed), { kind: "disconnect", edges: removed }) ===
+        "applied"
+      )
+        event.currentTarget.focus();
     },
-    [apply],
+    [propose],
   );
 
   // The library moves selected steps on arrow keys inside its own flow state, where onNodeDragStop
@@ -215,11 +237,20 @@ export const useGraphEditor = ({
       if (plan.kind === "edge") announce(`${label} is at the lane edge`);
       else if (plan.kind === "blocked") announce(`${label} cannot move further ${word}`);
       else {
+        const change = { kind: "drop" as const, drops: plan.drops };
+        if (changeWarnings(current, change).length) {
+          // A lane change with consequences asks first, like a pointer drop; it never folds into
+          // a run of keyboard moves, so the next press starts a new undo entry.
+          session.current += 1;
+          if (propose(current, dropAction(plan.drops), change) === "pending")
+            announce(`Confirmation needed before moving ${label} ${word}`);
+          return;
+        }
         const coalesce = `keyboard:${session.current}:${selected.map((node) => node.id).join(",")}`;
         if (apply(dropAction(plan.drops), { coalesce })) announce(`${label} moved ${word}`);
       }
     },
-    [apply, announce],
+    [apply, announce, propose],
   );
 
   // Moving focus away ends a run of keyboard moves, so the next one is its own undo entry.
@@ -230,12 +261,18 @@ export const useGraphEditor = ({
   // The library announces onEdgesDelete before it removes anything, so a refusal could not be
   // undone there. Deleting through onBeforeDelete lets the loop decide: the gesture is turned into
   // one apply, the library is told not to delete, and the flow redraws from the changed loop.
-  const onBeforeDelete = useCallback<OnBeforeDelete<GraphNode, DependencyFlowEdge>>(
+  const onBeforeDelete = useCallback<OnBeforeDelete<GraphNode, GraphEdge>>(
     async ({ edges: doomed }) => {
-      if (doomed.length) apply(disconnectAction(doomed));
+      if (doomed.length) {
+        const removed = doomed.map((edge) => ({ source: edge.source, target: edge.target }));
+        propose(latest.current.loop, disconnectAction(removed), {
+          kind: "disconnect",
+          edges: removed,
+        });
+      }
       return false;
     },
-    [apply],
+    [propose],
   );
 
   const onNodeDragStart = useCallback<OnNodeDrag<GraphNode>>(() => {
@@ -247,10 +284,15 @@ export const useGraphEditor = ({
     (dragged: GraphNode[]) => {
       dragging.current = false;
       const moves = dragged.filter(isStepNode).map(({ id, position }) => ({ id, position }));
-      const drops = planDrops(latest.current.loop, moves);
-      if (!drops.length || !apply(dropAction(drops))) restore();
+      const { loop: current } = latest.current;
+      const drops = planDrops(current, moves);
+      if (
+        !drops.length ||
+        propose(current, dropAction(drops), { kind: "drop", drops }) === "refused"
+      )
+        restore();
     },
-    [apply, restore],
+    [propose, restore],
   );
 
   const onNodeDragStop = useCallback<OnNodeDrag<GraphNode>>(
@@ -284,6 +326,9 @@ export const useGraphEditor = ({
   return {
     nodes,
     edges,
+    displayNodes,
+    displayEdges,
+    confirmation,
     onNodesChange,
     onEdgesChange,
     isValidConnection,

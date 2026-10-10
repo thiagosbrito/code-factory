@@ -96,7 +96,7 @@ describe("Graph view rendering", () => {
     expect(within(node).getByText("3. Implementation")).toBeTruthy();
     expect(within(node).getByText("parallel: G")).toBeTruthy();
     expect(
-      within(screen.getByRole("group", { name: /^d, Role/ })).getByText("join any"),
+      within(screen.getByRole("group", { name: /^d, Role/ })).getByText("waits for any"),
     ).toBeTruthy();
   });
 

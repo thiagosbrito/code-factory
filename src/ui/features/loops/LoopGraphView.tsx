@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   Controls,
   ReactFlow,
@@ -10,14 +11,17 @@ import "@xyflow/react/dist/style.css";
 import type { LoopDefinition } from "../../../domain/loop.js";
 import { useTheme } from "@/shared/theme";
 import { DependencyEdge } from "./graph/DependencyEdge";
+import { ConfirmPanel } from "./graph/ConfirmPanel";
+import { ContinuationEdge } from "./graph/ContinuationEdge";
 import { LaneNode } from "./graph/LaneNode";
+import { RegionNode } from "./graph/RegionNode";
 import { StepNode } from "./graph/StepNode";
 import type { Apply } from "./graph/graph-actions";
-import type { DependencyFlowEdge, GraphNode } from "./graph/graph-mapping";
+import type { GraphEdge, GraphNode } from "./graph/graph-mapping";
 import { useGraphEditor } from "./graph/useGraphEditor";
 
-const nodeTypes: NodeTypes = { step: StepNode, lane: LaneNode };
-const edgeTypes: EdgeTypes = { dependency: DependencyEdge };
+const nodeTypes: NodeTypes = { step: StepNode, lane: LaneNode, region: RegionNode };
+const edgeTypes: EdgeTypes = { dependency: DependencyEdge, continuation: ContinuationEdge };
 
 /** Snapping distance (px) from a target handle within which a released connection still connects. */
 const CONNECTION_RADIUS = 40;
@@ -27,7 +31,7 @@ export const MIN_OPENING_ZOOM = 0.6;
 const OPENING_MARGIN = 12;
 
 /** Fits the whole graph, but never below a readable zoom: a big loop opens at its top-left. */
-const openReadably = (instance: ReactFlowInstance<GraphNode, DependencyFlowEdge>) => {
+const openReadably = (instance: ReactFlowInstance<GraphNode, GraphEdge>) => {
   void instance.fitView({ padding: 0.08, minZoom: MIN_OPENING_ZOOM, maxZoom: 1 }).then(() => {
     const zoom = instance.getZoom();
     if (zoom <= MIN_OPENING_ZOOM + 0.001)
@@ -45,20 +49,22 @@ export type LoopGraphViewProps = {
 const LoopGraphView = ({ loop, apply, openDrawer }: LoopGraphViewProps) => {
   const { theme } = useTheme();
   const graph = useGraphEditor({ loop, apply, openDrawer });
+  const section = useRef<HTMLElement>(null);
+  const { warnings, confirm, cancel } = graph.confirmation;
   return (
-    <section aria-label="Graph view" className="flex min-w-0 flex-col">
+    <section ref={section} aria-label="Graph view" className="flex min-w-0 flex-col">
       <p className="border-b px-4 py-2 text-xs text-muted-foreground">
         Drag from a step&apos;s right handle to another step&apos;s left handle to connect them.
         Select a connection and press Delete to remove it. Drop a step in another lane to change its
-        stage.
+        stage. Groups, joins and decisions are shown here and edited in the Board view.
       </p>
       <output aria-label="Graph announcements" className="sr-only">
         {graph.announcement}
       </output>
       <div className="h-[clamp(480px,75vh,900px)] min-w-0">
         <ReactFlow
-          nodes={graph.nodes}
-          edges={graph.edges}
+          nodes={graph.displayNodes}
+          edges={graph.displayEdges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           colorMode={theme}
@@ -88,6 +94,12 @@ const LoopGraphView = ({ loop, apply, openDrawer }: LoopGraphViewProps) => {
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
+      <ConfirmPanel
+        warnings={warnings}
+        onConfirm={confirm}
+        onCancel={cancel}
+        onClosed={() => section.current?.querySelector<HTMLElement>(".react-flow")?.focus()}
+      />
     </section>
   );
 };

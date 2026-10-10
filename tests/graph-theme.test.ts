@@ -37,6 +37,24 @@ describe("Graph view theme tokens", () => {
     ).toBeGreaterThanOrEqual(3);
   });
 
+  it.each(["--graph-join", "--graph-continue", "--graph-region-parallel", "--graph-region-repeat"])(
+    "draws %s at 3:1 or better against the canvas in both themes",
+    (name) => {
+      for (const selector of [":root", ".dark"])
+        expect(
+          contrast(token(selector, name), token(selector, "--graph-bg")),
+        ).toBeGreaterThanOrEqual(3);
+    },
+  );
+
+  it("keeps the continuation dashed (not a dependency look) and regions free of pointer events by design", () => {
+    expect(css).toMatch(
+      /\.graph-continue-path\s*\{[^}]*stroke-dasharray:\s*6 4[^}]*pointer-events:\s*none/,
+    );
+    expect(css).toMatch(/\.graph-region-parallel\s*\{[^}]*border-style:\s*dashed/);
+    expect(css).toMatch(/\.graph-region-repeat\s*\{[^}]*border-style:\s*solid/);
+  });
+
   it("shows a keyboard focus ring on step nodes, which the library otherwise hides", () => {
     expect(css).toMatch(
       /\.react-flow__node-step:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--ring\)/,
