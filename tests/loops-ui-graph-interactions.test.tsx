@@ -159,7 +159,7 @@ describe("Graph view gestures delivered through the component", () => {
     await open();
     const node = screen.getByRole("group", { name: /^Review, Reviewer/ });
     node.focus();
-    await user.keyboard("{Enter}");
+    await user.keyboard(" ");
     const dragged = props().nodes?.find((item) => item.id === "review");
     if (!dragged) throw new Error("missing node");
     act(() => props().onNodeDragStart?.(new MouseEvent("mousedown"), dragged, [dragged]));

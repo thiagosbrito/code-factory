@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { Button } from "@/shared/components/button";
 import {
   Controls,
   ReactFlow,
@@ -12,6 +13,8 @@ import type { LoopDefinition } from "../../../domain/loop.js";
 import { useTheme } from "@/shared/theme";
 import { DependencyEdge } from "./graph/DependencyEdge";
 import { ConfirmPanel } from "./graph/ConfirmPanel";
+import { LinkDialog } from "./graph/LinkDialog";
+import { useGraphLinking } from "./graph/useGraphLinking";
 import { ContinuationEdge } from "./graph/ContinuationEdge";
 import { LaneActionsProvider } from "./graph/LaneActions";
 import { LaneNode } from "./graph/LaneNode";
@@ -58,6 +61,20 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
   const graph = useGraphEditor({ loop, apply, openDrawer });
   const section = useRef<HTMLElement>(null);
   const { warnings, confirm, cancel } = graph.confirmation;
+  const linking = useGraphLinking({
+    loop,
+    apply,
+    propose: graph.confirmation.propose,
+    announce: graph.announce,
+    openDrawer,
+  });
+  const selectedStep = graph.nodes.filter((node) => node.type === "step" && node.selected);
+  const selectedId = selectedStep.length === 1 ? selectedStep[0]?.id : undefined;
+  const selectedName = loop.steps.find((step) => step.id === selectedId)?.name;
+  const focusStep = (stepId: string) =>
+    section.current
+      ?.querySelector<HTMLElement>(`.react-flow__node-step[data-id="${CSS.escape(stepId)}"]`)
+      ?.focus();
   const laneActions = {
     addStep: (stage: Stage) => {
       if (apply((current) => addStepToLane(current, stage)))
@@ -69,8 +86,35 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
       <p className="border-b px-4 py-2 text-xs text-muted-foreground">
         Drag from a step&apos;s right handle to another step&apos;s left handle to connect them.
         Select a connection and press Delete to remove it. Drop a step in another lane to change its
-        stage. Groups, joins and decisions are shown here and edited in the Board view.
+        stage. By keyboard: Tab to a step, press C to connect it, D to disconnect it, Enter to open
+        it, and Alt with an arrow to move to a neighbouring step. Groups, joins and decisions are
+        shown here and edited in the Board view.
       </p>
+      <div
+        role="toolbar"
+        aria-label="Step connections"
+        className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm"
+      >
+        <span className="text-muted-foreground">
+          {selectedName ? `Selected: ${selectedName}` : "Select one step to connect it by keyboard"}
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!selectedId}
+          onClick={() => selectedId && linking.open("connect", selectedId)}
+        >
+          Connect to…
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!selectedId}
+          onClick={() => selectedId && linking.open("disconnect", selectedId)}
+        >
+          Disconnect…
+        </Button>
+      </div>
       <output aria-label="Graph announcements" className="sr-only">
         {graph.announcement}
       </output>
@@ -99,7 +143,9 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
               // below can limit it to focus inside the graph; steps are also marked non-deletable.
               deleteKeyCode={null}
               onKeyDown={graph.onKeyDown}
-              onKeyDownCapture={graph.onKeyDownCapture}
+              onKeyDownCapture={(event) => {
+                if (!linking.onKeyCapture(event)) graph.onKeyDownCapture(event);
+              }}
               onBlur={graph.onBlur}
               tabIndex={-1}
               selectNodesOnDrag={false}
@@ -111,6 +157,18 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
           </LaneActionsProvider>
         </StepFactsProvider>
       </div>
+      <LinkDialog
+        loop={loop}
+        request={linking.request}
+        onConnect={linking.connect}
+        onRefused={linking.refused}
+        onDisconnect={linking.disconnect}
+        onClose={linking.close}
+        onClosed={() => {
+          const stepId = linking.openedFor();
+          if (stepId) focusStep(stepId);
+        }}
+      />
       <ConfirmPanel
         warnings={warnings}
         onConfirm={confirm}

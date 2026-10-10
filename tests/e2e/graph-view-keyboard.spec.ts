@@ -60,7 +60,7 @@ test("arrow keys move a selected step through the loop, so Undo and Save see it"
   const label = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
   if (!label) throw new Error("The focused step has no label");
   const step = page.getByRole("group", { name: label, exact: true });
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Space");
   await expect(step).toHaveClass(/selected/);
   const before = await step.boundingBox();
   if (!before) throw new Error("Step has no layout");

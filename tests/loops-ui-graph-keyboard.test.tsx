@@ -58,7 +58,7 @@ const selectEdge = (label: string) => {
 /** Focuses a step and selects it the way a keyboard user does. */
 const selectStep = async (user: ReturnType<typeof userEvent.setup>, node: HTMLElement) => {
   node.focus();
-  await user.keyboard("{Enter}");
+  await user.keyboard(" ");
   expect(node.classList.contains("selected")).toBe(true);
 };
 
@@ -193,14 +193,14 @@ describe("arrow keys the editor leaves alone", () => {
     expect(drawnAt(implement)).toEqual(implementBefore);
   });
 
-  it("leaves Ctrl, Meta and Alt arrows to the browser and to keyboard linking", async () => {
+  it("keeps Ctrl, Meta and Alt arrows for moving focus: they never move or record the step", async () => {
     const user = userEvent.setup();
     await open();
     await selectStep(user, reviewNode());
     const before = drawnAt(reviewNode());
     for (const modifier of ["ctrlKey", "metaKey", "altKey"] as const)
-      expect(fireEvent.keyDown(reviewNode(), { key: "ArrowDown", [modifier]: true })).toBe(true);
-    // Not cancelled, not recorded, and not moved in the library's flow state either.
+      expect(fireEvent.keyDown(reviewNode(), { key: "ArrowDown", [modifier]: true })).toBe(false);
+    // Claimed for focus movement, so not recorded and not moved in the library's flow state.
     expect(isDisabled("Undo")).toBe(true);
     expect(drawnAt(reviewNode())).toEqual(before);
   });
