@@ -1,27 +1,17 @@
 import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { z } from "zod";
 import { createClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { createCodexAdapter } from "../adapters/codex.js";
 import { createKiroAdapter } from "../adapters/kiro.js";
 import type { AgentAdapter, AgentConnection } from "../adapters/contract.js";
 import { mockAdapter } from "../adapters/mock.js";
 import { discoverAgents } from "../adapters/discovery.js";
+import type { ConnectionMemory } from "./connection-memory.js";
+import { connectionRequestSchema, type ConnectionRequest } from "./connection-request.js";
 import { ProjectError } from "./project.js";
 
-export const connectionRequestSchema = z.discriminatedUnion("provider", [
-  z.strictObject({ provider: z.literal("codex"), launch: z.literal(true) }),
-  z.strictObject({ provider: z.literal("kiro"), launch: z.literal(true) }),
-  z.strictObject({ provider: z.literal("claude-code"), launch: z.literal(true) }),
-  z.strictObject({
-    provider: z.literal("custom"),
-    launch: z.literal(true),
-    executable: z.string().trim().min(1),
-    protocol: z.literal("codex-app-server"),
-  }),
-]);
-export type ConnectionRequest = z.infer<typeof connectionRequestSchema>;
+export { connectionRequestSchema, type ConnectionRequest };
 /** Providers with an execution adapter that Code Factory launches from their detected CLI. */
 export const NATIVE_PROVIDERS = ["codex", "kiro", "claude-code"] as const;
 type NativeProvider = (typeof NATIVE_PROVIDERS)[number];
@@ -75,6 +65,9 @@ const resolveExecutable = async (
   }
 };
 
+/** How long a listing waits for restored connections before showing what is connected so far. */
+const RESTORE_WAIT_MS = 20_000;
+
 /** Discovery is read-only. Only an explicit connect request may launch a provider process. */
 export class ConnectionRegistry {
   private readonly active = new Map<
@@ -94,7 +87,27 @@ export class ConnectionRegistry {
     private readonly createClaudeCode: (
       executable: string,
     ) => Promise<InspectableAdapter> = createClaudeCodeAdapter,
+    private readonly memory?: ConnectionMemory,
   ) {}
+
+  /** Connections being restored after a start; the first listing waits for them, briefly. */
+  private restoring: Promise<unknown> | undefined;
+
+  /**
+   * Connects again every agent the user connected for this project before. Each goes through the
+   * same launch authorization as a click on Verify; one that fails (uninstalled, signed out,
+   * project not yet trusted) stays disconnected and the others are unaffected.
+   */
+  restore(authorize: LaunchAuthorizer): Promise<void> {
+    const memory = this.memory;
+    if (!memory) return Promise.resolve();
+    const restoring = (async () => {
+      const requests = await memory.read().catch(() => []);
+      await Promise.allSettled(requests.map((request) => this.connect(request, authorize)));
+    })();
+    this.restoring = restoring;
+    return restoring;
+  }
 
   private create(provider: ConnectionRequest["provider"], executable: string) {
     if (provider === "kiro") return this.createKiro(executable);
@@ -104,6 +117,16 @@ export class ConnectionRegistry {
   }
 
   async list(): Promise<AgentConnection[]> {
+    if (this.restoring) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        this.restoring,
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, RESTORE_WAIT_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+    }
     const candidates = await this.discover();
     return candidates.map((candidate) => {
       const active = this.active.get(candidate.provider)?.connection;
@@ -171,6 +194,8 @@ export class ConnectionRegistry {
           : inspected;
       this.active.get(request.provider)?.adapter.close();
       this.active.set(request.provider, { adapter, connection });
+      // Remembering is a convenience: a connection that works is not undone by a failed write.
+      await this.memory?.remember(request).catch(() => undefined);
       return connection;
     } catch (error) {
       adapter?.close();

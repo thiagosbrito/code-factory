@@ -1,5 +1,6 @@
 import type { ConnectionViewModel } from "../../shared/connection";
-import { NativeSelect } from "@/shared/components/native-select";
+import { EffortSlider } from "../../shared/EffortSlider";
+import { ModelField } from "../../shared/ModelField";
 import { SetupSection } from "./SetupSection";
 
 export const ModelSetupSection = ({
@@ -29,24 +30,15 @@ export const ModelSetupSection = ({
     >
       <label htmlFor="default-model" className="grid max-w-sm gap-2 text-sm font-medium">
         Project default model
-        <NativeSelect
+        <ModelField
           id="default-model"
-          aria-label="Project default model"
+          ariaLabel="Project default model"
           value={model}
-          onChange={(event) => onModelChange(event.target.value)}
+          models={active?.models ?? []}
+          allowCustom={Boolean(active?.customModels)}
           disabled={!active?.connected}
-          className="font-normal text-muted-foreground"
-        >
-          <option value="agent-default">Agent default</option>
-          {active?.models.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.displayName}
-            </option>
-          ))}
-          {model !== "agent-default" && !active?.models.some((item) => item.id === model) && (
-            <option value={model}>{model} (unavailable)</option>
-          )}
-        </NativeSelect>
+          onChange={onModelChange}
+        />
         <small className="font-normal text-muted-foreground">
           {active?.connected
             ? "Models come from this connection's catalog; listing does not guarantee entitlement."
@@ -56,21 +48,16 @@ export const ModelSetupSection = ({
         </small>
       </label>
       {availableEfforts.length > 0 && (
-        <label htmlFor="default-effort" className="mt-4 grid max-w-sm gap-2 text-sm font-medium">
+        <div className="mt-4 grid max-w-sm gap-2 text-sm font-medium">
           Effort
-          <NativeSelect
+          <EffortSlider
             id="default-effort"
-            value={effort}
-            onChange={(event) => onEffortChange(event.target.value)}
-          >
-            <option value="">Agent default</option>
-            {availableEfforts.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </NativeSelect>
-        </label>
+            ariaLabel="Project default effort"
+            efforts={availableEfforts}
+            value={effort || undefined}
+            onChange={(next) => onEffortChange(next ?? "")}
+          />
+        </div>
       )}
       {validation && (
         <p role="alert" className="mt-3 text-sm text-red-700">

@@ -1,5 +1,6 @@
 import { readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
+import { catalogProblem } from "../domain/binding-catalog.js";
 import { connectionRequestSchema, type ConnectionRegistry } from "./connections.js";
 import {
   ProjectError,
@@ -37,11 +38,10 @@ const validateDefaultBinding = async (
       422,
     );
 
-  const model = connection.models?.find((item) => item.id === binding.model);
-  if (binding.model !== "agent-default" && !model)
+  const problem = catalogProblem(connection, binding);
+  if (problem === "model")
     throw new ProjectError("Selected model is unavailable in the current agent catalog.", 422);
-  if (binding.effort && !model?.efforts?.includes(binding.effort))
-    throw new ProjectError("Selected effort is unavailable for this model.", 422);
+  if (problem) throw new ProjectError("Selected effort is unavailable for this model.", 422);
 
   if (binding.provider !== "custom") return;
   const configuredPath = input.customAgent?.executable;

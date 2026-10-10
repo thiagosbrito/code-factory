@@ -19,6 +19,20 @@ afterEach(async () =>
   Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))),
 );
 
+const catalog = [
+  { value: "default", displayName: "Default (recommended)", supportsEffort: true },
+  {
+    value: "claude-haiku-4-5-20251001",
+    displayName: "Haiku 4.5",
+    description: "Fastest for quick answers",
+  },
+  {
+    value: "sonnet",
+    displayName: "Sonnet 5.5",
+    supportedEffortLevels: ["low", "medium", "high"],
+  },
+];
+
 const signedIn = {
   loggedIn: true,
   authMethod: "claude.ai",
@@ -29,7 +43,7 @@ const signedIn = {
 /** A fake `claude` that answers the probes and prints `events` for a print-mode step. */
 const fixture = async (
   events: unknown[],
-  options: { exitCode?: number; auth?: unknown; authExit?: number } = {},
+  options: { exitCode?: number; auth?: unknown; authExit?: number; catalog?: "fail" } = {},
 ) => {
   const directory = await mkdtemp(join(tmpdir(), "code-factory-claude-"));
   directories.push(directory);
@@ -42,9 +56,17 @@ const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('2.1.295 (Claude Code)'); process.exit(0); }
 if (args.join(' ') === 'auth status --json') { console.log(${JSON.stringify(JSON.stringify(options.auth ?? signedIn))}); process.exit(${options.authExit ?? 0}); }
 if (args[0] !== '-p') process.exit(3);
+if (args.includes('--input-format')) {
+  require('readline').createInterface({ input: process.stdin }).on('line', (line) => {
+    const request = JSON.parse(line);
+    if (${JSON.stringify(options.catalog === "fail")}) process.exit(1);
+    console.log(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: request.request_id, response: { account: { email: 'person@example.com' }, models: ${JSON.stringify(catalog)} } } }));
+  });
+} else {
 require('fs').writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(args));
 for (const event of ${JSON.stringify(events)}) console.log(typeof event === 'string' ? event : JSON.stringify(event));
 process.exit(${options.exitCode ?? 0});
+}
 `,
   );
   await chmod(executable, 0o755);
@@ -102,13 +124,28 @@ describe("Claude Code connection", () => {
         version: "2.1.295",
         protocol: "claude-code-stream-json",
         capabilities: { streaming: "supported", steering: "unsupported", resume: "unsupported" },
-        models: CLAUDE_CODE_MODELS,
+        models: [
+          {
+            id: "claude-haiku-4-5-20251001",
+            displayName: "Haiku 4.5",
+            description: "Fastest for quick answers",
+            efforts: [],
+          },
+          { id: "sonnet", displayName: "Sonnet 5.5", efforts: ["low", "medium", "high"] },
+        ],
+        customModels: { efforts: ["low", "medium", "high", "xhigh", "max"] },
       });
       expect(JSON.stringify(connection)).not.toMatch(/person@example\.com|Example org/);
       expect(registry.adapter("claude-code")?.provider).toBe("claude-code");
     } finally {
       registry.close();
     }
+  });
+
+  it("falls back to the documented aliases when the CLI cannot list its models", async () => {
+    const { executable } = await fixture([], { catalog: "fail" });
+    const connection = await (await createClaudeCodeAdapter(executable)).inspect("/");
+    expect(connection.models).toEqual(CLAUDE_CODE_MODELS);
   });
 
   it("reports a signed-out CLI as unauthenticated even when it exits nonzero", async () => {

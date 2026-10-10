@@ -15,6 +15,7 @@ import {
 } from "./server-http.js";
 import { defaultUiDirectory, serveAsset } from "./server-static.js";
 import { handleLoopReads, handleLoopRoutes } from "./server-routes-loops.js";
+import { userConnectionMemory } from "./connection-memory.js";
 import { handleProjectMutations, handleProjectReads } from "./server-routes-project.js";
 import { handleRunActions } from "./server-routes-run-actions.js";
 import { handleRunMutations, handleRunReads } from "./server-routes-runs.js";
@@ -53,9 +54,20 @@ export const startLocalServer = async (options: {
   devOrigin?: string;
   connections?: ConnectionRegistry;
   tracker?: TicketTracker;
+  /** Remember connected agents per user and connect them again on the next start. */
+  rememberConnections?: boolean;
 }) => {
   const projectDirectory = await validateProjectDirectory(options.projectDirectory);
-  const connections = options.connections ?? new ConnectionRegistry(projectDirectory);
+  const connections =
+    options.connections ??
+    new ConnectionRegistry(
+      projectDirectory,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      options.rememberConnections ? userConnectionMemory(projectDirectory) : undefined,
+    );
   // Agents, check and setup commands and Git all inherit this process's environment. The tracker
   // key is read once and removed, so it reaches the tracker and nothing the project runs.
   const linearKey = process.env.CODE_FACTORY_LINEAR_API_KEY;
@@ -154,6 +166,8 @@ export const startLocalServer = async (options: {
       resolveStarted();
     });
   });
+  // Agents the user connected before come back through the same launch authorization as Verify.
+  if (options.rememberConnections) void connections.restore(authorizeLaunch);
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Runtime has no TCP address.");
   // Unfinished runs are never resumed on start: the project's files may come from someone else.

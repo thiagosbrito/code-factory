@@ -31,10 +31,12 @@ export const agentConnectionSchema = z.object({
       z.object({
         id: z.string(),
         displayName: z.string(),
+        description: z.string().optional(),
         efforts: z.array(z.string()).optional(),
       }),
     )
     .optional(),
+  customModels: z.object({ efforts: z.array(z.string()) }).optional(),
 });
 export const projectResponseSchema = z.object({
   project: projectConfigSchema.nullable(),

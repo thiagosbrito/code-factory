@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../../../adapters/contract.js";
+import { effortChoices } from "../../../domain/binding-catalog.js";
 import type { ProviderId } from "../../../domain/loop.js";
 import { formatCommandLine, parseCommandLine } from "../../../domain/project.js";
 import {
@@ -17,6 +18,9 @@ export type SetupControllerOptions = {
   onConnect: (request: ConnectRequest) => Promise<AgentConnection>;
   onSaved: (state: ProjectResponse) => void;
 };
+
+/** The pause after choosing an agent in which the user can still change their mind. */
+export const AUTO_CONNECT_DELAY_MS = 500;
 
 /** Local setup draft, connection verification and persistence. */
 export const useSetupController = ({
@@ -41,6 +45,9 @@ export const useSetupController = ({
   const [setupCommand, setSetupCommand] = useState(savedSetupCommand);
   const [bindingChanged, setBindingChanged] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  // True from choosing an agent until its automatic connection starts or is cancelled.
+  const [connectPending, setConnectPending] = useState(false);
+  const connectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -65,16 +72,36 @@ export const useSetupController = ({
   const activeConnection = displayedAgents.find((item) => item.provider === selected);
   const active = activeConnection ? connectionViewModel(activeConnection) : undefined;
   const savedBinding = state.project?.defaultBinding;
-  const activeModel = activeConnection?.models?.find((item) => item.id === model);
-  const availableEfforts = activeModel?.efforts ?? [];
+  const availableEfforts = effortChoices(activeConnection, model);
   const draftBinding = selected
     ? { provider: selected, model, ...(effort ? { effort } : {}) }
     : null;
   const validation = bindingError(draftBinding, displayedAgents);
   useEffect(() => {
     nameRef.current?.focus();
+    return () => clearTimeout(connectTimer.current);
   }, []);
+  const cancelPendingConnect = () => {
+    clearTimeout(connectTimer.current);
+    setConnectPending(false);
+  };
   const selectAgent = (provider: ProviderId | null) => {
+    // Choosing another agent within the pause cancels the first one's connection.
+    cancelPendingConnect();
+    const target = displayedAgents.find((item) => item.provider === provider);
+    if (
+      provider &&
+      isNativeProvider(provider) &&
+      target &&
+      !connectionViewModel(target).connected &&
+      target.installation === "detected"
+    ) {
+      setConnectPending(true);
+      connectTimer.current = setTimeout(() => {
+        setConnectPending(false);
+        void verify(provider);
+      }, AUTO_CONNECT_DELAY_MS);
+    }
     setSelected(provider);
     setModel("agent-default");
     setEffort("");
@@ -146,14 +173,15 @@ export const useSetupController = ({
       setRefreshing(false);
     }
   };
-  const verify = async () => {
-    if (!selected || (!isNativeProvider(selected) && selected !== "custom")) return;
+  const verify = async (provider: ProviderId | null = selected) => {
+    cancelPendingConnect();
+    if (!provider || (!isNativeProvider(provider) && provider !== "custom")) return;
     setVerifying(true);
     setError("");
     try {
       const connection = await onConnect(
-        isNativeProvider(selected)
-          ? { provider: selected, launch: true }
+        isNativeProvider(provider)
+          ? { provider, launch: true }
           : {
               provider: "custom",
               launch: true,
@@ -161,7 +189,7 @@ export const useSetupController = ({
               protocol: "codex-app-server",
             },
       );
-      if (selected === "custom" && connection.executable)
+      if (provider === "custom" && connection.executable)
         setCustomExecutable(connection.executable);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not verify agent connection.");
@@ -183,6 +211,7 @@ export const useSetupController = ({
     bindingChanged,
     setBindingChanged,
     verifying,
+    connectPending,
     error,
     setError,
     busy,

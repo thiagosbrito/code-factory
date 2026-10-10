@@ -21,7 +21,7 @@ test("verified model selection, loop controls, and run intake work as one keyboa
   const model = page.getByRole("combobox", { name: "Project default model" });
   await expect(model).toBeEnabled();
   await model.selectOption("model-a");
-  await page.getByRole("combobox", { name: "Effort" }).selectOption("high");
+  await page.getByRole("slider", { name: "Project default effort" }).fill("2");
   await page.getByRole("button", { name: "Finish setup" }).click();
 
   await page.getByRole("button", { name: "Loops" }).click();

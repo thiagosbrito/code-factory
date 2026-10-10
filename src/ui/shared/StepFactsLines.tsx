@@ -7,6 +7,22 @@ const rows = (facts: StepFacts) =>
     ["Effort", facts.effort],
   ] as const;
 
+/** Filled segments up to the effort level, one per level the agent offers. */
+const EffortMeter = ({ scale }: { scale: StepFacts["effortScale"] }) =>
+  scale && (
+    <span
+      aria-hidden="true"
+      className="ml-1.5 inline-flex shrink-0 items-center gap-px align-middle"
+    >
+      {Array.from({ length: scale.total }, (_, index) => (
+        <span
+          key={index}
+          className={`h-1.5 w-2 rounded-[1px] ${index < scale.position ? "bg-primary" : "bg-muted-foreground/30"}`}
+        />
+      ))}
+    </span>
+  );
+
 const grid = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 text-[10.5px] leading-[14px]";
 
 /**
@@ -31,8 +47,9 @@ export const StepFactsLines = ({
         {rows(facts).map(([label, value]) => (
           <span key={label} className="contents">
             <span className="text-muted-foreground">{label}:</span>
-            <span title={value} className="truncate font-medium">
-              {value}
+            <span title={value} className="flex min-w-0 items-center font-medium">
+              <span className="truncate">{value}</span>
+              {label === "Effort" && <EffortMeter scale={facts.effortScale} />}
             </span>
           </span>
         ))}
@@ -43,8 +60,9 @@ export const StepFactsLines = ({
       {rows(facts).map(([label, value]) => (
         <div key={label} className="contents">
           <dt className="text-muted-foreground">{label}:</dt>
-          <dd title={value} className="m-0 truncate font-medium">
-            {value}
+          <dd title={value} className="m-0 flex min-w-0 items-center font-medium">
+            <span className="truncate">{value}</span>
+            {label === "Effort" && <EffortMeter scale={facts.effortScale} />}
           </dd>
         </div>
       ))}

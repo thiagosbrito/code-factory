@@ -97,6 +97,7 @@ const main = async () => {
     projectDirectory: resolve(values.project ?? process.cwd()),
     sessionToken: createSessionToken(),
     port,
+    rememberConnections: true,
     ...(process.env.CODE_FACTORY_DEV_ORIGIN
       ? { devOrigin: process.env.CODE_FACTORY_DEV_ORIGIN }
       : {}),

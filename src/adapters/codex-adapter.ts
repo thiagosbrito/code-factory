@@ -66,29 +66,41 @@ export class CodexAdapter implements AgentAdapter {
     return this.initialized;
   }
 
+  /** Every page of `model/list`; a server that keeps returning cursors is cut off. */
+  private async listModels(): Promise<unknown[]> {
+    const entries: unknown[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 20; page += 1) {
+      const catalog = object(await this.rpc.request("model/list", cursor ? { cursor } : {}));
+      if (Array.isArray(catalog.data)) entries.push(...catalog.data);
+      if (typeof catalog.nextCursor !== "string" || !catalog.nextCursor) break;
+      cursor = catalog.nextCursor;
+    }
+    return entries;
+  }
+
   async inspect(_projectDirectory: string): Promise<AgentConnection> {
     await this.initialize();
     const account = object(await this.rpc.request("account/read", { refreshToken: false }));
     const accountType = account.account ? object(account.account).type : null;
-    const catalog = object(await this.rpc.request("model/list", {}));
-    const models = Array.isArray(catalog.data)
-      ? catalog.data
-          .map((entry) => object(entry))
-          .filter((entry) => !entry.hidden)
-          .map((entry) => ({
-            id: identifier(entry.model),
-            displayName: identifier(entry.displayName),
-            efforts: Array.isArray(entry.supportedReasoningEfforts)
-              ? entry.supportedReasoningEfforts
-                  .map((effort) =>
-                    effort && typeof effort === "object" && "reasoningEffort" in effort
-                      ? effort.reasoningEffort
-                      : null,
-                  )
-                  .filter((effort): effort is string => typeof effort === "string")
-              : [],
-          }))
-      : [];
+    const entries = await this.listModels();
+    const models = entries
+      .map((entry) => object(entry))
+      .filter((entry) => !entry.hidden)
+      .map((entry) => ({
+        id: identifier(entry.model),
+        displayName: identifier(entry.displayName),
+        efforts: Array.isArray(entry.supportedReasoningEfforts)
+          ? entry.supportedReasoningEfforts
+              .map((effort) =>
+                effort && typeof effort === "object" && "reasoningEffort" in effort
+                  ? effort.reasoningEffort
+                  : null,
+              )
+              .filter((effort): effort is string => typeof effort === "string")
+          : [],
+      }));
+
     return {
       provider: this.provider,
       executable: this.executable,

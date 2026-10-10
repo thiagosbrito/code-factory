@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "../src/ui/app/App.js";
 import { ErrorBoundary } from "../src/ui/app/ErrorBoundary.js";
@@ -103,6 +103,52 @@ function runtime(initial: ProjectConfig | null = null) {
   };
 }
 
+describe("automatic agent connection", () => {
+  const codexConnection: AgentConnection = {
+    provider: "codex",
+    executable: "/bin/codex",
+    installation: "detected",
+    authentication: "authenticated",
+    identity: "Codex CLI",
+    version: "0.160.0",
+    protocol: "Codex app-server JSON-RPC over stdio",
+    capabilities: {
+      streaming: "unknown",
+      steering: "unknown",
+      resume: "unknown",
+      pause: "unsupported",
+      waitingInput: "unknown",
+    },
+    models: [],
+  };
+  const connects = (local: ReturnType<typeof runtime>) =>
+    local.requests.filter((item) => item.path === "/api/agents/connect");
+
+  it("connects a chosen agent after a short pause, without pressing Verify", async () => {
+    const local = runtime();
+    local.setConnection(codexConnection);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /Codex.*Executable detected/ }));
+    expect(screen.getByRole("status").textContent).toContain("Connecting in a moment");
+    expect(connects(local)).toHaveLength(0);
+    expect(await screen.findByText(/Codex CLI 0.160.0 · Connected/)).toBeTruthy();
+    expect(connects(local)).toHaveLength(1);
+  });
+
+  it("does not connect an agent the user moved away from within the pause", async () => {
+    const local = runtime();
+    local.setConnection(codexConnection);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /Codex.*Executable detected/ }));
+    await user.click(screen.getByRole("button", { name: /No default agent/ }));
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(connects(local)).toHaveLength(0);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
 describe("first-use UI", () => {
   it("uses explicit verification and keyboard selection, then clears incompatible draft models", async () => {
     const local = runtime();
@@ -157,7 +203,9 @@ describe("first-use UI", () => {
       screen.getByRole("combobox", { name: "Project default model" }),
       "model-a",
     );
-    await user.selectOptions(screen.getByRole("combobox", { name: "Effort" }), "high");
+    fireEvent.change(screen.getByRole("slider", { name: "Project default effort" }), {
+      target: { value: "2" },
+    });
     const cursor = screen.getByRole("button", { name: /Cursor.*Not detected/ });
     cursor.focus();
     await user.keyboard("{Enter}");
@@ -166,7 +214,7 @@ describe("first-use UI", () => {
       "value",
       "agent-default",
     );
-    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+    expect(screen.queryByRole("slider", { name: "Project default effort" })).toBeNull();
     await user.click(codex);
     await user.type(screen.getByRole("textbox", { name: "Project name" }), "Verified project");
     await user.click(screen.getByRole("button", { name: "Finish setup" }));
@@ -213,7 +261,9 @@ describe("first-use UI", () => {
       screen.getByRole("combobox", { name: "Project default model" }),
       "opus",
     );
-    await user.selectOptions(screen.getByRole("combobox", { name: "Effort" }), "max");
+    fireEvent.change(screen.getByRole("slider", { name: "Project default effort" }), {
+      target: { value: "2" },
+    });
     await user.type(screen.getByRole("textbox", { name: "Project name" }), "Claude project");
     await user.click(screen.getByRole("button", { name: "Finish setup" }));
     expect(await screen.findByRole("heading", { name: "No runs yet" })).toBeTruthy();

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { AgentConnection } from "../src/adapters/contract.js";
@@ -58,16 +58,19 @@ describe("step binding selectors", () => {
     agent.focus();
     await user.selectOptions(agent, "codex");
     await user.selectOptions(screen.getByRole("combobox", { name: "Step model" }), "model-a");
-    await user.selectOptions(screen.getByRole("combobox", { name: "Step effort" }), "low");
+    fireEvent.change(screen.getByRole("slider", { name: "Step effort" }), {
+      target: { value: "1" },
+    });
     await user.selectOptions(agent, "cursor");
     expect(screen.getByRole("combobox", { name: "Step model" })).toHaveProperty(
       "value",
       "agent-default",
     );
-    expect(screen.getByRole("combobox", { name: "Step effort" })).toHaveProperty("value", "");
+    expect(screen.getByRole("slider", { name: "Step effort" })).toHaveProperty("value", "0");
     expect(screen.getByRole("alert").textContent).toContain("unavailable");
     await user.selectOptions(agent, "");
-    expect(screen.queryByRole("combobox", { name: "Step model" })).toBeNull();
+    // An inheriting step still shows the model it inherits and lets the user override it.
+    expect(screen.getByRole("combobox", { name: "Step model" })).toHaveProperty("value", "model-a");
     expect(screen.getByRole("option", { name: /Inherit project default/ })).toBeTruthy();
   });
   it("keeps a saved model visible when the adapter catalog removes it", () => {
