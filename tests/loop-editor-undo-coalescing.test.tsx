@@ -108,7 +108,7 @@ describe("undo coalescing in the editor controller", () => {
     expect(names(hook).present.name).toBe("A");
   });
 
-  it("does not fold across Redo, another edit or a different key", () => {
+  it("keeps folding after Undo and Redo return to the run's own entry, but not after another edit or a different key", () => {
     const hook = controller();
     press(hook, "B");
     pressUndo(hook);

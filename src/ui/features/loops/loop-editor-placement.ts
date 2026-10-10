@@ -30,11 +30,10 @@ export const firstFreeRowY = (x: number, others: Point[]): number => {
  * The placement rules the Board and the Graph view share, so a position the Board writes is the
  * one the Graph draws. They live apart from the Graph's drop planner so the Board, which loads
  * with the main bundle, does not pull the lazily loaded Graph view's code in with it.
- */
-/**
- * Pure geometry for the Graph view. Every coordinate is an ABSOLUTE canvas coordinate, the same
- * space the Runs graph reads from `step.position`. A "lane offset" is the distance from a lane's
- * left edge; it exists only inside these helpers and is never stored.
+ *
+ * Every coordinate is an ABSOLUTE canvas coordinate, the same space the Runs graph reads from
+ * `step.position`. A "lane offset" is the distance from a lane's left edge; it exists only inside
+ * these helpers and is never stored.
  */
 
 /** The visible lane is a little narrower than its slot so neighbouring lanes show a gutter. */

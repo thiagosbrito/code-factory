@@ -74,8 +74,9 @@ export const useLoopEditorController = ({
   // A run of coalescing applies (arrow-key moves) owns ONE undo entry: the one its first apply
   // pushed. `depth` is that entry's position, `present` the loop it left. A later apply folds into
   // it only while the key matches, the loop is still that exact object and the entry is still the
-  // latest one; any other edit, Undo or Redo breaks the run, and so does an apply that changes
-  // nothing or folds the entry away.
+  // latest one. Any other edit breaks the run, as does an Undo or Redo that leaves a different
+  // loop or depth, a different key, an apply that changes nothing, or one that folds the entry
+  // away. Undo followed by Redo returns to the very same loop and depth, so the run survives it.
   const run = useRef<{ key: string; present: LoopDefinition; depth: number } | null>(null);
   const apply = (
     action: (current: LoopDefinition) => LoopDefinition,
