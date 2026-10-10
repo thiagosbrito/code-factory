@@ -38,7 +38,7 @@ export const toolGrantText: Record<
   },
 };
 export const TOOL_GRANT_PERSISTENCE =
-  "Saved for this project in .code-factory/project.json. Revoke it any time in Setup → Agent tool permission.";
+  "Saved for this project in trust.json in your Code Factory user folder, never in the project's own files. Revoke it any time in Setup → Agent tool permission.";
 
 /** Presentational consent dialog; the caller owns the grant request and its state. */
 export const ToolGrantDialog = ({

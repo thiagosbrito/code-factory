@@ -6,6 +6,7 @@ const subtitles: Record<Screen, string> = {
   runs: "Launch and review repeatable coding work.",
   loops: "Reusable local workflows for future runs.",
   settings: "Project and connection settings",
+  manual: "How to use every screen, field and button.",
 };
 
 /** Screen title, the New run and demo actions, the demo banner and the transient notice. */
@@ -32,7 +33,7 @@ export const FactoryPageHeader = ({
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">{subtitles[screen]}</p>
       </div>
-      {!demo && (
+      {!demo && screen !== "manual" && (
         <div className="flex gap-2">
           {screen === "runs" && <Button onClick={onNewRun}>New run</Button>}
           <Button variant="outline" onClick={onDemo}>

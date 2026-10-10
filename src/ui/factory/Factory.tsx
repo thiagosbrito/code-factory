@@ -6,6 +6,7 @@ import type { FactoryResponse, ProjectPatch, ProjectResponse } from "../shared/p
 import { DemoPlaceholder } from "./DemoPlaceholder";
 import { FactoryDialogs } from "./FactoryDialogs";
 import { FactoryPageHeader } from "./FactoryPageHeader";
+import { Manual } from "../features/manual/Manual";
 import { FactorySidebar, type Screen } from "./FactorySidebar";
 import { ProjectSettingsCard } from "./ProjectSettingsCard";
 import { RunsScreen } from "./RunsScreen";
@@ -75,7 +76,9 @@ export const Factory = ({
           onNewRun={() => setNewRunOpen(true)}
           onDemo={onDemo}
         />
-        {screen === "loops" && !demo ? (
+        {screen === "manual" ? (
+          <Manual />
+        ) : screen === "loops" && !demo ? (
           <Loops
             project={project}
             agents={agents}
