@@ -164,6 +164,32 @@ describe("dropping a step", () => {
     expect(next.steps.find((step) => step.id === "b")?.position?.y).toBe(48);
   });
 
+  it("treats the old spots of every dragged step as free when they move together", () => {
+    const loop = build(["a", "b"]);
+    const lane = laneOriginX("implementation");
+    // a is drawn at row 48 and b at row 168; both move down one row, so a lands on b's old spot.
+    const drops = planDrops(loop, [
+      { id: "a", position: { x: lane + 16, y: 168 } },
+      { id: "b", position: { x: lane + 16, y: 288 } },
+    ]);
+    expect(drops.map((drop) => [drop.id, drop.position.y])).toEqual([
+      ["a", 168],
+      ["b", 288],
+    ]);
+  });
+
+  it("does not drop one dragged step onto another that stays where it is drawn", () => {
+    const loop = build(["a", "b"]);
+    const lane = laneOriginX("implementation");
+    const drawn = displayPositions(loop);
+    const drops = planDrops(loop, [
+      { id: "a", position: { x: lane + 16, y: 200 } },
+      { id: "b", position: drawn.get("b") ?? { x: 0, y: 0 } },
+    ]);
+    const a = drops.find((drop) => drop.id === "a");
+    expect(a?.position.y).toBe(288);
+  });
+
   it("writes every step's drawn position on the first drop so positions are all-or-none", () => {
     const loop = chain();
     const drawn = displayPositions(loop);

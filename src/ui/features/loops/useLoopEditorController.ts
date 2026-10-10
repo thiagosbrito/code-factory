@@ -3,7 +3,7 @@ import { ZodError } from "zod";
 import type { AgentConnection } from "../../../adapters/contract.js";
 import { parseLoop, type LoopDefinition } from "../../../domain/loop.js";
 import { bindingError } from "../../shared/connection";
-import { commit, redo, undo, type History } from "./loop-editor-model";
+import { amend, commit, redo, undo, type History } from "./loop-editor-model";
 import { api, loopResponseSchema, type ProjectResponse } from "../../shared/project-api";
 
 const describeError = (error: unknown): string => {
@@ -71,10 +71,33 @@ export const useLoopEditorController = ({
       return () => clearTimeout(timeout);
     }
   }, [selectedId, selected]);
-  const apply = (action: (current: LoopDefinition) => LoopDefinition) => {
+  // A run of coalescing applies (arrow-key moves) owns ONE undo entry: the one its first apply
+  // pushed. `depth` is that entry's position, `present` the loop it left. A later apply folds into
+  // it only while the key matches, the loop is still that exact object and the entry is still the
+  // latest one. Any other edit breaks the run, as does an Undo or Redo that leaves a different
+  // loop or depth, a different key, an apply that changes nothing, or one that folds the entry
+  // away. Undo followed by Redo returns to the very same loop and depth, so the run survives it.
+  const run = useRef<{ key: string; present: LoopDefinition; depth: number } | null>(null);
+  const apply = (
+    action: (current: LoopDefinition) => LoopDefinition,
+    options?: { coalesce?: string },
+  ) => {
     if (busyRef.current) return false;
     try {
-      setHistory(commit(history, action(history.present)));
+      const key = options?.coalesce;
+      const folds =
+        key !== undefined &&
+        run.current?.key === key &&
+        run.current.present === history.present &&
+        run.current.depth === history.past.length;
+      const next = action(history.present);
+      const updated = folds ? amend(history, next) : commit(history, next);
+      const owned = updated.past.length === history.past.length + (folds ? 0 : 1);
+      run.current =
+        key !== undefined && updated !== history && owned
+          ? { key, present: updated.present, depth: updated.past.length }
+          : null;
+      setHistory(updated);
       setMessage("");
       return true;
     } catch (cause) {

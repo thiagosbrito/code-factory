@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, renderHook } from "@testing-library/react";
-import type { LoopDefinition } from "../src/domain/loop.js";
-import { useGraphEditor } from "../src/ui/features/loops/graph/useGraphEditor.js";
+import { act, cleanup } from "@testing-library/react";
 import { laneOriginX } from "../src/ui/features/loops/graph/graph-layout.js";
-import { commit, type History } from "../src/ui/features/loops/loop-editor-model.js";
 import { chain, cycleMessage, decided } from "./support/loop-editor-builders.js";
+import { graphHarness } from "./support/graph-editor-harness.js";
 import { stubReactFlowGlobals } from "./support/react-flow.js";
 
 beforeEach(stubReactFlowGlobals);
@@ -14,24 +12,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** A minimal stand-in for the editor controller's `apply`, with the same commit/throw contract. */
-const harness = (initial: LoopDefinition) => {
-  let history: History = { present: initial, past: [], future: [] };
-  const errors: string[] = [];
-  const apply = (action: (current: LoopDefinition) => LoopDefinition) => {
-    try {
-      history = commit(history, action(history.present));
-      return true;
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
-      return false;
-    }
-  };
-  const hook = renderHook(() =>
-    useGraphEditor({ loop: history.present, apply, openDrawer: () => undefined }),
-  );
-  return { hook, errors, history: () => history };
-};
+const harness = graphHarness;
 
 describe("Graph editor handlers", () => {
   it("validates a connection with a dry run that never changes the loop", () => {

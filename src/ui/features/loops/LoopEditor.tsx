@@ -117,7 +117,7 @@ export const LoopEditor = ({
             onRetry={() => focusSwitch("graph")}
             onUseBoard={() => {
               setView("board");
-              setTimeout(() => focusSwitch("board"), 0);
+              focusSwitch("board");
             }}
           />
         )}

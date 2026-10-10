@@ -1,5 +1,6 @@
 import type { LoopDefinition } from "../../../domain/loop.js";
 import { Button } from "@/shared/components/button";
+import { completePositions } from "./loop-editor-placement";
 import { addStep, semanticDrop, stageOf, stages } from "./loop-editor-model";
 
 export const LoopStageBoard = ({
@@ -143,7 +144,9 @@ export const LoopStageBoard = ({
               className="w-full"
               onClick={() =>
                 apply((current) =>
-                  addStep(current, stage.id, stage.id === "validation" ? "check" : "agent"),
+                  completePositions(
+                    addStep(current, stage.id, stage.id === "validation" ? "check" : "agent"),
+                  ),
                 )
               }
             >
