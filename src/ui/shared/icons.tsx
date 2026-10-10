@@ -92,3 +92,71 @@ export const SunIcon = () => (
     <path d="m19.07 4.93-1.41 1.41" />
   </Icon>
 );
+
+/** Sidebar panel with a chevron pointing the way the toggle will move it. */
+export const PanelLeftCloseIcon = () => (
+  <Icon>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M9 3v18" />
+    <path d="m16 15-3-3 3-3" />
+  </Icon>
+);
+
+export const PanelLeftOpenIcon = () => (
+  <Icon>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M9 3v18" />
+    <path d="m14 9 3 3-3 3" />
+  </Icon>
+);
+
+/** Runs: a play triangle in a circle. */
+export const RunsIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="10" />
+    <path d="m10 8 6 4-6 4Z" />
+  </Icon>
+);
+
+/** Loops: two arrows chasing each other. */
+export const LoopsIcon = () => (
+  <Icon>
+    <path d="m17 2 4 4-4 4" />
+    <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+    <path d="m7 22-4-4 4-4" />
+    <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+  </Icon>
+);
+
+/** Settings: sliders. */
+export const SettingsIcon = () => (
+  <Icon>
+    <path d="M4 21v-7" />
+    <path d="M4 10V3" />
+    <path d="M12 21v-9" />
+    <path d="M12 8V3" />
+    <path d="M20 21v-5" />
+    <path d="M20 12V3" />
+    <path d="M2 14h4" />
+    <path d="M10 8h4" />
+    <path d="M18 16h4" />
+  </Icon>
+);
+
+/** Capability notice: a circled "i". */
+export const InfoIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 16v-4" />
+    <path d="M12 8h.01" />
+  </Icon>
+);
+
+/** Leave demo mode: an arrow leaving a bracket. */
+export const ExitDemoIcon = () => (
+  <Icon>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <path d="m16 17 5-5-5-5" />
+    <path d="M21 12H9" />
+  </Icon>
+);
