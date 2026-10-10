@@ -56,7 +56,7 @@ export const LoopStepDrawer = ({
             drawerRef.current?.focus();
           }}
           onCloseAutoFocus={(event) => event.preventDefault()}
-          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l bg-white shadow-2xl focus:outline-none"
+          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l bg-card shadow-2xl focus:outline-none"
         >
           <fieldset disabled={busy} className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-start justify-between border-b p-5">

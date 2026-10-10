@@ -70,6 +70,11 @@ test("the packaged UI runs under its Content-Security-Policy without violations"
   await expect(drawer).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
+  // The pre-paint theme script is an external file; the policy must allow it and the toggle.
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
   await page.getByRole("button", { name: "Runs" }).click();
   await page.getByRole("button", { name: /New run/i }).click();
   await expect(page.getByRole("dialog")).toBeVisible();

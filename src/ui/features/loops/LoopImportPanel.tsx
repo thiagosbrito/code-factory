@@ -19,7 +19,7 @@ export const LoopImportPanel = ({
   onValidate: () => void;
   onConfirm: () => void;
 }) => (
-  <details id="loop-import" className="mt-4 rounded-lg border bg-white p-4">
+  <details id="loop-import" className="mt-4 rounded-lg border bg-card p-4">
     <summary className="cursor-pointer font-medium">Import canonical loop JSON</summary>
     <label htmlFor="loop-json" className="mt-3 block text-sm">
       Paste a portable loop document

@@ -125,7 +125,7 @@ export const RunGraph = ({
       </div>
       <div className="relative mt-3">
         {overlay && (
-          <div className="absolute right-3 top-3 z-10 rounded-lg border bg-white/95 p-1 shadow-sm backdrop-blur">
+          <div className="absolute right-3 top-3 z-10 rounded-lg border bg-card/95 p-1 shadow-sm backdrop-blur">
             {overlay}
           </div>
         )}
@@ -179,7 +179,7 @@ export const RunGraph = ({
                     refY="4"
                     orient="auto"
                   >
-                    <path d="M0 0 L8 4 L0 8" fill="none" stroke="#8b9690" />
+                    <path d="M0 0 L8 4 L0 8" fill="none" style={{ stroke: "var(--graph-edge)" }} />
                   </marker>
                 </defs>
                 {run.snapshot.loop.dependencies.map((edge) => {
@@ -195,7 +195,7 @@ export const RunGraph = ({
                       key={`${edge.from}:${edge.to}`}
                       d={`M${x1} ${y1} C${x1 + 40} ${y1},${x2 - 40} ${y2},${x2 - 8} ${y2}`}
                       fill="none"
-                      stroke="#8b9690"
+                      style={{ stroke: "var(--graph-edge)" }}
                       strokeWidth="1.5"
                       markerEnd="url(#run-graph-arrow)"
                     />
@@ -214,7 +214,7 @@ export const RunGraph = ({
                     id={`run-node-${definition.id}`}
                     type="button"
                     style={{ left: point.x, top: point.y, width: nodeWidth, minHeight: nodeHeight }}
-                    className={`run-graph-node run-graph-node-${status} absolute rounded-lg border bg-white p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
+                    className={`run-graph-node run-graph-node-${status} absolute rounded-lg border bg-card p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
                     aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts`}
                     aria-pressed={selectedStepId === definition.id}
                     onClick={() => onSelect(definition.id)}

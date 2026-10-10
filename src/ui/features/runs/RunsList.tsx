@@ -29,7 +29,7 @@ export const RunsList = ({ runs, onOpen }: { runs: RunRecord[]; onOpen: (id: str
     <section className="mt-7" aria-label="Run history">
       <div className="flex flex-wrap items-center gap-3">
         <Input
-          className="max-w-sm bg-white"
+          className="max-w-sm bg-card"
           aria-label="Search runs, tickets, or tasks"
           placeholder="Search runs, tickets, or tasks"
           value={query}
@@ -57,7 +57,7 @@ export const RunsList = ({ runs, onOpen }: { runs: RunRecord[]; onOpen: (id: str
         <span>Started</span>
         <span>Last activity</span>
       </div>
-      <div className="overflow-hidden rounded-lg border bg-white">
+      <div className="overflow-hidden rounded-lg border bg-card">
         {visible.map((run) => {
           const last = activityPreview(run.evidence);
           return (

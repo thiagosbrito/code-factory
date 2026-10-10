@@ -1,3 +1,5 @@
+import { ThemeToggle } from "./ThemeToggle";
+
 export const Brand = () => {
   return (
     <div className="flex items-center gap-3 text-lg font-semibold tracking-tight">
@@ -5,6 +7,7 @@ export const Brand = () => {
         ∞
       </span>
       code-factory
+      <ThemeToggle />
     </div>
   );
 };

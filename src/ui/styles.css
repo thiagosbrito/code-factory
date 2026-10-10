@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: oklch(0.99 0 0);
   --foreground: oklch(0.2 0 0);
@@ -16,8 +18,26 @@
   --border: oklch(0.9 0 0);
   --input: oklch(0.9 0 0);
   --ring: oklch(0.49 0.09 183);
+  --card: oklch(1 0 0);
   --graphite: #252b29;
   --canvas: #f5f6f3;
+  --graph-bg: #f4f5f1;
+  --graph-dot: #c9d0c9;
+  --graph-edge: #8b9690;
+  --status-bg: #edf0ec;
+  --status-fg: #47534c;
+  --status-active-bg: #e1f3f0;
+  --status-active-fg: #116b64;
+  --status-ok-bg: #e5f3e7;
+  --status-ok-fg: #27613a;
+  --status-wait-bg: #fff2d9;
+  --status-wait-fg: #855c16;
+  --status-idle-bg: #ececea;
+  --status-idle-fg: #4a4a46;
+  --status-bad-bg: #fce9e6;
+  --status-bad-fg: #9a3935;
+  --detail-label: #657169;
+  color-scheme: light;
   --radius: 0.5rem;
 }
 
@@ -38,10 +58,68 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-graphite: var(--graphite);
+  --color-card: var(--card);
   --color-canvas: var(--canvas);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
+}
+
+/* Dark tones from the same palette: graphite surfaces, teal accent kept. Tinted Tailwind shades used
+   across the UI are remapped here so components need no per-class dark: variants. */
+.dark {
+  --background: oklch(0.2 0.006 170);
+  --foreground: oklch(0.95 0.005 170);
+  --card: oklch(0.25 0.008 170);
+  --primary: oklch(0.7 0.11 183);
+  --primary-foreground: oklch(0.18 0.01 170);
+  --secondary: oklch(0.3 0.008 170);
+  --secondary-foreground: oklch(0.95 0.005 170);
+  --muted: oklch(0.3 0.008 170);
+  --muted-foreground: oklch(0.72 0.01 170);
+  --accent: oklch(0.3 0.008 170);
+  --accent-foreground: oklch(0.95 0.005 170);
+  --destructive: oklch(0.65 0.2 27);
+  --border: oklch(0.36 0.008 170);
+  --input: oklch(0.36 0.008 170);
+  --ring: oklch(0.7 0.11 183);
+  --graphite: #161a19;
+  --canvas: #1b201f;
+  --graph-bg: #1b201f;
+  --graph-dot: #38413d;
+  --graph-edge: #7f8b85;
+  --status-bg: #2c3330;
+  --status-fg: #c3ccc6;
+  --status-active-bg: #123b38;
+  --status-active-fg: #7fd8cf;
+  --status-ok-bg: #173824;
+  --status-ok-fg: #8fd6a4;
+  --status-wait-bg: #43330f;
+  --status-wait-fg: #f0c978;
+  --status-idle-bg: #2f3331;
+  --status-idle-fg: #bfc4c0;
+  --status-bad-bg: #4a1f1c;
+  --status-bad-fg: #f2a39e;
+  --detail-label: #a2aea7;
+  --color-red-700: var(--color-red-300);
+  --color-red-200: var(--color-red-900);
+  --color-red-50: var(--color-red-950);
+  --color-teal-700: var(--color-teal-300);
+  --color-teal-600: var(--color-teal-400);
+  --color-teal-200: var(--color-teal-800);
+  --color-teal-50: var(--color-teal-950);
+  --color-amber-900: var(--color-amber-200);
+  --color-amber-800: var(--color-amber-300);
+  --color-amber-700: var(--color-amber-300);
+  --color-amber-300: var(--color-amber-700);
+  --color-amber-100: var(--color-amber-900);
+  --color-amber-50: var(--color-amber-950);
+  --color-emerald-700: var(--color-emerald-400);
+  --color-slate-100: var(--muted);
+  --color-slate-50: var(--background);
+  --color-stone-600: var(--color-stone-300);
+  --color-stone-50: var(--background);
+  color-scheme: dark;
 }
 
 @layer base {
@@ -60,8 +138,8 @@
   align-items: center;
   border-radius: 999px;
   padding: 0.2rem 0.55rem;
-  background: #edf0ec;
-  color: #47534c;
+  background: var(--status-bg);
+  color: var(--status-fg);
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: capitalize;
@@ -69,22 +147,22 @@
 .run-status-running,
 .run-status-message,
 .run-status-tool {
-  background: #e1f3f0;
-  color: #116b64;
+  background: var(--status-active-bg);
+  color: var(--status-active-fg);
 }
 .run-status-succeeded,
 .run-status-check {
-  background: #e5f3e7;
-  color: #27613a;
+  background: var(--status-ok-bg);
+  color: var(--status-ok-fg);
 }
 .run-status-waiting,
 .run-status-pending {
-  background: #fff2d9;
-  color: #855c16;
+  background: var(--status-wait-bg);
+  color: var(--status-wait-fg);
 }
 .run-status-not-reached {
-  background: #ececea;
-  color: #4a4a46;
+  background: var(--status-idle-bg);
+  color: var(--status-idle-fg);
 }
 .run-status-failed,
 .run-status-rejected,
@@ -92,13 +170,13 @@
 .run-status-blocked,
 .run-status-error,
 .run-status-canceled {
-  background: #fce9e6;
-  color: #9a3935;
+  background: var(--status-bad-bg);
+  color: var(--status-bad-fg);
 }
 .run-graph-canvas {
   min-height: 340px;
-  background-color: #f4f5f1;
-  background-image: radial-gradient(#c9d0c9 0.8px, transparent 0.8px);
+  background-color: var(--graph-bg);
+  background-image: radial-gradient(var(--graph-dot) 0.8px, transparent 0.8px);
   background-size: 18px 18px;
 }
 .run-graph-node-running {
@@ -178,7 +256,7 @@
   gap: 0.5rem;
 }
 .run-details-grid dt {
-  color: #657169;
+  color: var(--detail-label);
 }
 .run-details-grid dd {
   margin: 0;
