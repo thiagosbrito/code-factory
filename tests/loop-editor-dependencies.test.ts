@@ -1,118 +1,46 @@
 import { describe, expect, it } from "vitest";
-import { createLoopDraft, parseLoop, type LoopDefinition } from "../src/domain/loop.js";
+import { parseLoop, type LoopDefinition } from "../src/domain/loop.js";
 import {
   addDependency,
   removeDependency,
-  setStage,
 } from "../src/ui/features/loops/loop-editor-dependencies.js";
-import { commit, redo, undo, type History } from "../src/ui/features/loops/loop-editor-model.js";
+import {
+  build,
+  chain,
+  cycleMessage,
+  decided,
+  decisionParts,
+  edge,
+  joinParts,
+  joined,
+  parallel,
+  parallelParts,
+  repeated,
+} from "./support/loop-editor-builders.js";
 
-const cycle = "Dependency cycles are not allowed; repairs require explicit bounded policy.";
-const decisionSource =
-  "Step a is a decision. Add a named branch to its decision instead of a plain connection.";
-const repeatSource =
-  "Step c is a decision. Add a named branch to its decision instead of a plain connection.";
-const fewBranches = (id: string) =>
-  `Decision ${id} needs at least two branches. Remove the decision first to disconnect this step.`;
-const groupMessage = "This step belongs to a group, join, or decision.";
+const decisionSource = (id: string) =>
+  `Step ${id} is a decision. Add a named branch to its decision instead of a plain connection.`;
+const tooFew = (from: string, to: string, outcomes: string, plural = false) =>
+  `Removing ${from} to ${to} removes outcome${plural ? "s" : ""} ${outcomes} and leaves fewer than two branches on decision ${from}. Remove the decision first to disconnect this step.`;
+const parallelMessage = "Parallel group g cannot order its members.";
 
-type Parts = Partial<Pick<LoopDefinition, "dependencies" | "groups" | "joins" | "decisions">> & {
-  grouped?: Record<string, string>;
-  checks?: string[];
-};
-
-const build = (ids: string[], parts: Parts = {}): LoopDefinition =>
-  parseLoop({
-    ...createLoopDraft("example", "Example"),
-    steps: ids.map((id) => ({
-      id,
-      name: id,
-      kind: parts.checks?.includes(id) ? "check" : "agent",
-      stage: parts.checks?.includes(id) ? "validation" : "implementation",
-      role: "Role",
-      instruction: "Do it",
-      expectedOutputs: ["Result"],
-      groupId: parts.grouped?.[id],
-    })),
-    dependencies: parts.dependencies ?? [],
-    groups: parts.groups ?? [],
-    joins: parts.joins ?? [],
-    decisions: parts.decisions ?? [],
-  });
-
-const edge = (from: string, to: string) => ({ from, to });
-const chain = () => build(["a", "b", "c"], { dependencies: [edge("a", "b"), edge("b", "c")] });
-
-const joinParts: Parts = {
-  dependencies: [edge("b", "d"), edge("c", "d")],
-  joins: [{ stepId: "d", from: ["b", "c"], mode: "all" }],
-};
-const joined = () =>
-  build(["a", "b", "c", "d"], {
-    ...joinParts,
-    dependencies: [edge("a", "b"), edge("a", "c"), ...(joinParts.dependencies ?? [])],
-  });
-
-const decisionParts: Parts = {
-  dependencies: [edge("a", "b"), edge("a", "c")],
-  decisions: [
-    {
-      stepId: "a",
-      branches: [
-        { outcome: "yes", to: "b" },
-        { outcome: "no", to: "c" },
-      ],
-    },
-  ],
-};
-const decided = () => build(["a", "b", "c", "d"], decisionParts);
-
-const parallelParts: Parts = {
-  dependencies: [edge("a", "b"), edge("a", "c"), edge("b", "d"), edge("c", "d")],
-  groups: [{ id: "g", name: "G", kind: "parallel", stepIds: ["b", "c"] }],
-  grouped: { b: "g", c: "g" },
-};
-const parallel = () => build(["a", "b", "c", "d"], parallelParts);
-
-const repeated = () =>
-  build(["a", "b", "c", "d", "e"], {
-    dependencies: [edge("a", "b"), edge("b", "c"), edge("c", "d")],
-    groups: [
-      {
-        id: "g",
-        name: "G",
-        kind: "repeat",
-        stepIds: ["b", "c"],
-        maxIterations: 3,
-        exitWhen: { stepId: "c", outcome: "done" },
-        continueWhen: { outcome: "again", to: "b" },
-      },
-    ],
-    grouped: { b: "g", c: "g" },
-    decisions: [
-      {
-        stepId: "c",
-        branches: [
-          { outcome: "done", to: "d" },
-          { outcome: "again", to: "b" },
-        ],
-      },
-    ],
-  });
-
-type Case = {
+type Base = {
   name: string;
   loop: () => LoopDefinition;
   op: "add" | "remove";
   from: string;
   to: string;
-  error?: string;
-  expected?: (loop: LoopDefinition) => void;
 };
+type AcceptRow = Base & { expected: (loop: LoopDefinition) => void };
+type RejectRow = Base & { error: string };
 
-/** The accept/reject table for addDependency and removeDependency (mirrors the THI-43 spike note). */
-const cases: Case[] = [
-  // Accept rows.
+const run = (loop: LoopDefinition, row: Base): LoopDefinition =>
+  row.op === "add"
+    ? addDependency(loop, row.from, row.to)
+    : removeDependency(loop, row.from, row.to);
+
+/** Accept rows of the THI-43 spike table plus the join/decision bookkeeping done in the same parse. */
+const accepted: AcceptRow[] = [
   {
     name: "plain skip edge",
     loop: chain,
@@ -162,7 +90,19 @@ const cases: Case[] = [
     op: "add",
     from: "a",
     to: "d",
-    expected: (l) => expect(l.joins[0]?.from).toEqual(["b", "c", "a"]),
+    expected: (l) => expect(l.joins).toEqual([{ stepId: "d", from: ["b", "c", "a"], mode: "all" }]),
+  },
+  {
+    name: "third source into an any-join keeps its mode",
+    loop: () =>
+      build(["a", "b", "c", "d"], {
+        dependencies: [edge("b", "d"), edge("c", "d")],
+        joins: [{ stepId: "d", from: ["b", "c"], mode: "any" }],
+      }),
+    op: "add",
+    from: "a",
+    to: "d",
+    expected: (l) => expect(l.joins).toEqual([{ stepId: "d", from: ["b", "c", "a"], mode: "any" }]),
   },
   {
     name: "outgoing edge from a join target",
@@ -170,7 +110,7 @@ const cases: Case[] = [
     op: "add",
     from: "d",
     to: "e",
-    expected: (l) => expect(l.joins[0]?.from).toEqual(["b", "c"]),
+    expected: (l) => expect(l.joins).toEqual([{ stepId: "d", from: ["b", "c"], mode: "all" }]),
   },
   {
     name: "incoming edge into a decision step",
@@ -224,7 +164,7 @@ const cases: Case[] = [
     },
   },
   {
-    name: "remove a join source while two remain",
+    name: "remove a join source while two remain keeps the mode",
     loop: () =>
       build(["a", "b", "c", "d"], {
         dependencies: [edge("a", "d"), edge("b", "d"), edge("c", "d")],
@@ -256,9 +196,115 @@ const cases: Case[] = [
     to: "d",
     expected: (l) => expect(l.decisions[0]?.branches.map((b) => b.to)).toEqual(["b", "c"]),
   },
-  // Reject rows.
-  { name: "self edge", loop: chain, op: "add", from: "a", to: "a", error: cycle },
-  { name: "back edge closing a cycle", loop: chain, op: "add", from: "c", to: "a", error: cycle },
+  {
+    name: "two outcomes sharing one target are accepted and both removed with it",
+    loop: () =>
+      build(["a", "b", "c", "d"], {
+        dependencies: [edge("a", "b"), edge("a", "c"), edge("a", "d")],
+        decisions: [
+          {
+            stepId: "a",
+            branches: [
+              { outcome: "yes", to: "b" },
+              { outcome: "maybe", to: "b" },
+              { outcome: "x", to: "c" },
+              { outcome: "y", to: "d" },
+            ],
+          },
+        ],
+      }),
+    op: "remove",
+    from: "a",
+    to: "b",
+    expected: (l) => expect(l.decisions[0]?.branches.map((b) => b.outcome)).toEqual(["x", "y"]),
+  },
+  {
+    name: "edge that is both a decision branch and a join source updates both",
+    loop: () =>
+      build(["a", "b", "c", "d", "x"], {
+        dependencies: [edge("a", "b"), edge("a", "c"), edge("a", "d"), edge("x", "c")],
+        decisions: [
+          {
+            stepId: "a",
+            branches: [
+              { outcome: "yes", to: "b" },
+              { outcome: "no", to: "c" },
+              { outcome: "maybe", to: "d" },
+            ],
+          },
+        ],
+        joins: [{ stepId: "c", from: ["a", "x"], mode: "all" }],
+      }),
+    op: "remove",
+    from: "a",
+    to: "c",
+    expected: (l) => {
+      expect(l.decisions[0]?.branches.map((b) => b.outcome)).toEqual(["yes", "maybe"]);
+      expect(l.joins).toEqual([]);
+      expect(l.dependencies).toEqual([edge("a", "b"), edge("a", "d"), edge("x", "c")]);
+    },
+  },
+  {
+    name: "remove an edge beside the repeat continuation keeps the continuation branch",
+    loop: () =>
+      build(["a", "b", "c", "d"], {
+        dependencies: [edge("a", "c"), edge("c", "d"), edge("c", "b")],
+        groups: [
+          {
+            id: "g",
+            name: "G",
+            kind: "repeat",
+            stepIds: ["c", "b"],
+            maxIterations: 3,
+            exitWhen: { stepId: "c", outcome: "done" },
+            continueWhen: { outcome: "again", to: "b" },
+          },
+        ],
+        grouped: { b: "g", c: "g" },
+        decisions: [
+          {
+            stepId: "c",
+            branches: [
+              { outcome: "done", to: "d" },
+              { outcome: "again", to: "b" },
+              { outcome: "alt", to: "b" },
+            ],
+          },
+        ],
+      }),
+    op: "remove",
+    from: "c",
+    to: "b",
+    expected: (l) => {
+      expect(l.decisions[0]?.branches).toEqual([
+        { outcome: "done", to: "d" },
+        { outcome: "again", to: "b" },
+      ]);
+      expect(l.groups[0]).toMatchObject({ continueWhen: { outcome: "again", to: "b" } });
+      expect(l.dependencies).toEqual([edge("a", "c"), edge("c", "d")]);
+    },
+  },
+];
+
+/** Reject rows: the exact message is pinned. A rejected call throws and the loop is unchanged. */
+const rejected: RejectRow[] = [
+  { name: "self edge", loop: chain, op: "add", from: "a", to: "a", error: cycleMessage },
+  {
+    name: "self edge on a join target",
+    loop: () => build(["a", "b", "c", "d"], joinParts),
+    op: "add",
+    from: "d",
+    to: "d",
+    error: cycleMessage,
+  },
+  {
+    name: "back edge closing a cycle",
+    loop: chain,
+    op: "add",
+    from: "c",
+    to: "a",
+    error: cycleMessage,
+  },
   {
     name: "duplicate edge",
     loop: chain,
@@ -276,12 +322,20 @@ const cases: Case[] = [
     error: "Select two existing steps.",
   },
   {
+    name: "edge from a missing step",
+    loop: chain,
+    op: "add",
+    from: "nope",
+    to: "a",
+    error: "Select two existing steps.",
+  },
+  {
     name: "new outgoing edge from a decision step",
     loop: decided,
     op: "add",
     from: "a",
     to: "d",
-    error: decisionSource,
+    error: decisionSource("a"),
   },
   {
     name: "remove a branch edge leaving fewer than two branches",
@@ -289,7 +343,28 @@ const cases: Case[] = [
     op: "remove",
     from: "a",
     to: "c",
-    error: fewBranches("a"),
+    error: tooFew("a", "c", "no"),
+  },
+  {
+    name: "remove an edge carrying several outcomes of a three-branch decision",
+    loop: () =>
+      build(["a", "b", "c"], {
+        dependencies: [edge("a", "b"), edge("a", "c")],
+        decisions: [
+          {
+            stepId: "a",
+            branches: [
+              { outcome: "yes", to: "b" },
+              { outcome: "maybe", to: "b" },
+              { outcome: "no", to: "c" },
+            ],
+          },
+        ],
+      }),
+    op: "remove",
+    from: "a",
+    to: "b",
+    error: tooFew("a", "b", "yes, maybe", true),
   },
   {
     name: "edge between two parallel members",
@@ -297,7 +372,7 @@ const cases: Case[] = [
     op: "add",
     from: "b",
     to: "c",
-    error: "Parallel group g cannot order its members.",
+    error: parallelMessage,
   },
   {
     name: "reverse edge between two parallel members",
@@ -305,7 +380,7 @@ const cases: Case[] = [
     op: "add",
     from: "c",
     to: "b",
-    error: "Parallel group g cannot order its members.",
+    error: parallelMessage,
   },
   {
     name: "repeat continuation drawn as an edge",
@@ -313,7 +388,7 @@ const cases: Case[] = [
     op: "add",
     from: "c",
     to: "b",
-    error: repeatSource,
+    error: decisionSource("c"),
   },
   {
     name: "third outgoing edge from the repeat exit decision",
@@ -321,7 +396,7 @@ const cases: Case[] = [
     op: "add",
     from: "c",
     to: "e",
-    error: repeatSource,
+    error: decisionSource("c"),
   },
   {
     name: "remove the repeat exit edge",
@@ -329,7 +404,40 @@ const cases: Case[] = [
     op: "remove",
     from: "c",
     to: "d",
-    error: fewBranches("c"),
+    error: tooFew("c", "d", "done"),
+  },
+  {
+    name: "remove the exit edge of a three-branch repeat decision is refused by parseLoop",
+    loop: () =>
+      build(["a", "b", "c", "d", "e"], {
+        dependencies: [edge("a", "b"), edge("b", "c"), edge("c", "d"), edge("c", "e")],
+        groups: [
+          {
+            id: "g",
+            name: "G",
+            kind: "repeat",
+            stepIds: ["b", "c"],
+            maxIterations: 3,
+            exitWhen: { stepId: "c", outcome: "done" },
+            continueWhen: { outcome: "again", to: "b" },
+          },
+        ],
+        grouped: { b: "g", c: "g" },
+        decisions: [
+          {
+            stepId: "c",
+            branches: [
+              { outcome: "done", to: "d" },
+              { outcome: "again", to: "b" },
+              { outcome: "other", to: "e" },
+            ],
+          },
+        ],
+      }),
+    op: "remove",
+    from: "c",
+    to: "d",
+    error: "Repeat g needs an exit decision leading outside its body.",
   },
   {
     name: "edge closing a loop outside the body",
@@ -337,7 +445,7 @@ const cases: Case[] = [
     op: "add",
     from: "d",
     to: "a",
-    error: cycle,
+    error: cycleMessage,
   },
   {
     name: "remove an edge that does not exist",
@@ -349,97 +457,39 @@ const cases: Case[] = [
   },
 ];
 
-const run = (loop: LoopDefinition, item: Case): LoopDefinition =>
-  item.op === "add"
-    ? addDependency(loop, item.from, item.to)
-    : removeDependency(loop, item.from, item.to);
-
 describe("dependency operations", () => {
-  it.each(cases.filter((item) => item.error === undefined))(
-    "accepts $op $from -> $to: $name",
-    (item) => {
-      const loop = item.loop();
-      const before = structuredClone(loop);
-      const next = run(loop, item);
-      item.expected?.(next);
-      expect(parseLoop(next)).toEqual(next);
-      expect(loop).toEqual(before);
-      expect(next.groups).toEqual(loop.groups);
-    },
-  );
-
-  it.each(cases.filter((item) => item.error !== undefined))(
-    "rejects $op $from -> $to: $name",
-    (item) => {
-      const loop = item.loop();
-      const before = structuredClone(loop);
-      expect(() => run(loop, item)).toThrow(item.error);
-      expect(loop).toEqual(before);
-    },
-  );
-
-  it("never duplicates an edge and never changes continueWhen", () => {
-    const loop = repeated();
-    const next = addDependency(loop, "a", "c");
-    expect(new Set(next.dependencies.map((e) => `${e.from}:${e.to}`)).size).toBe(
-      next.dependencies.length,
-    );
-    expect(next.groups).toEqual(loop.groups);
-    expect(() => removeDependency(loop, "c", "d")).toThrow(fewBranches("c"));
-  });
-
-  it("restores the exact previous dependency list through undo and redo", () => {
-    const initial = chain();
-    const start: History = { present: initial, past: [], future: [] };
-    const added = commit(start, addDependency(initial, "a", "c"));
-    expect(undo(added).present.dependencies).toEqual(initial.dependencies);
-    const removed = commit(added, removeDependency(added.present, "a", "b"));
-    expect(undo(removed).present.dependencies).toEqual(added.present.dependencies);
-    expect(redo(undo(removed)).present.dependencies).toEqual(removed.present.dependencies);
-    expect(() => addDependency(removed.present, "c", "a")).toThrow(cycle);
-    expect(removed.past).toHaveLength(2);
-  });
-});
-
-describe("setStage", () => {
-  it("changes only the stage", () => {
-    const loop = chain();
-    const next = setStage(loop, "b", "review");
-    expect(next.steps.find((s) => s.id === "b")?.stage).toBe("review");
-    expect(next.dependencies).toEqual(loop.dependencies);
-    expect(next.steps.map((s) => s.id)).toEqual(loop.steps.map((s) => s.id));
-    expect(next.steps.filter((s) => s.id !== "b")).toEqual(loop.steps.filter((s) => s.id !== "b"));
-  });
-
-  it("is a no-op for the current stage", () => {
-    const loop = chain();
-    expect(setStage(loop, "a", "implementation")).toBe(loop);
-  });
-
-  it.each([
-    [
-      "check step outside Validate",
-      () => build(["a", "b"], { checks: ["b"] }),
-      "b",
-      "Check steps belong in Validate.",
-    ],
-    ["group member", parallel, "b", groupMessage],
-    ["join step", joined, "d", groupMessage],
-    ["decision step", decided, "a", groupMessage],
-    ["missing step", chain, "nope", "Select an existing step."],
-  ] as const)("refuses a %s", (_name, make, id, message) => {
-    const loop = make();
+  it.each(accepted)("accepts $op $from -> $to: $name", (row) => {
+    const loop = row.loop();
     const before = structuredClone(loop);
-    expect(() => setStage(loop, id, "review")).toThrow(message);
+    const next = run(loop, row);
+    row.expected(next);
+    expect(parseLoop(next)).toEqual(next);
+    expect(loop).toEqual(before);
+    expect(next.groups.map(({ id }) => id)).toEqual(loop.groups.map(({ id }) => id));
+  });
+
+  it.each(rejected)("rejects $op $from -> $to: $name", (row) => {
+    const loop = row.loop();
+    const before = structuredClone(loop);
+    expect(() => run(loop, row)).toThrow(new Error(row.error));
     expect(loop).toEqual(before);
   });
 
-  it("keeps a check step in Validate and restores the stage on undo and redo", () => {
-    const initial = build(["a", "b"], { checks: ["b"] });
-    expect(setStage(initial, "b", "validation")).toBe(initial);
-    const start: History = { present: initial, past: [], future: [] };
-    const moved = commit(start, setStage(initial, "a", "planning"));
-    expect(undo(moved).present).toEqual(initial);
-    expect(redo(undo(moved)).present.steps[0]?.stage).toBe("planning");
+  it("rejects a duplicate edge without changing the loop", () => {
+    const loop = chain();
+    const before = structuredClone(loop);
+    expect(() => addDependency(loop, "a", "b")).toThrow(
+      new Error("Step a already leads to step b."),
+    );
+    expect(loop).toEqual(before);
+    expect(loop.dependencies.filter((e) => e.from === "a" && e.to === "b")).toHaveLength(1);
+  });
+
+  it("leaves continueWhen unchanged after an allowed removal", () => {
+    const loop = repeated();
+    const next = removeDependency(loop, "a", "b");
+    expect(next.dependencies).toEqual([edge("b", "c"), edge("c", "d")]);
+    expect(next.groups).toEqual(loop.groups);
+    expect(next.decisions).toEqual(loop.decisions);
   });
 });

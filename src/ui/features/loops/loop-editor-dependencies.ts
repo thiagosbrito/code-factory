@@ -1,6 +1,6 @@
 import { ZodError } from "zod";
 import { parseLoop, type LoopDefinition } from "../../../domain/loop.js";
-import { stageOf, type Stage } from "./loop-editor-model.js";
+import { stageOf, type Stage } from "./loop-editor-model";
 
 /**
  * Pure dependency and stage operations for the Graph view. Like the other model functions they
@@ -11,13 +11,13 @@ import { stageOf, type Stage } from "./loop-editor-model.js";
 
 const cycleMessage = "Dependency cycles are not allowed; repairs require explicit bounded policy.";
 
-/** Run parseLoop and turn Zod issues into one readable Error instead of a raw ZodError. */
-const parseEdited = (input: unknown): LoopDefinition => {
+/** Run parseLoop and turn Zod issues into one readable Error (same "; " format as the controller). */
+export const parseEdited = (input: unknown): LoopDefinition => {
   try {
     return parseLoop(input);
   } catch (error) {
     if (!(error instanceof ZodError)) throw error;
-    throw new Error([...new Set(error.issues.map((issue) => issue.message))].join(" "));
+    throw new Error([...new Set(error.issues.map((issue) => issue.message))].join("; "));
   }
 };
 
@@ -55,10 +55,13 @@ export const removeDependency = (
   if (!loop.dependencies.some((edge) => edge.from === from && edge.to === to))
     throw new Error(`Step ${from} does not lead to step ${to}.`);
   const dependencies = loop.dependencies.filter((edge) => !(edge.from === from && edge.to === to));
-  // Safest choice for a decision: it needs two named branches, so removing a branch that would
-  // leave fewer is refused. The user must remove the decision explicitly (removeDecision), which
-  // never happens as a side effect of deleting a connection. Repeat exit decisions fall under the
-  // same rule because they always hold the exit and the continuation branch.
+  // Safest choice for a decision: it needs two named branches, so removing a connection that
+  // would leave fewer is refused; the user must remove the decision explicitly (removeDecision).
+  // Several outcomes may share one target and the connection carries all of them, so the refusal
+  // names them. A repeat's continueWhen branch has no edge and is always kept. A repeat exit
+  // decision with two branches is refused by the rule above; with three or more, parseLoop
+  // refuses ("Repeat g needs an exit decision leading outside its body"). Either way, removing a
+  // repeat exit edge is always refused.
   const continuations = new Set(
     loop.groups.flatMap((group) =>
       group.kind === "repeat" && group.exitWhen.stepId === from
@@ -68,17 +71,21 @@ export const removeDependency = (
   );
   const decisions = loop.decisions.map((decision) => {
     if (decision.stepId !== from) return decision;
-    const branches = decision.branches.filter(
-      (branch) => branch.to !== to || continuations.has(`${branch.outcome}:${branch.to}`),
+    const removed = decision.branches.filter(
+      (branch) => branch.to === to && !continuations.has(`${branch.outcome}:${branch.to}`),
     );
-    if (branches.length < 2)
+    const branches = decision.branches.filter((branch) => !removed.includes(branch));
+    if (branches.length < 2) {
+      const outcomes = removed.map((branch) => branch.outcome).join(", ");
       throw new Error(
-        `Decision ${from} needs at least two branches. Remove the decision first to disconnect this step.`,
+        `Removing ${from} to ${to} removes outcome${removed.length > 1 ? "s" : ""} ${outcomes} and leaves fewer than two branches on decision ${from}. Remove the decision first to disconnect this step.`,
       );
+    }
     return { ...decision, branches };
   });
   // A join with fewer than two sources is no longer a join: the record is dropped and the
-  // remaining plain edge stays.
+  // remaining plain edge stays. Note for the Graph UI (THI-46/47): a dropped join of mode "any"
+  // is not restored by re-adding the edge; that becomes plain fan-in (mode "all"), so warn first.
   const joins = loop.joins.flatMap((join) => {
     if (join.stepId !== to) return [join];
     const sources = join.from.filter((source) => source !== from);
@@ -87,7 +94,11 @@ export const removeDependency = (
   return parseEdited({ ...loop, dependencies, decisions, joins });
 };
 
-/** Changes only `stage`; edges, order and positions are untouched (unlike semanticDrop). */
+/**
+ * Changes only `stage`; edges, order and positions are untouched (unlike semanticDrop).
+ * Stage is not purely visual: the scheduler and acceptance rules treat stage === "review" steps
+ * specially (they may overlap), so moving a step between lanes can change execution semantics.
+ */
 export const setStage = (loop: LoopDefinition, stepId: string, stage: Stage): LoopDefinition => {
   const step = loop.steps.find((item) => item.id === stepId);
   if (!step) throw new Error("Select an existing step.");
