@@ -112,6 +112,8 @@ export const LoopEditor = ({
         ) : (
           <LazyLoopGraphView
             loop={loop}
+            apply={apply}
+            openDrawer={openDrawer}
             onRetry={() => focusSwitch("graph")}
             onUseBoard={() => {
               setView("board");

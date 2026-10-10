@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useState, type ReactNode } from "react";
-import type { LoopDefinition } from "../../../domain/loop.js";
+import type { LoopGraphViewProps } from "./LoopGraphView";
 import { Button } from "@/shared/components/button";
 
 type GraphModule = typeof import("./LoopGraphView");
@@ -60,11 +60,12 @@ const viewFor = (load: () => Promise<GraphModule>): GraphView => {
 /** Loads the graph view as a separate chunk; a failed load can be retried or abandoned. */
 export const LazyLoopGraphView = ({
   loop,
+  apply,
+  openDrawer,
   onUseBoard,
   onRetry,
   load = loadGraphModule,
-}: {
-  loop: LoopDefinition;
+}: LoopGraphViewProps & {
   onUseBoard: () => void;
   /** Called synchronously when Retry is pressed, so the caller can place focus. */
   onRetry?: () => void;
@@ -85,7 +86,7 @@ export const LazyLoopGraphView = ({
           <output className="block p-6 text-sm text-muted-foreground">Loading graph view…</output>
         }
       >
-        <View loop={loop} />
+        <View loop={loop} apply={apply} openDrawer={openDrawer} />
       </Suspense>
     </GraphErrorBoundary>
   );

@@ -70,6 +70,13 @@ test("the packaged UI runs under its Content-Security-Policy without violations"
   await expect(drawer).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
+  // The Graph view is a lazy chunk with its own stylesheet; both must load under the policy, and
+  // selecting a connection renders its delete control through the library's label portal.
+  await page.getByRole("button", { name: "Graph" }).click();
+  await expect(page.locator(".react-flow__node-step").first()).toBeVisible();
+  await page.locator(".react-flow__edge-path").first().click({ force: true });
+  await expect(page.getByRole("button", { name: /^Delete: Dependency from/ })).toBeVisible();
+  await page.getByRole("button", { name: "Board" }).click();
   // The pre-paint theme script is an external file; the policy must allow it and the toggle.
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await page.reload();
