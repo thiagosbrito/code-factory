@@ -32,7 +32,11 @@ const laneOf = async (page: Page, step: string, lane: string) => {
   const node = await stepNode(page, step).boundingBox();
   const box = await laneBox(page, lane);
   return (
-    !!node && node.x >= box.x - 1 && node.x + node.width <= box.x + box.width + 1 && node.y >= box.y
+    !!node &&
+    node.x >= box.x - 1 &&
+    node.x + node.width <= box.x + box.width + 1 &&
+    node.y >= box.y &&
+    node.y + node.height <= box.y + box.height + 1
   );
 };
 
@@ -96,7 +100,7 @@ test("a group member refuses a lane move, snaps back and shows the reason on scr
 test("a check step cannot leave Validate", async ({ page, harness }) => {
   await openStarterInGraph(page, harness.origin);
   // The starter's Validate step is an agent step; the Validate lane's own add makes a real check.
-  await page.getByRole("button", { name: "+ Add step to 5. Validate" }).click();
+  await page.getByRole("button", { name: "Add step to 5. Validate" }).click();
   await expect(stepNode(page, "New check")).toBeVisible();
   expect(await laneOf(page, "New check", "5. Validate")).toBe(true);
   const before = await insideLane(page, "New check", "5. Validate");
@@ -118,7 +122,7 @@ test("adding a step from a lane header puts it in that lane as one undo entry an
   await openStarterInGraph(page, harness.origin);
   const cards = page.getByRole("group", { name: /^New agent step, / });
   await expect(cards).toHaveCount(0);
-  await page.getByRole("button", { name: "+ Add step to 2. Plan" }).click();
+  await page.getByRole("button", { name: "Add step to 2. Plan" }).click();
   await expect(cards).toHaveCount(1);
   expect(await laneOf(page, "New agent step", "2. Plan")).toBe(true);
   await undo(page).click();
@@ -128,5 +132,31 @@ test("adding a step from a lane header puts it in that lane as one undo entry an
 
   await reopenDraft(page);
   await expect(cards).toHaveCount(1);
+  expect(await laneOf(page, "New agent step", "2. Plan")).toBe(true);
+});
+
+test("adding to a lane after positions are stored lands in the lane without overlapping", async ({
+  page,
+  harness,
+}) => {
+  await openStarterInGraph(page, harness.origin);
+  // Dropping a step stores positions for every step; the add then takes the stored-position path.
+  await dropInto(page, "Implement", "2. Plan");
+  await page.getByRole("button", { name: "Add step to 2. Plan" }).click();
+  const added = stepNode(page, "New agent step");
+  await expect(added).toBeVisible();
+  expect(await laneOf(page, "New agent step", "2. Plan")).toBe(true);
+  const [a, b] = await Promise.all([
+    added.boundingBox(),
+    stepNode(page, "Implement").boundingBox(),
+  ]);
+  const apart = !a || !b || a.y + a.height <= b.y + 1 || b.y + b.height <= a.y + 1;
+  expect(apart).toBe(true);
+  await page.getByRole("status", { name: "Graph announcements" }).waitFor({ state: "attached" });
+  await expect(page.getByRole("status", { name: "Graph announcements" })).toHaveText(
+    /Added a step to 2\. Plan/,
+  );
+
+  await reopenDraft(page);
   expect(await laneOf(page, "New agent step", "2. Plan")).toBe(true);
 });

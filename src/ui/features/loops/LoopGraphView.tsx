@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useRef } from "react";
 import {
   Controls,
   ReactFlow,
@@ -20,8 +20,8 @@ import { StepNode } from "./graph/StepNode";
 import type { Apply } from "./graph/graph-actions";
 import type { GraphEdge, GraphNode } from "./graph/graph-mapping";
 import { useGraphEditor } from "./graph/useGraphEditor";
-import { addStep, type Stage } from "./loop-editor-model";
-import { completePositions } from "./loop-editor-placement";
+import { type Stage, stages } from "./loop-editor-model";
+import { addStepToLane } from "./loop-editor-add";
 
 const nodeTypes: NodeTypes = { step: StepNode, lane: LaneNode, region: RegionNode };
 const edgeTypes: EdgeTypes = { dependency: DependencyEdge, continuation: ContinuationEdge };
@@ -54,15 +54,12 @@ const LoopGraphView = ({ loop, apply, openDrawer }: LoopGraphViewProps) => {
   const graph = useGraphEditor({ loop, apply, openDrawer });
   const section = useRef<HTMLElement>(null);
   const { warnings, confirm, cancel } = graph.confirmation;
-  const laneActions = useMemo(
-    () => ({
-      addStep: (stage: Stage) =>
-        apply((current) =>
-          completePositions(addStep(current, stage, stage === "validation" ? "check" : "agent")),
-        ),
-    }),
-    [apply],
-  );
+  const laneActions = {
+    addStep: (stage: Stage) => {
+      if (apply((current) => addStepToLane(current, stage)))
+        graph.announce(`Added a step to ${stages.find((item) => item.id === stage)?.name}`);
+    },
+  };
   return (
     <section ref={section} aria-label="Graph view" className="flex min-w-0 flex-col">
       <p className="border-b px-4 py-2 text-xs text-muted-foreground">
