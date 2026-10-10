@@ -24,10 +24,14 @@ test("collapsing the main sidebar widens the editor canvas and is remembered aft
 
   // Every rail control shares one vertical axis: the theme toggle is not pushed to the right.
   const axis = async (name: string | RegExp) => {
-    const box = await page.getByRole("button", { name }).boundingBox();
-    return Math.round((box?.x ?? 0) + (box?.width ?? 0) / 2);
+    const button = page.getByRole("button", { name });
+    await expect(button).toBeVisible();
+    const box = await button.boundingBox();
+    if (!box) throw new Error(`No box for ${String(name)}`);
+    return Math.round(box.x + box.width / 2);
   };
-  const runs = await axis(/^Runs/);
+  const runs = await axis("Runs");
+  expect(runs).toBeGreaterThan(0);
   expect(await axis(/^Switch to/)).toBe(runs);
   expect(await axis("Expand sidebar")).toBe(runs);
 
