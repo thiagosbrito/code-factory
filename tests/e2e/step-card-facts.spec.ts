@@ -26,3 +26,17 @@ test("the Graph card and the Board card both state agent, model and effort", asy
   for (const label of ["Agent:", "Model:", "Effort:"]) await expect(boardCard).toContainText(label);
   expect(await boardCard.locator("dd").allTextContents()).toEqual(graphFacts);
 });
+
+test("a check step shows no agent facts on either card", async ({ page, harness }) => {
+  await openStarterInGraph(page, harness.origin);
+  await page.getByRole("button", { name: "Add step to 5. Validate" }).click();
+  const check = stepNode(page, "New check");
+  await expect(check).toBeVisible();
+  await expect(check).not.toContainText("Agent:");
+  await page.getByRole("button", { name: "Board" }).click();
+  const boardCheck = page
+    .getByRole("button", { name: "New check", exact: true })
+    .locator("xpath=ancestor::div[contains(@class,'shadow-sm')][1]");
+  await expect(boardCheck).toBeVisible();
+  await expect(boardCheck).not.toContainText("Agent:");
+});

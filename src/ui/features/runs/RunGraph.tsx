@@ -6,8 +6,7 @@ import { RetryIcon } from "../../shared/icons";
 import { StepFactsLines } from "../../shared/StepFactsLines";
 import { stepFacts } from "../../shared/step-facts";
 import { NOT_REACHED, stepDisplayStatus } from "./run-view-model";
-import { formatDuration, hasRunningAttempt, stepElapsedMs } from "./step-timing";
-import { useNow } from "./useNow";
+import { StepElapsed } from "./StepElapsed";
 
 type Point = { x: number; y: number };
 const nodeWidth = 210;
@@ -70,7 +69,6 @@ export const RunGraph = ({
   const [canvasWidth, setCanvasWidth] = useState(0);
   const canvasRef = useRef<HTMLElement>(null);
   const layout = positions(run);
-  const now = useNow(hasRunningAttempt(run.steps));
   const width = Math.max(700, ...[...layout.values()].map((point) => point.x + nodeWidth + 60));
   const height = Math.max(340, ...[...layout.values()].map((point) => point.y + nodeHeight + 70));
   useEffect(() => {
@@ -218,7 +216,14 @@ export const RunGraph = ({
                 if (!point) return null;
                 const status = step?.status ?? "pending";
                 const shown = stepDisplayStatus(run, step);
-                const elapsed = stepElapsedMs(step, now);
+                const facts =
+                  definition.kind === "check"
+                    ? null
+                    : stepFacts({
+                        binding: definition.binding,
+                        projectDefault: run.snapshot.bindings[definition.id],
+                        agents,
+                      });
                 return (
                   <button
                     key={definition.id}
@@ -226,7 +231,7 @@ export const RunGraph = ({
                     type="button"
                     style={{ left: point.x, top: point.y, width: nodeWidth, height: nodeHeight }}
                     className={`run-graph-node run-graph-node-${status} absolute overflow-hidden rounded-lg border bg-card p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
-                    aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts`}
+                    aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts${facts ? `, agent ${facts.agent}, model ${facts.model}, effort ${facts.effort}` : ""}`}
                     aria-pressed={selectedStepId === definition.id}
                     onClick={() => onSelect(definition.id)}
                     onKeyDown={(event) => {
@@ -246,24 +251,13 @@ export const RunGraph = ({
                       >
                         {shown}
                       </span>
-                      {elapsed !== null && (
-                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                          {formatDuration(elapsed)}
-                        </span>
-                      )}
+                      <StepElapsed step={step} />
                     </span>
                     <strong className="mt-2 line-clamp-2 block text-sm">{definition.name}</strong>
                     <span className="block truncate text-xs text-muted-foreground">
                       {definition.role} · {step?.attempts.length ?? 0} attempts
                     </span>
-                    <StepFactsLines
-                      className="mt-1.5"
-                      facts={stepFacts({
-                        binding: run.snapshot.bindings[definition.id],
-                        projectDefault: run.snapshot.projectDefault,
-                        agents,
-                      })}
-                    />
+                    {facts && <StepFactsLines inline facts={facts} className="mt-1.5" />}
                   </button>
                 );
               })}

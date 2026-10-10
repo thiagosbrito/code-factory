@@ -31,9 +31,9 @@ export const firstFreeRowY = (x: number, others: Point[]): number => {
  * one the Graph draws. They live apart from the Graph's drop planner so the Board, which loads
  * with the main bundle, does not pull the lazily loaded Graph view's code in with it.
  *
- * Every coordinate is an ABSOLUTE canvas coordinate, the same space the Runs graph reads from
- * `step.position`. A "lane offset" is the distance from a lane's left edge; it exists only inside
- * these helpers and is never stored.
+ * Every coordinate is an ABSOLUTE canvas coordinate (the space `step.position` is stored in). The
+ * Runs graph does not read it: a run always lays out by dependency depth. A "lane offset" is the
+ * distance from a lane's left edge; it exists only inside these helpers and is never stored.
  */
 
 /** The visible lane is a little narrower than its slot so neighbouring lanes show a gutter. */
@@ -74,7 +74,7 @@ const orderedSteps = (loop: LoopDefinition): LoopDefinition["steps"] => {
 
 /**
  * The deterministic default position of every step: ordered by (rank, id), the n-th step of a
- * lane sits on row n at `y = 48 + row * 120`. A stored position does not change this order.
+ * lane sits on row n at `y = FIRST_ROW_Y + row * ROW_HEIGHT`. A stored position does not change this order.
  */
 export const defaultPositions = (loop: LoopDefinition): Map<string, Point> => {
   const ordered = orderedSteps(loop);
@@ -115,9 +115,21 @@ const placedPositions = (loop: LoopDefinition): Map<string, Point> => {
     positions.set(id, point);
     taken.set(stage, [...(taken.get(stage) ?? []), point]);
   };
-  for (const step of loop.steps)
-    if (step.position)
-      take(stageOf(step), step.id, clampIntoLane(stageOf(step), step.position, height));
+  // Positions saved when cards were shorter can sit closer than a card is tall. Such a card is
+  // drawn one row below the one above it (top to bottom); nothing is written back to the loop.
+  const stored = loop.steps
+    .flatMap((step) => (step.position ? [{ step, point: step.position }] : []))
+    .sort((a, b) => a.point.y - b.point.y || a.point.x - b.point.x);
+  for (const { step, point } of stored) {
+    const stage = stageOf(step);
+    const clamped = clampIntoLane(stage, point, height);
+    const above = taken.get(stage) ?? [];
+    let y = clamped.y;
+    let blocking: Point | undefined;
+    while ((blocking = above.find((other) => overlaps({ x: clamped.x, y }, other))))
+      y = blocking.y + ROW_HEIGHT;
+    take(stage, step.id, { x: clamped.x, y });
+  }
   for (const step of orderedSteps(loop)) {
     if (step.position) continue;
     const stage = stageOf(step);
@@ -198,8 +210,8 @@ export const nudgeStepRight = (loop: LoopDefinition, id: string): LoopDefinition
 /**
  * Keeps positions all-or-none: when some steps have a stored position and others do not, each
  * step without one is written at the position the Graph draws it at; a loop with no positions at
- * all (or every position) is returned unchanged. The Runs graph reads a stored position as
- * absolute and lays out the rest on its own grid, so a partly positioned loop would overlap there.
+ * all (or every position) is returned unchanged. The Graph draws stored positions as they are and
+ * lays out only the rest, so a partly positioned loop could overlap on the next drop.
  */
 export const completePositions = (loop: LoopDefinition): LoopDefinition =>
   loop.steps.some((step) => step.position) ? fillPositions(loop) : loop;

@@ -2,21 +2,21 @@ import type { RunStep } from "./run-view-model";
 
 /**
  * Time a step has spent running, summed over its attempts: an ended attempt counts its recorded
- * span, an attempt still `running` counts up to `now`. An attempt that is paused or waiting for
- * input and has no end time contributes nothing, because its running time is not recorded.
- * Returns null while the step has no attempt.
+ * span, an attempt still `running` counts up to `now`. An attempt that has no end time and is not
+ * running (paused, waiting for input, interrupted) has an unknown running time, so the whole
+ * answer is null rather than a number that drops to zero and jumps back on resume. Also null while
+ * the step has no attempt.
  */
 export const stepElapsedMs = (step: RunStep | undefined, now: number): number | null => {
   if (!step?.attempts.length) return null;
-  return step.attempts.reduce((total, attempt) => {
+  let total = 0;
+  for (const attempt of step.attempts) {
     const started = Date.parse(attempt.startedAt);
-    const ended = attempt.endedAt
-      ? Date.parse(attempt.endedAt)
-      : attempt.status === "running"
-        ? now
-        : started;
-    return total + Math.max(0, ended - started);
-  }, 0);
+    if (attempt.endedAt) total += Math.max(0, Date.parse(attempt.endedAt) - started);
+    else if (attempt.status === "running") total += Math.max(0, now - started);
+    else return null;
+  }
+  return total;
 };
 
 export const hasRunningAttempt = (steps: RunStep[]): boolean =>

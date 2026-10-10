@@ -77,10 +77,10 @@ it("shows simultaneous active nodes and isolates the drawer to selected attempt"
 
 it("centers a lone step vertically on its parallel neighbours without moving it sideways", () => {
   const run = makeRun();
-  // Without saved positions the graph lays steps out itself: plan alone, then two in parallel.
-  const steps = run.snapshot.loop.steps.map(({ position: _position, ...step }) => step);
-  const laidOut = { ...run, snapshot: { ...run.snapshot, loop: { ...run.snapshot.loop, steps } } };
-  render(<RunGraph run={laidOut} selectedStepId={null} onSelect={vi.fn<(id: string) => void>()} />);
+  // The fixture carries editor positions (plan at 40,70; build at 340,20), which the run ignores:
+  // it lays steps out by dependency depth, plan alone then two in parallel.
+  expect(run.snapshot.loop.steps.every((step) => step.position)).toBe(true);
+  render(<RunGraph run={run} selectedStepId={null} onSelect={vi.fn<(id: string) => void>()} />);
   const at = (id: string) => {
     const node = document.getElementById(`run-node-${id}`);
     return { left: node?.style.left, top: node?.style.top };

@@ -87,3 +87,17 @@ describe("completePositions matches the Graph's placement", () => {
     expect(added.steps.every((step) => step.position)).toBe(true);
   });
 });
+
+describe("loops saved before the cards grew", () => {
+  it("draws cards stored 120 px apart without overlapping, and writes nothing back", () => {
+    const old = ["a", "b", "c"].reduce(
+      (loop, id, index) => moveVisual(loop, id, impl + 16, 48 + index * 120),
+      build(["a", "b", "c"]),
+    );
+    const points = [...displayPositions(old).values()];
+    for (const [index, left] of points.entries())
+      for (const right of points.slice(index + 1)) expect(overlaps(left, right)).toBe(false);
+    expect(old.steps.map((step) => step.position?.y)).toEqual([48, 168, 288]);
+    expect(points.map((point) => point.y)).toEqual([row(0), row(1), row(2)]);
+  });
+});

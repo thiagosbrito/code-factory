@@ -13,10 +13,13 @@ export type StepFacts = {
 
 export const NOT_CONFIGURED = "Not configured";
 
+const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
 /**
  * Describes a binding for display: the agent's name, the model's display name (its id when the
  * adapter does not list it) and the effort level. A step without a binding shows the project
  * default and says so; with neither, every fact reads "Not configured" rather than a guess.
+ * Check steps run a shell command, never an agent, so callers show no facts for them.
  */
 export const stepFacts = ({
   binding,
@@ -44,7 +47,7 @@ export const stepFacts = ({
       effective.model === "agent-default"
         ? "Agent default"
         : (listed?.displayName ?? effective.model),
-    effort: effective.effort ?? "Default",
+    effort: effective.effort ? capitalized(effective.effort) : "Default",
     inherited: !binding,
   };
 };

@@ -15,7 +15,7 @@ describe("step card facts", () => {
         projectDefault: null,
         agents: [claude],
       }),
-    ).toEqual({ agent: "Claude Code", model: "Claude Opus", effort: "high", inherited: false });
+    ).toEqual({ agent: "Claude Code", model: "Claude Opus", effort: "High", inherited: false });
   });
 
   it("falls back to the model id when the adapter does not list it, and says Default effort", () => {
