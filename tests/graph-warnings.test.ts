@@ -117,7 +117,10 @@ describe("warnings before moving a step to another lane", () => {
     const warnings = changeWarnings(loop, { kind: "drop", drops });
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("into the Review lane");
-    expect(warnings[0]).toContain("at the same time");
+    expect(warnings[0]).toContain("only reads the workspace");
+    expect(warnings[0]).toContain("alongside other reviews");
+    expect(warnings[0]).toContain("changes-requested outcome ends the run as rejected");
+    expect(warnings[0]).toContain("unless a repeat group continues it");
   });
 
   it("warns when a step leaves the Review lane", () => {
@@ -133,6 +136,9 @@ describe("warnings before moving a step to another lane", () => {
     ]);
     const warnings = changeWarnings(reviewed, { kind: "drop", drops });
     expect(warnings[0]).toContain("out of the Review lane");
+    expect(warnings[0]).toContain("may write to the workspace");
+    expect(warnings[0]).toContain("runs on its own");
+    expect(warnings[0]).toContain("no longer rejects the run");
   });
 
   it("does not warn for a move between two other lanes or within a lane", () => {

@@ -7,6 +7,6 @@ import type { RegionFlowNode } from "./graph-mapping";
  */
 export const RegionNode = ({ data }: NodeProps<RegionFlowNode>) => (
   <div className={`graph-region graph-region-${data.kind} h-full w-full rounded-lg`}>
-    <span className="graph-region-label">{data.label}</span>
+    {data.label && <span className="graph-region-label">{data.label}</span>}
   </div>
 );

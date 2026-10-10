@@ -30,6 +30,7 @@ import {
   type ConnectEnd,
 } from "./graph-actions";
 import { displayPositions, type Point } from "./graph-layout";
+import { changeWarnings } from "./graph-warnings";
 import { useConfirmedChange } from "./useConfirmedChange";
 import {
   buildGraph,
@@ -236,11 +237,20 @@ export const useGraphEditor = ({
       if (plan.kind === "edge") announce(`${label} is at the lane edge`);
       else if (plan.kind === "blocked") announce(`${label} cannot move further ${word}`);
       else {
+        const change = { kind: "drop" as const, drops: plan.drops };
+        if (changeWarnings(current, change).length) {
+          // A lane change with consequences asks first, like a pointer drop; it never folds into
+          // a run of keyboard moves, so the next press starts a new undo entry.
+          session.current += 1;
+          if (propose(current, dropAction(plan.drops), change) === "pending")
+            announce(`Confirmation needed before moving ${label} ${word}`);
+          return;
+        }
         const coalesce = `keyboard:${session.current}:${selected.map((node) => node.id).join(",")}`;
         if (apply(dropAction(plan.drops), { coalesce })) announce(`${label} moved ${word}`);
       }
     },
-    [apply, announce],
+    [apply, announce, propose],
   );
 
   // Moving focus away ends a run of keyboard moves, so the next one is its own undo entry.

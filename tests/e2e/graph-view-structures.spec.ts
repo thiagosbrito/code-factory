@@ -104,3 +104,71 @@ test("removing a join source asks first: Cancel changes nothing, Confirm is one 
   await expect(page.getByRole("button", { name: "Redo" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Save draft" })).toBeDisabled();
 });
+
+test("a group spanning lanes is framed per lane around its members only", async ({
+  page,
+  harness,
+}) => {
+  await openStarterInGraph(page, harness.origin, 1);
+  const frames = page.locator(".graph-region-repeat");
+  expect(await frames.count()).toBeGreaterThanOrEqual(3);
+  // Only the first frame carries the label.
+  await expect(page.locator(".graph-region-repeat .graph-region-label")).toHaveCount(1);
+  // The Final verification step is not in the group, so no frame may enclose it.
+  const outsider = await stepNode(page, "Final verification").boundingBox();
+  if (!outsider) throw new Error("Final verification has no layout");
+  const boxes = await frames.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().toJSON()),
+  );
+  const encloses = boxes.some(
+    (box) =>
+      box.x <= outsider.x &&
+      box.y <= outsider.y &&
+      box.x + box.width >= outsider.x + outsider.width &&
+      box.y + box.height >= outsider.y + outsider.height,
+  );
+  expect(encloses).toBe(false);
+});
+
+test("the view is idle once opened: no node or edge is rebuilt without a change", async ({
+  page,
+  harness,
+}) => {
+  await openStarterInGraph(page, harness.origin, 1);
+  await expect(page.locator(".graph-region").first()).toBeVisible();
+  await page.waitForTimeout(500);
+  const mutations = await page.locator(".react-flow__viewport").evaluate(
+    (viewport) =>
+      new Promise<number>((resolve) => {
+        let count = 0;
+        const observer = new MutationObserver((records) => {
+          count += records.length;
+        });
+        observer.observe(viewport, { subtree: true, childList: true, attributes: true });
+        setTimeout(() => {
+          observer.disconnect();
+          resolve(count);
+        }, 1000);
+      }),
+  );
+  expect(mutations).toBe(0);
+});
+
+test("a step carrying several badges keeps them all inside its box", async ({ page, harness }) => {
+  await openStarterInGraph(page, harness.origin, 1);
+  // Verify and adjudicate: stage, repeat group, join and decision badges.
+  const node = stepNode(page, ADJUDICATE);
+  await expect(node.locator("span[title]")).toHaveCount(3);
+  const clipped = await node.evaluate((wrapper) => {
+    const box = wrapper.getBoundingClientRect();
+    const inner = wrapper.firstElementChild;
+    const badges = [...wrapper.querySelectorAll("span")].map((item) =>
+      item.getBoundingClientRect(),
+    );
+    return {
+      overflow: inner ? inner.scrollHeight - inner.clientHeight : -1,
+      outside: badges.filter((item) => item.bottom > box.bottom + 0.5).length,
+    };
+  });
+  expect(clipped).toEqual({ overflow: 0, outside: 0 });
+});

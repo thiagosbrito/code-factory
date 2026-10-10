@@ -17,10 +17,13 @@ export const StepNode = ({ data, selected }: NodeProps<StepFlowNode>) => (
     <p className="truncate text-[11px] text-muted-foreground">
       {data.role} · {data.kind}
     </p>
-    <div className="mt-1 flex min-w-0 flex-wrap gap-1">
-      <span className="shrink-0 rounded border px-1.5 text-[10px] text-muted-foreground">
-        {data.stageLabel}
-      </span>
+    <div className="mt-1 flex min-w-0 flex-nowrap gap-1 overflow-hidden">
+      {/* The lane already names the stage; with many badges the chip makes way so the row never clips. */}
+      {data.badges.length < 3 && (
+        <span className="shrink-0 rounded border px-1.5 text-[10px] text-muted-foreground">
+          {data.stageLabel}
+        </span>
+      )}
       {data.badges.map((badge) => (
         <span
           key={badge}

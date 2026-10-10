@@ -52,8 +52,11 @@ const stageWarnings = (loop: LoopDefinition, drops: PlannedDrop[]): string[] =>
     if (!step) return [];
     const from = stageOf(step);
     if (from === drop.stage || (from !== "review" && drop.stage !== "review")) return [];
+    const into = drop.stage === "review";
     return [
-      `Moving ${step.name} ${drop.stage === "review" ? "into" : "out of"} the Review lane changes its stage. The scheduler lets review steps run at the same time as each other; every other step runs on its own.`,
+      into
+        ? `Moving ${step.name} into the Review lane makes it a review step: it only reads the workspace and may run alongside other reviews, and a changes-requested outcome ends the run as rejected unless a repeat group continues it on that outcome.`
+        : `Moving ${step.name} out of the Review lane stops it being a review step: it may write to the workspace, so it runs on its own, and a changes-requested outcome no longer rejects the run.`,
     ];
   });
 

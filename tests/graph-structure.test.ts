@@ -14,7 +14,14 @@ import {
   stepBadges,
   stepNotes,
 } from "../src/ui/features/loops/graph/graph-structure.js";
-import { decided, joined, parallel, repeated, structured } from "./support/loop-editor-builders.js";
+import {
+  build,
+  decided,
+  joined,
+  parallel,
+  repeated,
+  structured,
+} from "./support/loop-editor-builders.js";
 
 const step = (loop: ReturnType<typeof structured>, id: string) => {
   const found = loop.steps.find((item) => item.id === id);
@@ -55,6 +62,59 @@ describe("group region geometry", () => {
   it("labels a repeat group with its name and iteration limit and tells it from a parallel one", () => {
     const [region] = groupRegions(repeated(), displayPositions(repeated()));
     expect(region).toMatchObject({ kind: "repeat", label: "Repeat group: G (max 3 iterations)" });
+  });
+
+  describe("a group whose members span several lanes", () => {
+    const spread = () => {
+      const base = build(["x", "y", "z", "w"], {
+        groups: [{ id: "g", name: "Spread", kind: "parallel", stepIds: ["x", "y", "z"] }],
+        grouped: { x: "g", y: "g", z: "g" },
+      });
+      const lane = { x: "implementation", y: "review", z: "validation", w: "review" } as const;
+      return {
+        ...base,
+        steps: base.steps.map((item) => ({ ...item, stage: lane[item.id as keyof typeof lane] })),
+      };
+    };
+    const inside = (
+      region: { x: number; y: number; width: number; height: number },
+      point: { x: number; y: number },
+    ) =>
+      point.x >= region.x &&
+      point.y >= region.y &&
+      point.x + 200 <= region.x + region.width &&
+      point.y + 102 <= region.y + region.height;
+
+    it("draws one frame per lane around only that lane's members, labelled once", () => {
+      const loop = spread();
+      const positions = displayPositions(loop);
+      const regions = groupRegions(loop, positions);
+      expect(regions).toHaveLength(3);
+      expect(regions.map((region) => region.label)).toEqual(["Parallel group: Spread", "", ""]);
+      expect(new Set(regions.map((region) => region.kind))).toEqual(new Set(["parallel"]));
+      expect(new Set(regions.map((region) => region.id)).size).toBe(3);
+      for (const [id, region] of [
+        ["x", regions[0]],
+        ["y", regions[1]],
+        ["z", regions[2]],
+      ] as const) {
+        const point = positions.get(id);
+        if (!point || !region) throw new Error("missing");
+        expect(inside(region, point)).toBe(true);
+      }
+      // The non-member in the Review lane is not enclosed by any frame.
+      const outsider = positions.get("w");
+      if (!outsider) throw new Error("missing w");
+      expect(regions.some((region) => inside(region, outsider))).toBe(false);
+    });
+
+    it("draws a single frame when only one member has a position", () => {
+      const loop = spread();
+      const only = new Map([["y", displayPositions(loop).get("y") ?? { x: 0, y: 0 }]]);
+      const regions = groupRegions(loop, only);
+      expect(regions).toHaveLength(1);
+      expect(regions[0]?.label).toBe("Parallel group: Spread");
+    });
   });
 
   it("skips a group whose members have no drawn position", () => {

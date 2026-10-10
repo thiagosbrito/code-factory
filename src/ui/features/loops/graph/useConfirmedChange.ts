@@ -14,6 +14,9 @@ export type Proposal = "applied" | "refused" | "pending";
  */
 export const useConfirmedChange = (loop: LoopDefinition, apply: Apply, restore: () => void) => {
   const [pending, setPending] = useState<Pending | null>(null);
+  // A proposal belongs to one loop value. Clear it as soon as the loop differs, so returning to the
+  // same reference later (Undo then Redo) cannot bring a stale confirmation back.
+  if (pending && pending.loop !== loop) setPending(null);
   const active = pending && pending.loop === loop ? pending : null;
 
   const propose = useCallback(
