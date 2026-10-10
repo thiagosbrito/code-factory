@@ -136,12 +136,28 @@ try {
   const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
   assert(assets.length >= 2, "Packaged HTML must reference built JS and CSS");
   for (const asset of assets) assert.equal((await fetch(`${url}${asset}`)).status, 200);
+  // The Graph editor is a separate chunk, loaded only when its view opens: the packed UI ships it
+  // as its own file, it is served, and the entry bundle the page loads does not contain the library.
+  const uiAssets = join(dirname(cli), "..", "ui", "assets");
+  const graphChunks = (await readdir(uiAssets)).filter((name) =>
+    /^LoopGraphView-.+\.js$/.test(name),
+  );
+  assert.equal(graphChunks.length, 1, "The packed UI must contain one separate Graph view chunk");
+  assert.equal((await fetch(`${url}/assets/${graphChunks[0]}`)).status, 200);
+  const entry = assets.find((asset) => /\/index-.+\.js$/.test(asset));
+  assert(entry, "Packaged HTML must load the entry bundle");
+  assert.ok(
+    !(await readFile(join(uiAssets, entry.slice("/assets/".length)), "utf8")).includes(
+      "react-flow__",
+    ),
+    "The entry bundle must not contain the Graph library",
+  );
   const exited = once(runtime, "exit");
   runtime.kill("SIGTERM");
   assert.equal((await exited)[0], 0);
   runtime = undefined;
   console.log(
-    "Package smoke passed: npm production install, public API, --version, busy-port message, blank init, preservation, duplicate-init rejection, packaged UI/assets/API with security headers behind the session token, and clean shutdown.",
+    "Package smoke passed: npm production install, public API, --version, busy-port message, blank init, preservation, duplicate-init rejection, packaged UI/assets (with the lazy Graph chunk)/API with security headers behind the session token, and clean shutdown.",
   );
 } finally {
   if (runtime && runtime.exitCode === null && runtime.signalCode === null) {

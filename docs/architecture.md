@@ -79,6 +79,31 @@ Keep local React state near its components. Use reducers for complex editor tran
 
 The loops library reads saved drafts and the latest publication from the local registry. The five-stage board is a view of portable steps; `stage` and canvas coordinates do not grant execution order. Explicit before/after targets change dependency edges, while group, join, and decision controls change their corresponding portable structures. The editor keeps immutable undo/redo states, saves drafts through the runtime, and validates publication against current connection catalogs and project defaults. Publications stay numbered and immutable; later edits target the next draft version. Optional templates and import/export are owned by THI-18.
 
+## Advanced graph editor
+
+The loop editor has two views of one draft: the stage **Board** (the default) and an opt-in **Graph** view. A switch in the editor toolbar chooses between them and the choice is remembered per browser. Nothing about the portable loop changes: both views read and write the same `LoopDefinition`, and `position` stays presentation only (it never changes dependencies, stages or execution order).
+
+- **Lazy chunk.** The Graph view (`features/loops/LoopGraphView.tsx` and `features/loops/graph/`) and `@xyflow/react` 12.12.0 load only when the view is first opened: `LazyLoopGraphView` imports it dynamically, the library's stylesheet is imported inside the lazy module, and a failed load shows an error with Retry and "Use Board". The built UI therefore has an entry bundle without the library and a separate `LoopGraphView-<hash>.js`/`.css` pair (about 64 kB gzip). `scripts/smoke-package.mjs` asserts this against the packed tarball. The library is a development dependency bundled by Vite, so the published package has no new runtime dependency.
+- **Who owns edits.** The loop stays authoritative; the flow library only holds transient interaction state. Every gesture becomes one `apply` call on the editor controller (one undo entry): dependencies go through `addDependency`/`removeDependency` and stage changes through `setStage` in `loop-editor-dependencies.ts`, positions through `moveVisual`, and the Graph's pure planning (drops, keyboard moves, linking targets, warnings) lives in `features/loops/graph/graph-*.ts`. A change the model accepts but that loses something (a join falling below two sources, several decision outcomes, a lane change into or out of Review) asks for confirmation first; a change the model refuses shows its reason inline and records nothing. Groups, joins and decisions are drawn but edited on the Board.
+- **Keyboard and screen readers.** Everything the mouse does for dependencies has a keyboard path: `Connect to…` and `Disconnect…` dialogs (also `C` and `D` on a focused step), `Enter` opens the step drawer, `Space` selects, Alt with an arrow moves focus to the neighbouring step, plain arrows move a selected step inside its lane, and results and refusals are announced in a polite live region. Edges are never animated.
+- **Run graph.** A run's execution graph is separate: it always lays steps out by dependency depth and ignores the positions saved in the editor, so lanes chosen for editing never make a run draw backwards edges.
+- **Step cards.** The Board card, the Graph card and the run card state the same facts (Agent, Model, Effort from the step's binding or the project default; none for check steps, which run a command), and the run card adds time spent running. Token usage is not captured by any adapter yet (Linear THI-50).
+
+Dependency licenses for the Graph view, checked with `pnpm licenses list` on 2026-10-10:
+
+| Package                                                                                                        | Version   | License      |
+| -------------------------------------------------------------------------------------------------------------- | --------- | ------------ |
+| `@xyflow/react`                                                                                                | 12.12.0   | MIT          |
+| `@xyflow/system`                                                                                               | 0.0.83    | MIT          |
+| `classcat`                                                                                                     | 5.0.5     | MIT          |
+| `zustand`                                                                                                      | 4.5.7     | MIT          |
+| `use-sync-external-store`                                                                                      | 1.7.0     | MIT          |
+| `d3-color`, `d3-dispatch`, `d3-drag`, `d3-interpolate`, `d3-selection`, `d3-timer`, `d3-transition`, `d3-zoom` | 3.x / 1.x | ISC          |
+| `d3-ease`                                                                                                      | 3.0.1     | BSD-3-Clause |
+| `@types/d3-color`, `-drag`, `-interpolate`, `-selection`, `-transition`, `-zoom`                               | 3.x       | MIT          |
+
+No copyleft or non-open-source license appears in this tree. The library shows a small "React Flow" attribution link by default; hiding it is a policy choice, not a license restriction on the MIT package. The decision record is [the THI-43 spike](evidence/thi43-xyflow-spike-2026-10-10.md).
+
 ## Code structure and limits
 
 Layers depend inward only: `domain` imports nothing from `ui`, `runtime`, `adapters` or `translators`; `adapters`, `translators` and `runtime` never import `ui`; the UI never imports `runtime` or `translators` (the shared `translators/contract.js` types are the one allowed path) and reaches the runtime over the local API. Inside `src/ui/`, each feature (`features/runs`, `features/loops`, `features/setup`) may import `shared/` and the domain but not another feature or the app shell (`app/`, `factory/`), and `shared/` imports no feature. Oxlint enforces these rules with `no-restricted-imports` overrides in `.oxlintrc.json`.
