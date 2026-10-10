@@ -1,6 +1,6 @@
 {
   "name": "@thiagosbrito/code-factory",
-  "version": "0.3.0-beta.0",
+  "version": "0.3.0-beta.1",
   "description": "A local, agent-independent coding loop factory",
   "keywords": [
     "agents",
