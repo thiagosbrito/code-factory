@@ -63,7 +63,7 @@ export const RunInspector = ({
   const definition = definitionForScope(run, scope);
   return (
     <aside
-      className="run-inspector fixed bottom-0 left-0 top-0 z-40 flex max-w-[100vw] flex-col border-r bg-white shadow-xl md:left-[232px]"
+      className="run-inspector fixed bottom-0 left-0 top-0 z-40 flex max-w-[100vw] flex-col border-r bg-card shadow-xl md:left-[232px]"
       style={{ width }}
       aria-label="Run inspector"
     >

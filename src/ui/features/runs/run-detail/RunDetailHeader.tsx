@@ -34,7 +34,7 @@ export const RunDetailHeader = ({
 }) => {
   const { active, complete } = stepProgress(run);
   return (
-    <header className="sticky top-0 z-20 -mx-2 rounded-lg border bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+    <header className="sticky top-0 z-20 -mx-2 rounded-lg border bg-card/95 px-4 py-3 shadow-sm backdrop-blur">
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="outline" size="sm" onClick={onBack}>
           ← All runs

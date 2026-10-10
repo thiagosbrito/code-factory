@@ -124,7 +124,7 @@ export const RunInputPrompt = ({
             )}
             <input
               id={`input-${request.id}-${question.id}`}
-              className="mt-2 w-full rounded-md border bg-white px-3 py-2 text-sm"
+              className="mt-2 w-full rounded-md border bg-card px-3 py-2 text-sm"
               value={values[question.id] ?? ""}
               onChange={(event) =>
                 setValues((current) => ({ ...current, [question.id]: event.target.value }))

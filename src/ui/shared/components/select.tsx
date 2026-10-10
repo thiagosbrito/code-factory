@@ -11,7 +11,7 @@ export const SelectTrigger = ({
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "flex h-10 w-full items-center justify-between rounded-md border border-input bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "flex h-10 w-full items-center justify-between rounded-md border border-input bg-card px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
       {...props}
@@ -26,7 +26,7 @@ export const SelectContent = ({ children }: { children: React.ReactNode }) => {
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         position="popper"
-        className="z-[60] max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-auto rounded-md border bg-white p-1 shadow-lg"
+        className="z-[60] max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-auto rounded-md border bg-card p-1 shadow-lg"
       >
         <SelectPrimitive.Viewport>{children}</SelectPrimitive.Viewport>
       </SelectPrimitive.Content>

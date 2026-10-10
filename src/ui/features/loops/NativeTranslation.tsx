@@ -212,7 +212,7 @@ export const NativeTranslation = ({
         <p className="mt-2 text-xs text-muted-foreground">{selected.label} is import-only.</p>
       )}
       {preview && (
-        <div className="mt-3 rounded-md border bg-white p-3 text-sm">
+        <div className="mt-3 rounded-md border bg-card p-3 text-sm">
           <p>
             Affected path: <code>{preview.relativePath}</code>
           </p>

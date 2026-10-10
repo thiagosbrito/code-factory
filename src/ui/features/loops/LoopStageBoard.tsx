@@ -14,7 +14,7 @@ export const LoopStageBoard = ({
   setMessage: (message: string) => void;
 }) => {
   return (
-    <div className="overflow-x-auto bg-[radial-gradient(#c8cbc7_.6px,transparent_.6px)] bg-[length:17px_17px] bg-[#f4f3ef] p-4">
+    <div className="overflow-x-auto bg-[radial-gradient(var(--graph-dot)_.6px,transparent_.6px)] bg-[length:17px_17px] bg-[var(--graph-bg)] p-4">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold">Execution stages</h3>
@@ -22,14 +22,14 @@ export const LoopStageBoard = ({
             Drop only on labeled Before / After targets. Coordinates never change dependencies.
           </p>
         </div>
-        <span className="rounded bg-white px-2 py-1 text-xs">Draft v{loop.version}</span>
+        <span className="rounded bg-card px-2 py-1 text-xs">Draft v{loop.version}</span>
       </div>
       <div className="mt-4 grid min-w-[900px] grid-cols-5 gap-3">
         {stages.map((stage) => (
           <section
             key={stage.id}
             aria-label={stage.name}
-            className="min-h-72 rounded-lg border bg-white/75 p-2"
+            className="min-h-72 rounded-lg border bg-card/75 p-2"
           >
             <div className="min-h-16 border-b p-1">
               <h4 className="text-sm font-semibold">{stage.name}</h4>
@@ -46,7 +46,7 @@ export const LoopStageBoard = ({
                       (edge) => loop.steps.find((item) => item.id === edge.from)?.name ?? edge.from,
                     );
                   return (
-                    <div key={step.id} className="rounded-md border bg-white p-2 shadow-sm">
+                    <div key={step.id} className="rounded-md border bg-card p-2 shadow-sm">
                       <div className="flex items-center gap-1">
                         <span aria-hidden="true" className="text-stone-400">
                           ⠿

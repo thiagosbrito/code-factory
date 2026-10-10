@@ -14,16 +14,16 @@ export const LoopCard = ({
   onExport?: () => void;
 }) => {
   return (
-    <Card className="grid gap-3 bg-white p-5 sm:grid-cols-[8rem_1fr_auto] sm:items-center">
+    <Card className="grid gap-3 bg-card p-5 sm:grid-cols-[8rem_1fr_auto] sm:items-center">
       <div
         aria-hidden="true"
         className="flex h-16 items-center justify-around rounded-lg border bg-stone-50 text-teal-700"
       >
-        <span className="rounded border bg-white px-2 py-1">1</span>
+        <span className="rounded border bg-card px-2 py-1">1</span>
         <span>→</span>
-        <span className="rounded border bg-white px-2 py-1">2</span>
+        <span className="rounded border bg-card px-2 py-1">2</span>
         <span>→</span>
-        <span className="rounded border bg-white px-2 py-1">3</span>
+        <span className="rounded border bg-card px-2 py-1">3</span>
       </div>
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">

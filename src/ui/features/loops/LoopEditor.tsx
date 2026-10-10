@@ -40,7 +40,7 @@ export const LoopEditor = ({
     publish,
   } = useLoopEditorController({ initial, project, agents, onPublished });
   return (
-    <div className="mt-5 min-h-[680px] rounded-xl border bg-white shadow-sm">
+    <div className="mt-5 min-h-[680px] rounded-xl border bg-card shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
         <div className="flex items-center gap-3">
           <Button ref={backRef} variant="ghost" disabled={busy} onClick={onBack}>

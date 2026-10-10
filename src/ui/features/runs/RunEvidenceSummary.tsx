@@ -24,22 +24,22 @@ export const RunEvidenceSummary = ({
       <section className="grid gap-2 sm:grid-cols-4" aria-label="Run summary">
         <Button
           variant="outline"
-          className="h-auto justify-between bg-white p-3"
+          className="h-auto justify-between bg-card p-3"
           onClick={onOpenFiles}
         >
           Changed files <strong>{files}</strong>
         </Button>
         <Button
           variant="outline"
-          className="h-auto justify-between bg-white p-3"
+          className="h-auto justify-between bg-card p-3"
           onClick={onOpenArtifacts}
         >
           Artifacts <strong>{artifacts}</strong>
         </Button>
-        <div className="rounded-md border bg-white p-3 text-sm">
+        <div className="rounded-md border bg-card p-3 text-sm">
           Requirements met <strong className="float-right">{met}</strong>
         </div>
-        <div className="rounded-md border bg-white p-3 text-sm">
+        <div className="rounded-md border bg-card p-3 text-sm">
           Loop progress{" "}
           <strong className="float-right">
             {complete}/{total}
@@ -90,7 +90,7 @@ export const RunEvidenceSummary = ({
           {summary?.reviews?.length ? (
             <ul className="mt-2 space-y-3">
               {summary.reviews.map((review) => (
-                <li key={review.stepId} className="rounded-md border bg-white p-3">
+                <li key={review.stepId} className="rounded-md border bg-card p-3">
                   <p className="flex items-center gap-2 text-sm font-semibold">
                     {review.name}
                     <span

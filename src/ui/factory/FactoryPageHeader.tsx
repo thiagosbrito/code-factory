@@ -47,7 +47,7 @@ export const FactoryPageHeader = ({
       </p>
     )}
     {notice && (
-      <output className="mt-5 block rounded-md border bg-white p-3 text-sm">{notice}</output>
+      <output className="mt-5 block rounded-md border bg-card p-3 text-sm">{notice}</output>
     )}
   </>
 );

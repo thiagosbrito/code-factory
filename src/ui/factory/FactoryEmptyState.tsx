@@ -11,7 +11,7 @@ export const FactoryEmptyState = ({
   onTemplate: () => void;
 }) => {
   return (
-    <Card className="mt-7 flex min-h-80 flex-col items-center justify-center border-dashed bg-white/60 px-6 py-10 text-center">
+    <Card className="mt-7 flex min-h-80 flex-col items-center justify-center border-dashed bg-card/60 px-6 py-10 text-center">
       <div className="grid size-12 place-items-center rounded-xl bg-teal-50 text-2xl text-teal-700">
         {kind === "runs" ? "▷" : "∞"}
       </div>

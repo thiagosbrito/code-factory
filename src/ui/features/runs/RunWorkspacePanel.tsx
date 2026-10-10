@@ -58,7 +58,7 @@ export const RunWorkspacePanel = ({
   return (
     <section
       aria-labelledby={headingId}
-      className={bare ? "bg-white" : "rounded-lg border bg-white p-5"}
+      className={bare ? "bg-card" : "rounded-lg border bg-card p-5"}
     >
       <output aria-live="polite" className="sr-only">
         {message}
