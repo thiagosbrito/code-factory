@@ -25,6 +25,9 @@ test("a connection dragged in the Graph survives Save and reload, in Graph and B
   await page.reload();
   await page.getByRole("button", { name: "Loops" }).click();
   await page.getByRole("button", { name: "Edit draft" }).first().click();
+  await expect(page.getByRole("textbox", { name: "Loop title" })).toHaveValue(
+    "Implement → Review → Validate",
+  );
 
   // The editor remembers the last view; either way, check both explicitly.
   await page.getByRole("button", { name: "Graph" }).click();
@@ -39,10 +42,20 @@ test("a connection dragged in the Graph survives Save and reload, in Graph and B
   await expect(validate).toContainText("After: Review, Implement");
 });
 
-test("the Board stays the default and the Graph chunk loads only when asked for", async ({
+/**
+ * This harness serves the Vite dev server, so the lazy boundary is observed as the dev module
+ * `LoopGraphView.tsx` (not `LazyLoopGraphView.tsx`); the built, hashed chunk is asserted against the
+ * packed tarball by `scripts/smoke-package.mjs`. Requests are recorded from the very start, so no
+ * entry can be dropped from a bounded browser list.
+ */
+test("the Board stays the default and the Graph module loads only when asked for", async ({
   page,
   harness,
 }) => {
+  const graphRequests: string[] = [];
+  page.on("request", (request) => {
+    if (/\/LoopGraphView[.-]/.test(request.url())) graphRequests.push(request.url());
+  });
   await finishSetup(page, harness.origin);
   await page.getByRole("button", { name: "Loops" }).click();
   await page.getByRole("button", { name: "Use starter template" }).click();
@@ -51,18 +64,10 @@ test("the Board stays the default and the Graph chunk loads only when asked for"
     .getByRole("button", { name: "Create draft" })
     .first()
     .click();
-  const graphResources = () =>
-    page.evaluate(() =>
-      performance
-        .getEntriesByType("resource")
-        .map((entry) => entry.name)
-        // Built: assets/LoopGraphView-<hash>.js; dev server: .../LoopGraphView.tsx. Not LazyLoopGraphView.
-        .filter((name) => /\/LoopGraphView[.-]/.test(name)),
-    );
   await expect(page.getByRole("button", { name: "Board" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("region", { name: "Graph view" })).toHaveCount(0);
-  expect(await graphResources()).toEqual([]);
+  expect(graphRequests).toEqual([]);
   await page.getByRole("button", { name: "Graph" }).click();
   await expect(page.getByRole("region", { name: "Graph view" })).toBeVisible();
-  expect((await graphResources()).length).toBeGreaterThan(0);
+  expect(graphRequests.length).toBeGreaterThan(0);
 });

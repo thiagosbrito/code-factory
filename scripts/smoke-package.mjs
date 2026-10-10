@@ -146,6 +146,17 @@ try {
   assert.equal((await fetch(`${url}/assets/${graphChunks[0]}`)).status, 200);
   const entry = assets.find((asset) => /\/index-.+\.js$/.test(asset));
   assert(entry, "Packaged HTML must load the entry bundle");
+  // Positive control: the library is in the Graph chunk (so its absence from the entry means
+  // something), and the chunk ships its own stylesheet. The names follow Vite's default
+  // [name]-[hash] output for src/ui/features/loops/LoopGraphView.tsx.
+  assert.ok(
+    (await readFile(join(uiAssets, graphChunks[0]), "utf8")).includes("react-flow__"),
+    "The Graph chunk must contain the Graph library",
+  );
+  assert.ok(
+    (await readdir(uiAssets)).some((name) => /^LoopGraphView-.+\.css$/.test(name)),
+    "The Graph chunk must ship its own stylesheet",
+  );
   assert.ok(
     !(await readFile(join(uiAssets, entry.slice("/assets/".length)), "utf8")).includes(
       "react-flow__",
