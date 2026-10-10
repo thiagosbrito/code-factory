@@ -195,9 +195,9 @@ describe("editing dependencies in the Graph view", () => {
     render(editor(createStarterDraft("compact", "starter")));
     await graph();
     const node = screen.getByRole("group", { name: /^Review, Reviewer/ });
-    // Keyboard selection (Enter on the focused node) selects it without opening the drawer.
+    // Keyboard selection (Space on the focused node) selects it without opening the drawer.
     node.focus();
-    await user.keyboard("{Enter}");
+    await user.keyboard(" ");
     await user.keyboard("{Delete}{Backspace}");
     expect(screen.getByRole("group", { name: /^Review, Reviewer/ })).toBeTruthy();
     expect(edgeNames()).toHaveLength(2);

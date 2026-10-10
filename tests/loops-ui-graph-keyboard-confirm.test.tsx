@@ -44,7 +44,7 @@ const open = async () => {
   await screen.findByRole("region", { name: "Graph view" });
   const node = screen.getByRole("group", { name: /^a, Role/ });
   node.focus();
-  await userEvent.keyboard("{Enter}");
+  await userEvent.keyboard(" ");
   return node;
 };
 const isDisabled = (name: string) => screen.getByRole("button", { name }).hasAttribute("disabled");
