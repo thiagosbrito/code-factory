@@ -7,8 +7,12 @@ import { LoopEditor } from "../src/ui/features/loops/LoopEditor.js";
 import { LazyLoopGraphView } from "../src/ui/features/loops/LazyLoopGraphView.js";
 import { loopEditorViewStorageKey } from "../src/ui/features/loops/loop-editor-view.js";
 import { draft, project } from "./support/loops-ui.js";
+import { stubReactFlowGlobals } from "./support/react-flow.js";
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  stubReactFlowGlobals();
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -27,6 +31,7 @@ const editor = (initial = draft()) => (
   />
 );
 
+const inertEditor = { apply: () => false, openDrawer: () => undefined };
 const graphButton = () => screen.getByRole("button", { name: "Graph" });
 const boardButton = () => screen.getByRole("button", { name: "Board" });
 const graphView = () => screen.findByRole("region", { name: "Graph view" });
@@ -166,7 +171,9 @@ describe("lazy graph view failure", () => {
       .mockRejectedValueOnce(new Error("chunk 404"))
       .mockResolvedValue(module);
     const onUseBoard = vi.fn<() => void>();
-    render(<LazyLoopGraphView loop={draft()} onUseBoard={onUseBoard} load={load} />);
+    render(
+      <LazyLoopGraphView loop={draft()} {...inertEditor} onUseBoard={onUseBoard} load={load} />,
+    );
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("could not be loaded");
     await user.click(screen.getByRole("button", { name: "Use the Board" }));
@@ -211,7 +218,9 @@ describe("lazy graph view failure", () => {
     const user = userEvent.setup();
     const module = await import("../src/ui/features/loops/LoopGraphView.js");
     const load = vi.fn<() => Promise<typeof module>>().mockResolvedValue(module);
-    const view = <LazyLoopGraphView loop={draft()} onUseBoard={() => undefined} load={load} />;
+    const view = (
+      <LazyLoopGraphView loop={draft()} {...inertEditor} onUseBoard={() => undefined} load={load} />
+    );
     const first = render(view);
     await graphView();
     first.unmount();
