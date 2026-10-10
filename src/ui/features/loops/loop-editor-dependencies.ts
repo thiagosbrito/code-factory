@@ -101,7 +101,8 @@ export const removeDependency = (
  * Stage is not purely visual: the scheduler and acceptance rules treat stage === "review" steps
  * specially (they may overlap), and review and validation steps receive the results of every
  * upstream step on the same candidate, so moving a step between lanes can change execution
- * semantics (the Graph asks before such a move; see graph-warnings).
+ * semantics. The Graph asks before such a move (see graph-warnings); the Board path (semanticDrop)
+ * does not yet.
  */
 export const setStage = (loop: LoopDefinition, stepId: string, stage: Stage): LoopDefinition => {
   const step = loop.steps.find((item) => item.id === stepId);

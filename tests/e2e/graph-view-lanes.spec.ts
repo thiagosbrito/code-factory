@@ -161,18 +161,20 @@ test("adding to a lane after positions are stored lands in the lane without over
   expect(await laneOf(page, "New agent step", "2. Plan")).toBe(true);
 });
 
-test("moving an agent step into Validate asks first, because it then receives every upstream result", async ({
+test("moving an agent step out of Validate asks first when it has indirect ancestors", async ({
   page,
   harness,
 }) => {
+  // Validate depends on Review, which depends on Implement: Implement is an indirect ancestor, so
+  // as a Validate step it also receives Implement's results.
   await openStarterInGraph(page, harness.origin);
-  const before = await insideLane(page, "Implement", "3. Implementation");
-  await dropInto(page, "Implement", "5. Validate");
+  const before = await insideLane(page, "Validate", "5. Validate");
+  await dropInto(page, "Validate", "3. Implementation");
   const dialog = page.getByRole("dialog", { name: "Apply this change?" });
-  await expect(dialog).toContainText("into the Validate lane");
-  await expect(dialog).toContainText("results of every upstream step");
+  await expect(dialog).toContainText("out of the Validate lane");
+  await expect(dialog).toContainText("stops receiving the results of every upstream step");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toHaveCount(0);
-  expect(await insideLane(page, "Implement", "3. Implementation")).toEqual(before);
+  expect(await insideLane(page, "Validate", "5. Validate")).toEqual(before);
   await expect(undo(page)).toBeDisabled();
 });

@@ -50,6 +50,24 @@ const removalWarnings = (
 const receivesUpstream = (stage: ReturnType<typeof stageOf>): boolean =>
   stage === "review" || stage === "validation";
 
+/**
+ * True when the step has an ancestor that is not a direct dependency. The scheduler always gives a
+ * step its direct dependencies' results; a review or validation step additionally gets those of
+ * every further-upstream step, so only such a step's inputs depend on its lane.
+ */
+const hasIndirectAncestor = (loop: LoopDefinition, stepId: string): boolean => {
+  const direct = new Set(loop.dependencies.filter((edge) => edge.to === stepId).map((e) => e.from));
+  const seen = new Set<string>();
+  const queue = [...direct];
+  while (queue.length) {
+    const id = queue.pop();
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    for (const edge of loop.dependencies) if (edge.to === id) queue.push(edge.from);
+  }
+  return [...seen].some((id) => !direct.has(id));
+};
+
 const UPSTREAM_GAIN =
   " It also receives the results of every upstream step on the same candidate, not only its direct dependencies.";
 const UPSTREAM_LOSS =
@@ -61,8 +79,11 @@ const stageWarnings = (loop: LoopDefinition, drops: PlannedDrop[]): string[] =>
     if (!step) return [];
     const from = stageOf(step);
     if (from === drop.stage) return [];
-    const gains = !receivesUpstream(from) && receivesUpstream(drop.stage);
-    const loses = receivesUpstream(from) && !receivesUpstream(drop.stage);
+    // The lane only changes the step's inputs when it has ancestors beyond its direct dependencies.
+    const inputsDiffer = hasIndirectAncestor(loop, step.id);
+    const gains = inputsDiffer && !receivesUpstream(from) && receivesUpstream(drop.stage);
+    const loses = inputsDiffer && receivesUpstream(from) && !receivesUpstream(drop.stage);
+    // Check steps are locked to Validate (stageOf maps an unstaged check there), so they never differ.
     if (from !== "review" && drop.stage !== "review") {
       // Validate is not Review, but the scheduler feeds its steps the same upstream results.
       if (gains)
