@@ -2,7 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { LoopDefinition } from "../src/domain/loop.js";
-import { laneOriginX } from "../src/ui/features/loops/graph/graph-layout.js";
+import {
+  FIRST_ROW_Y,
+  laneOriginX,
+  ROW_HEIGHT,
+} from "../src/ui/features/loops/graph/graph-layout.js";
 import type { GraphNode } from "../src/ui/features/loops/graph/graph-mapping.js";
 import { useGraphEditor } from "../src/ui/features/loops/graph/useGraphEditor.js";
 import { moveVisual } from "../src/ui/features/loops/loop-editor-model.js";
@@ -17,6 +21,7 @@ afterEach(() => {
 });
 
 const lane = laneOriginX("implementation");
+const row = (index: number) => FIRST_ROW_Y + index * ROW_HEIGHT;
 const stepNodes = (nodes: GraphNode[]) =>
   nodes.flatMap((node) => (node.type === "step" ? [node] : []));
 const stepNode = (nodes: GraphNode[], id: string) => {
@@ -32,14 +37,14 @@ describe("dragging a box selection", () => {
     const b = stepNode(hook.result.current.nodes, "b");
     const event = new MouseEvent("mouseup");
     const moved = [
-      { ...a, position: { x: lane + 30, y: 400 } },
-      { ...b, position: { x: lane + 30, y: 280 } },
+      { ...a, position: { x: lane + 30, y: row(1) } },
+      { ...b, position: { x: lane + 30, y: row(0) } },
     ];
     act(() => hook.result.current.onSelectionDragStart(event, [a, b]));
     act(() => hook.result.current.onSelectionDragStop(event, moved));
     expect(history().past).toHaveLength(1);
     const steps = history().present.steps;
-    expect(steps.find((step) => step.id === "a")?.position).toEqual({ x: lane + 30, y: 400 });
+    expect(steps.find((step) => step.id === "a")?.position).toEqual({ x: lane + 30, y: row(1) });
     expect(steps.find((step) => step.id === "b")?.position?.x).toBe(lane + 30);
     expect(steps.every((step) => step.position)).toBe(true);
   });
@@ -59,7 +64,7 @@ describe("a reseed during a drag", () => {
     const apply = vi.fn<(action: (current: LoopDefinition) => LoopDefinition) => boolean>(
       () => false,
     );
-    const newest = moveVisual(chain(), "a", lane + 30, 400);
+    const newest = moveVisual(chain(), "a", lane + 30, row(3));
     const hook = renderHook(
       ({ loop }) => useGraphEditor({ loop, apply, openDrawer: () => undefined }),
       { initialProps: { loop: chain() } },
@@ -70,15 +75,15 @@ describe("a reseed during a drag", () => {
     hook.rerender({ loop: newest });
     // Undo (or any loop change) mid-drag must not yank the node from under the pointer.
     expect(stepNode(hook.result.current.nodes, "a").position).toEqual(before.position);
-    const dropped = { ...before, position: { x: lane + 30, y: 300 } };
+    const dropped = { ...before, position: { x: lane + 30, y: row(2) } };
     act(() => hook.result.current.onNodeDragStop(event, dropped, [dropped]));
     // The drop was planned against the newest loop, and the refused drop redraws from it.
     const action = apply.mock.calls[0]?.[0];
     if (!action) throw new Error("the drop did not reach apply");
     expect(action(newest).steps.find((step) => step.id === "a")?.position).toEqual({
       x: lane + 30,
-      y: 300,
+      y: row(2),
     });
-    expect(stepNode(hook.result.current.nodes, "a").position).toEqual({ x: lane + 30, y: 400 });
+    expect(stepNode(hook.result.current.nodes, "a").position).toEqual({ x: lane + 30, y: row(3) });
   });
 });

@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { RunDetail } from "../src/ui/features/runs/RunDetail.js";
-import { RunGraph } from "../src/ui/features/runs/RunGraph.js";
+import { RunGraph, rowSpacing } from "../src/ui/features/runs/RunGraph.js";
 import { RunsList } from "../src/ui/features/runs/RunsList.js";
 import { makeRun } from "./support/runs-ui.js";
 
@@ -86,6 +86,6 @@ it("centers a lone step vertically on its parallel neighbours without moving it 
     return { left: node?.style.left, top: node?.style.top };
   };
   expect(at("build")).toEqual({ left: "330px", top: "55px" });
-  expect(at("review")).toEqual({ left: "330px", top: "220px" });
-  expect(at("plan")).toEqual({ left: "40px", top: "137.5px" });
+  expect(at("review")).toEqual({ left: "330px", top: `${55 + rowSpacing}px` });
+  expect(at("plan")).toEqual({ left: "40px", top: `${55 + rowSpacing / 2}px` });
 });

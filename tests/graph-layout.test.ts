@@ -3,6 +3,7 @@ import {
   clampIntoLane,
   defaultPositions,
   displayPositions,
+  FIRST_ROW_Y,
   laneAtX,
   laneHeight,
   LANE_DRAWN_WIDTH,
@@ -11,12 +12,15 @@ import {
   NODE_HEIGHT,
   NODE_WIDTH,
   ranksOf,
+  ROW_HEIGHT,
   toAbsoluteX,
   toLaneOffsetX,
 } from "../src/ui/features/loops/graph/graph-layout.js";
 import { stages } from "../src/ui/features/loops/loop-editor-model.js";
 import { moveVisual } from "../src/ui/features/loops/loop-editor-model.js";
 import { build, chain, edge, joined, parallel } from "./support/loop-editor-builders.js";
+
+const row = (index: number) => FIRST_ROW_Y + index * ROW_HEIGHT;
 
 describe("graph layout", () => {
   it("places the three-step starter shape at the first row of each lane", () => {
@@ -25,7 +29,7 @@ describe("graph layout", () => {
     });
     const positions = defaultPositions(loop);
     // All three are in the implementation lane in this builder, so they stack by rank.
-    expect([...positions.values()].map((point) => point.y)).toEqual([48, 168, 288]);
+    expect([...positions.values()].map((point) => point.y)).toEqual([row(0), row(1), row(2)]);
     expect(new Set([...positions.values()].map((point) => point.x))).toEqual(
       new Set([laneOriginX("implementation") + 16]),
     );
@@ -42,8 +46,8 @@ describe("graph layout", () => {
     const rank = ranksOf(parallel());
     expect(Object.fromEntries(rank)).toEqual({ a: 0, b: 1, c: 1, d: 2 });
     const positions = defaultPositions(parallel());
-    expect(positions.get("b")?.y).toBe(48 + 120);
-    expect(positions.get("c")?.y).toBe(48 + 2 * 120);
+    expect(positions.get("b")?.y).toBe(row(1));
+    expect(positions.get("c")?.y).toBe(row(2));
   });
 
   it("lets a stored position win and never invents one", () => {
@@ -64,7 +68,9 @@ describe("graph layout", () => {
   });
 
   it("grows the lanes with the busiest lane", () => {
-    expect(laneHeight(chain())).toBe(MIN_LANE_HEIGHT);
+    const pair = build(["a", "b"], { dependencies: [edge("a", "b")] });
+    expect(laneHeight(pair)).toBe(MIN_LANE_HEIGHT);
+    expect(laneHeight(chain())).toBe(row(2) + NODE_HEIGHT + FIRST_ROW_Y);
     const ids = Array.from({ length: 8 }, (_, index) => `s${index}`);
     expect(laneHeight(build(ids))).toBeGreaterThan(MIN_LANE_HEIGHT);
   });
