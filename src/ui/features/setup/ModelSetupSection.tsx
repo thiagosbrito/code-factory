@@ -31,6 +31,7 @@ export const ModelSetupSection = ({
       <label htmlFor="default-model" className="grid max-w-sm gap-2 text-sm font-medium">
         Project default model
         <ModelField
+          key={active?.id}
           id="default-model"
           ariaLabel="Project default model"
           value={model}

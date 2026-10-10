@@ -102,9 +102,14 @@ export class ConnectionRegistry {
     const memory = this.memory;
     if (!memory) return Promise.resolve();
     const restoring = (async () => {
-      const requests = await memory.read().catch(() => []);
+      const requests = await memory.read().catch((error: unknown) => {
+        console.warn(`Code Factory could not restore agent connections: ${String(error)}`);
+        return [];
+      });
       await Promise.allSettled(requests.map((request) => this.connect(request, authorize)));
-    })();
+    })().finally(() => {
+      if (this.restoring === restoring) this.restoring = undefined;
+    });
     this.restoring = restoring;
     return restoring;
   }
@@ -126,6 +131,8 @@ export class ConnectionRegistry {
         }),
       ]);
       clearTimeout(timer);
+      // Only the first listing waits; a restore that is still stuck never slows the next ones.
+      this.restoring = undefined;
     }
     const candidates = await this.discover();
     return candidates.map((candidate) => {
@@ -167,10 +174,15 @@ export class ConnectionRegistry {
     };
   }
 
+  /** Counts connect requests per provider, so a slow older one cannot replace a newer one. */
+  private readonly latestConnect = new Map<string, number>();
+
   async connect(
     request: ConnectionRequest,
     authorize: LaunchAuthorizer = async () => undefined,
   ): Promise<AgentConnection> {
+    const ticket = (this.latestConnect.get(request.provider) ?? 0) + 1;
+    this.latestConnect.set(request.provider, ticket);
     const candidates = await this.discover();
     const executable = await resolveExecutable(request, candidates, authorize);
     let adapter: InspectableAdapter | undefined;
@@ -192,10 +204,14 @@ export class ConnectionRegistry {
               identity: inspected.identity ?? "Codex CLI",
             }
           : inspected;
+      if (this.latestConnect.get(request.provider) !== ticket)
+        throw new Error("A newer connection request for this agent replaced this one.");
       this.active.get(request.provider)?.adapter.close();
       this.active.set(request.provider, { adapter, connection });
       // Remembering is a convenience: a connection that works is not undone by a failed write.
-      await this.memory?.remember(request).catch(() => undefined);
+      await this.memory?.remember(request).catch((error: unknown) => {
+        console.warn(`Code Factory could not remember this connection: ${String(error)}`);
+      });
       return connection;
     } catch (error) {
       adapter?.close();

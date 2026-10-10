@@ -28,7 +28,7 @@ export const StepBindingSelectors = ({
   const connection = agents.find((item) => item.provider === effective?.provider);
   const connected = Boolean(connection && connectionViewModel(connection).connected);
   const efforts = effortChoices(connection, effective?.model ?? "agent-default");
-  const error = bindingError(value, agents);
+  const error = bindingError(effective, agents);
   return (
     <div className="grid gap-3">
       <label className="grid gap-1 text-sm font-medium">
@@ -62,6 +62,7 @@ export const StepBindingSelectors = ({
           <div className="grid gap-1 text-sm font-medium">
             Model
             <ModelField
+              key={effective.provider}
               ariaLabel="Step model"
               value={effective.model}
               models={connected ? (connection?.models ?? []) : []}
@@ -94,6 +95,12 @@ export const StepBindingSelectors = ({
             />
           </div>
         </div>
+      )}
+      {!value && effective && (
+        <p className="text-xs text-muted-foreground">
+          Changing the model or effort gives this step its own agent and model; it then stops
+          following the project default.
+        </p>
       )}
       {error && (
         <p role="alert" className="text-sm text-red-700">

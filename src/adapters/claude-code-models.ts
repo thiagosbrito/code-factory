@@ -77,6 +77,8 @@ export const listClaudeCodeModels = (executable: string): Promise<CatalogModel[]
       stderr = (stderr + chunk.toString()).slice(-PROBE_OUTPUT_LIMIT);
     });
     child.once("error", (error) => finish({ error }));
+    // The CLI may exit before it reads the request; that surfaces through "close", not a crash.
+    child.stdin.on("error", () => undefined);
     child.once("close", (code) =>
       finish({
         error: new Error(

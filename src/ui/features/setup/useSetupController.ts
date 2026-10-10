@@ -44,7 +44,11 @@ export const useSetupController = ({
     : "";
   const [setupCommand, setSetupCommand] = useState(savedSetupCommand);
   const [bindingChanged, setBindingChanged] = useState(false);
-  const [verifying, setVerifying] = useState(false);
+  // Agents being connected right now; several can be at once, each with its own outcome.
+  const [verifyingProviders, setVerifyingProviders] = useState<ProviderId[]>([]);
+  // Agents whose automatic connection failed: choosing them again does not relaunch them.
+  const autoFailed = useRef(new Set<ProviderId>());
+  const selectedRef = useRef<ProviderId | null>(null);
   // True from choosing an agent until its automatic connection starts or is cancelled.
   const [connectPending, setConnectPending] = useState(false);
   const connectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -69,6 +73,7 @@ export const useSetupController = ({
       reason: "Verify the current executable and protocol to connect.",
     };
   });
+  const verifying = selected !== null && verifyingProviders.includes(selected);
   const activeConnection = displayedAgents.find((item) => item.provider === selected);
   const active = activeConnection ? connectionViewModel(activeConnection) : undefined;
   const savedBinding = state.project?.defaultBinding;
@@ -78,6 +83,9 @@ export const useSetupController = ({
     : null;
   const validation = bindingError(draftBinding, displayedAgents);
   useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+  useEffect(() => {
     nameRef.current?.focus();
     return () => clearTimeout(connectTimer.current);
   }, []);
@@ -86,6 +94,8 @@ export const useSetupController = ({
     setConnectPending(false);
   };
   const selectAgent = (provider: ProviderId | null) => {
+    // Choosing the same agent again while it connects changes nothing.
+    if (provider !== null && provider === selected && (connectPending || verifying)) return;
     // Choosing another agent within the pause cancels the first one's connection.
     cancelPendingConnect();
     const target = displayedAgents.find((item) => item.provider === provider);
@@ -94,7 +104,10 @@ export const useSetupController = ({
       isNativeProvider(provider) &&
       target &&
       !connectionViewModel(target).connected &&
-      target.installation === "detected"
+      target.installation === "detected" &&
+      // Signed out or failed before: the card explains why; only Verify tries again.
+      target.authentication !== "unauthenticated" &&
+      !autoFailed.current.has(provider)
     ) {
       setConnectPending(true);
       connectTimer.current = setTimeout(() => {
@@ -176,7 +189,9 @@ export const useSetupController = ({
   const verify = async (provider: ProviderId | null = selected) => {
     cancelPendingConnect();
     if (!provider || (!isNativeProvider(provider) && provider !== "custom")) return;
-    setVerifying(true);
+    if (verifyingProviders.includes(provider)) return;
+    autoFailed.current.delete(provider);
+    setVerifyingProviders((current) => [...current, provider]);
     setError("");
     try {
       const connection = await onConnect(
@@ -192,9 +207,12 @@ export const useSetupController = ({
       if (provider === "custom" && connection.executable)
         setCustomExecutable(connection.executable);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not verify agent connection.");
+      autoFailed.current.add(provider);
+      // An agent the user has since moved away from does not put its error under another one.
+      if (selectedRef.current === provider)
+        setError(caught instanceof Error ? caught.message : "Could not verify agent connection.");
     } finally {
-      setVerifying(false);
+      setVerifyingProviders((current) => current.filter((item) => item !== provider));
     }
   };
   return {

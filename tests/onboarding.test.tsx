@@ -136,6 +136,18 @@ describe("automatic agent connection", () => {
     expect(connects(local)).toHaveLength(1);
   });
 
+  it("connects once when Verify is pressed during the pause", async () => {
+    const local = runtime();
+    local.setConnection(codexConnection);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /Codex.*Executable detected/ }));
+    await user.click(screen.getByRole("button", { name: "Verify connection" }));
+    expect(await screen.findByText(/Codex CLI 0.160.0 · Connected/)).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(connects(local)).toHaveLength(1);
+  });
+
   it("does not connect an agent the user moved away from within the pause", async () => {
     const local = runtime();
     local.setConnection(codexConnection);

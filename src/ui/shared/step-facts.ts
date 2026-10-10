@@ -45,7 +45,9 @@ export const stepFacts = ({
   const connection = agents.find((item) => item.provider === effective.provider);
   const listed = connection?.models?.find((item) => item.id === effective.model);
   const levels = effortChoices(connection, effective.model);
+  // A saved level the agent no longer lists (-1) has no honest place on the scale.
   const position = effective.effort ? levels.indexOf(effective.effort) + 1 : 0;
+  const listedEffort = !effective.effort || position > 0;
   return {
     agent: providerName(effective.provider),
     model:
@@ -53,7 +55,7 @@ export const stepFacts = ({
         ? "Agent default"
         : (listed?.displayName ?? effective.model),
     effort: effective.effort ? capitalized(effective.effort) : "Default",
-    effortScale: levels.length && position >= 0 ? { position, total: levels.length } : null,
+    effortScale: levels.length && listedEffort ? { position, total: levels.length } : null,
     inherited: !binding,
   };
 };

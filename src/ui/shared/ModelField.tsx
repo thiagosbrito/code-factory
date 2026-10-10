@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Input } from "@/shared/components/input";
 import { NativeSelect } from "@/shared/components/native-select";
 
@@ -27,7 +27,9 @@ export const ModelField = ({
 }) => {
   const listed = value === "agent-default" || models.some((item) => item.id === value);
   const [typing, setTyping] = useState(false);
-  const [draft, setDraft] = useState("");
+  // While typing, the input owns its text: the binding only ever holds a non-empty id.
+  const [draft, setDraft] = useState(listed ? "" : value);
+  const input = useRef<HTMLInputElement>(null);
   const custom = allowCustom && (typing || !listed);
   return (
     <div className="grid gap-2">
@@ -40,6 +42,7 @@ export const ModelField = ({
           const next = event.target.value;
           setTyping(next === CUSTOM);
           if (next !== CUSTOM) onChange(next);
+          else queueMicrotask(() => input.current?.focus());
         }}
       >
         <option value="agent-default">Agent default</option>
@@ -57,17 +60,25 @@ export const ModelField = ({
         </p>
       )}
       {custom && (
-        <Input
-          aria-label={`${ariaLabel} id`}
-          placeholder="Model id or alias, e.g. claude-opus-5-5"
-          value={listed ? draft : value}
-          disabled={disabled}
-          onChange={(event) => {
-            setDraft(event.target.value);
-            // A model id is never empty; the binding keeps its last model until one is typed.
-            if (event.target.value.trim()) onChange(event.target.value.trim());
-          }}
-        />
+        <>
+          <Input
+            ref={input}
+            aria-label={`${ariaLabel} id`}
+            placeholder="Model id or alias, e.g. claude-opus-5-5"
+            value={draft}
+            disabled={disabled}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              // A model id is never empty; the binding keeps its last model until one is typed.
+              if (event.target.value.trim()) onChange(event.target.value.trim());
+            }}
+          />
+          {!draft.trim() && (
+            <p className="text-xs font-normal text-muted-foreground">
+              Enter a model id, or choose another option. Until then the agent default is used.
+            </p>
+          )}
+        </>
       )}
     </div>
   );

@@ -66,17 +66,25 @@ export class CodexAdapter implements AgentAdapter {
     return this.initialized;
   }
 
-  /** Every page of `model/list`; a server that keeps returning cursors is cut off. */
+  /** Every page of `model/list`, without repeats; a server that keeps returning cursors is cut off. */
   private async listModels(): Promise<unknown[]> {
-    const entries: unknown[] = [];
+    const entries = new Map<string, unknown>();
+    const seenCursors = new Set<string>();
     let cursor: string | undefined;
     for (let page = 0; page < 20; page += 1) {
       const catalog = object(await this.rpc.request("model/list", cursor ? { cursor } : {}));
-      if (Array.isArray(catalog.data)) entries.push(...catalog.data);
-      if (typeof catalog.nextCursor !== "string" || !catalog.nextCursor) break;
-      cursor = catalog.nextCursor;
+      if (Array.isArray(catalog.data))
+        for (const entry of catalog.data) {
+          const model = object(entry).model;
+          entries.set(typeof model === "string" ? model : String(entries.size), entry);
+        }
+      const next = catalog.nextCursor;
+      // A server that repeats a cursor would otherwise list the same page until the cap.
+      if (typeof next !== "string" || !next || seenCursors.has(next)) break;
+      seenCursors.add(next);
+      cursor = next;
     }
-    return entries;
+    return [...entries.values()];
   }
 
   async inspect(_projectDirectory: string): Promise<AgentConnection> {

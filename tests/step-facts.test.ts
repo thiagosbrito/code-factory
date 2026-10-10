@@ -62,4 +62,19 @@ describe("step card facts", () => {
       inherited: true,
     });
   });
+
+  it("draws no meter for a saved effort the model no longer offers, and none for Default", () => {
+    const stale = stepFacts({
+      binding: { provider: "claude-code", model: "opus", effort: "max" },
+      projectDefault: null,
+      agents: [claude],
+    });
+    expect(stale.effortScale).toBeNull();
+    const unset = stepFacts({
+      binding: { provider: "claude-code", model: "opus" },
+      projectDefault: null,
+      agents: [claude],
+    });
+    expect(unset.effortScale).toEqual({ position: 0, total: 2 });
+  });
 });

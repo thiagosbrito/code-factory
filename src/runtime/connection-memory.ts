@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { connectionRequestSchema, type ConnectionRequest } from "./connection-request.js";
@@ -65,13 +65,18 @@ export const userConnectionMemory = (project: string): ConnectionMemory => {
         await mkdir(trustDirectory(), { recursive: true, mode: 0o700 });
         const path = memoryPath();
         const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-        await writeFile(
-          temporary,
-          `${JSON.stringify({ ...file, projects: { ...file.projects, [projectKey]: next } }, null, 2)}\n`,
-          { mode: 0o600 },
-        );
-        await chmod(temporary, 0o600);
-        await rename(temporary, path);
+        try {
+          await writeFile(
+            temporary,
+            `${JSON.stringify({ ...file, projects: { ...file.projects, [projectKey]: next } }, null, 2)}\n`,
+            { mode: 0o600 },
+          );
+          await chmod(temporary, 0o600);
+          await rename(temporary, path);
+        } catch (error) {
+          await rm(temporary, { force: true });
+          throw error;
+        }
       };
       queue = queue.then(write, write);
       return queue as Promise<void>;
