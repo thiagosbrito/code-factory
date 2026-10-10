@@ -71,9 +71,12 @@ export const useLoopEditorController = ({
       return () => clearTimeout(timeout);
     }
   }, [selectedId, selected]);
-  // The last coalescing apply and the loop it produced: a later one with the same key folds into
-  // the same undo entry only while nothing else (another edit, Undo, Redo) has changed the loop.
-  const coalesced = useRef<{ key: string; present: LoopDefinition } | null>(null);
+  // A run of coalescing applies (arrow-key moves) owns ONE undo entry: the one its first apply
+  // pushed. `depth` is that entry's position, `present` the loop it left. A later apply folds into
+  // it only while the key matches, the loop is still that exact object and the entry is still the
+  // latest one; any other edit, Undo or Redo breaks the run, and so does an apply that changes
+  // nothing or folds the entry away.
+  const run = useRef<{ key: string; present: LoopDefinition; depth: number } | null>(null);
   const apply = (
     action: (current: LoopDefinition) => LoopDefinition,
     options?: { coalesce?: string },
@@ -83,12 +86,16 @@ export const useLoopEditorController = ({
       const key = options?.coalesce;
       const folds =
         key !== undefined &&
-        coalesced.current?.key === key &&
-        coalesced.current.present === history.present &&
-        history.past.length > 0;
+        run.current?.key === key &&
+        run.current.present === history.present &&
+        run.current.depth === history.past.length;
       const next = action(history.present);
       const updated = folds ? amend(history, next) : commit(history, next);
-      coalesced.current = key === undefined ? null : { key, present: updated.present };
+      const owned = updated.past.length === history.past.length + (folds ? 0 : 1);
+      run.current =
+        key !== undefined && updated !== history && owned
+          ? { key, present: updated.present, depth: updated.past.length }
+          : null;
       setHistory(updated);
       setMessage("");
       return true;

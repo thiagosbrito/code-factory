@@ -78,10 +78,33 @@ describe("moving a selected step with the arrow keys", () => {
     expect(status()).toBe("Review moved down");
     // The node keeps keyboard focus so the next key press still reaches it.
     expect(document.activeElement).toBe(reviewNode());
-    await user.click(screen.getByRole("button", { name: "Undo" }));
+    // Undo with the keyboard shortcut, inside the same session: focus never left the graph.
+    await user.keyboard("{Control>}z{/Control}");
     await vi.waitFor(() => expect(drawnAt(reviewNode())).toEqual(before));
     expect(isDisabled("Undo")).toBe(true);
     expect(isDisabled("Save draft")).toBe(true);
+    // A move after that Undo is a fresh entry, not folded into anything older.
+    await user.keyboard("{ArrowRight}");
+    await vi.waitFor(() => expect(isDisabled("Undo")).toBe(false));
+    await user.keyboard("{Control>}z{/Control}");
+    await vi.waitFor(() => expect(drawnAt(reviewNode())).toEqual(before));
+    expect(isDisabled("Undo")).toBe(true);
+  });
+
+  it("changes the announcement on every press, even for the same message", async () => {
+    const user = userEvent.setup();
+    await open();
+    await selectStep(user, reviewNode());
+    await user.keyboard("{ArrowDown}");
+    const first = status();
+    expect(first).toBe("Review moved down");
+    await user.keyboard("{ArrowDown}");
+    const second = status();
+    expect(second?.trim()).toBe("Review moved down");
+    // A live region only speaks when its text changes.
+    expect(second).not.toBe(first);
+    await user.keyboard("{ArrowDown}");
+    expect(status()).not.toBe(second);
   });
 
   it("holding an arrow is one undo entry, and moving focus away starts a new one", async () => {

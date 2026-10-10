@@ -1,4 +1,13 @@
-import { Component, createRef, lazy, Suspense, useState, type ReactNode } from "react";
+import {
+  Component,
+  createRef,
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { LoopGraphViewProps } from "./LoopGraphView";
 import { Button } from "@/shared/components/button";
 
@@ -8,21 +17,24 @@ const loadGraphModule = (): Promise<GraphModule> => import("./LoopGraphView");
 
 // Error boundaries must be classes; this is the one semantic exception to arrow syntax.
 class GraphErrorBoundary extends Component<
-  { onRetry: () => void; onUseBoard: () => void; children: ReactNode },
+  {
+    onRetry: () => void;
+    onUseBoard: () => void;
+    /** True once, if the failure now shown follows a Retry press. */
+    consumeRetry: () => boolean;
+    children: ReactNode;
+  },
   { failed: boolean }
 > {
   state = { failed: false };
   private alert = createRef<HTMLDivElement>();
-  private retried = false;
   static getDerivedStateFromError() {
     return { failed: true };
   }
   componentDidUpdate(_previous: unknown, previousState: { failed: boolean }) {
     // A failure after Retry is announced where the user just pressed: move focus to the new alert.
-    if (this.state.failed && !previousState.failed && this.retried) {
-      this.retried = false;
+    if (this.state.failed && !previousState.failed && this.props.consumeRetry())
       this.alert.current?.focus();
-    }
   }
   render() {
     if (!this.state.failed) return this.props.children;
@@ -41,7 +53,6 @@ class GraphErrorBoundary extends Component<
           <Button
             variant="outline"
             onClick={() => {
-              this.retried = true;
               this.setState({ failed: false });
               this.props.onRetry();
             }}
@@ -77,6 +88,12 @@ const viewFor = (load: () => Promise<GraphModule>): GraphView => {
   return created;
 };
 
+/** Mounts only once everything in its Suspense boundary, the graph view included, has loaded. */
+const Loaded = ({ onLoaded }: { onLoaded: () => void }) => {
+  useEffect(onLoaded, [onLoaded]);
+  return null;
+};
+
 /** Loads the graph view as a separate chunk; a failed load can be retried or abandoned. */
 export const LazyLoopGraphView = ({
   loop,
@@ -92,12 +109,21 @@ export const LazyLoopGraphView = ({
   load?: () => Promise<GraphModule>;
 }) => {
   const [View, setView] = useState(() => viewFor(load));
+  // Set by Retry, cleared when a failure uses it or the view has actually loaded, so a later
+  // unrelated render error never takes focus.
+  const retrying = useRef(false);
   return (
     <GraphErrorBoundary
       onRetry={() => {
         views.delete(load);
+        retrying.current = true;
         setView(() => viewFor(load));
         onRetry?.();
+      }}
+      consumeRetry={() => {
+        const pending = retrying.current;
+        retrying.current = false;
+        return pending;
       }}
       onUseBoard={onUseBoard}
     >
@@ -107,6 +133,11 @@ export const LazyLoopGraphView = ({
         }
       >
         <View loop={loop} apply={apply} openDrawer={openDrawer} />
+        <Loaded
+          onLoaded={() => {
+            retrying.current = false;
+          }}
+        />
       </Suspense>
     </GraphErrorBoundary>
   );

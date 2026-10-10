@@ -223,6 +223,35 @@ describe("lazy graph view failure", () => {
     expect(second.getAttribute("tabindex")).toBe("-1");
   });
 
+  it("does not take focus for a later render error once a Retry has loaded the view", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const Fragile = ({ loop }: { loop: { name: string } }) => {
+      if (loop.name === "boom") throw new Error("render failure");
+      return <section aria-label="Graph view" />;
+    };
+    const load = vi
+      .fn<() => Promise<{ default: typeof Fragile; MIN_OPENING_ZOOM: 0.6 }>>()
+      .mockRejectedValueOnce(new Error("chunk 404"))
+      .mockResolvedValue({ default: Fragile, MIN_OPENING_ZOOM: 0.6 as const });
+    const view = (name: string) => (
+      <LazyLoopGraphView
+        loop={{ ...draft(), name }}
+        {...inertEditor}
+        onUseBoard={() => undefined}
+        load={load}
+      />
+    );
+    const shown = render(view("fine"));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await graphView();
+    // The view has loaded; a render error long after that is not a failed Retry.
+    shown.rerender(view("boom"));
+    const alert = await screen.findByRole("alert");
+    expect(document.activeElement).not.toBe(alert);
+  });
+
   it("imports again after the Board is used, instead of showing the stale error", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const module = await import("../src/ui/features/loops/LoopGraphView.js");

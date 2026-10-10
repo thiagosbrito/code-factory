@@ -101,6 +101,11 @@ export const useGraphEditor = ({
   const session = useRef(0);
   const stalled = useRef<{ loop: LoopDefinition; spec: string } | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  // Screen readers stay silent when a live region's text does not change, so a repeated message
+  // alternates a trailing no-break space.
+  const announce = useCallback((text: string) => {
+    setAnnouncement((previous) => (previous === text ? `${text}\u00a0` : text));
+  }, []);
 
   const reseed = useCallback(() => {
     const { seed: next } = latest.current;
@@ -207,14 +212,14 @@ export const useGraphEditor = ({
       const word = ARROW_WORD[event.key] ?? "";
       const plan = planKeyboardMove(current, moves, direction);
       stalled.current = plan.kind === "moved" ? null : { loop: current, spec };
-      if (plan.kind === "edge") setAnnouncement(`${label} is at the lane edge`);
-      else if (plan.kind === "blocked") setAnnouncement(`${label} cannot move further ${word}`);
+      if (plan.kind === "edge") announce(`${label} is at the lane edge`);
+      else if (plan.kind === "blocked") announce(`${label} cannot move further ${word}`);
       else {
         const coalesce = `keyboard:${session.current}:${selected.map((node) => node.id).join(",")}`;
-        if (apply(dropAction(plan.drops), { coalesce })) setAnnouncement(`${label} moved ${word}`);
+        if (apply(dropAction(plan.drops), { coalesce })) announce(`${label} moved ${word}`);
       }
     },
-    [apply],
+    [apply, announce],
   );
 
   // Moving focus away ends a run of keyboard moves, so the next one is its own undo entry.

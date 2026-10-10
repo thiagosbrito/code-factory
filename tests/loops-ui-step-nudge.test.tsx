@@ -58,4 +58,24 @@ describe("Nudge visual right in the step drawer", () => {
     );
     expect(transformOf(/^Review, Reviewer/).x).toBe(laneOriginX("review") + 36);
   });
+
+  it("applies in the same event, with no window for a concurrent edit to be lost", async () => {
+    render(
+      <LoopEditor
+        initial={createStarterDraft("compact", "starter")}
+        project={project}
+        agents={[]}
+        onBack={() => undefined}
+        onPublished={async () => undefined}
+      />,
+    );
+    await screen.findByRole("region", { name: "Graph view" });
+    const before = transformOf(/^Review, Reviewer/);
+    fireEvent.click(screen.getByRole("group", { name: /^Review, Reviewer/ }));
+    const drawer = await screen.findByRole("dialog", { name: "Step configuration" });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Nudge visual right" }));
+    // No await: the nudge is a plain synchronous edit, not a deferred one.
+    expect(transformOf(/^Review, Reviewer/).x).toBe(laneOriginX("review") + 36);
+    expect(transformOf(/^Review, Reviewer/).y).toBe(before.y);
+  });
 });
