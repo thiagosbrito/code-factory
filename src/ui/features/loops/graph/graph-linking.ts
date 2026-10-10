@@ -1,4 +1,5 @@
 import type { LoopDefinition } from "../../../../domain/loop.js";
+import { removeDependency } from "../loop-editor-dependencies";
 import { connectionError } from "./graph-actions";
 import type { Point } from "./graph-layout";
 
@@ -29,7 +30,24 @@ export const linkTargets = (loop: LoopDefinition, from: string): LinkTarget[] =>
       };
     });
 
-export type StepLink = { from: string; to: string; fromName: string; toName: string };
+export type StepLink = {
+  from: string;
+  to: string;
+  fromName: string;
+  toName: string;
+  /** Why removing it is refused (for example a repeat group's exit), or null when it is allowed. */
+  reason: string | null;
+};
+
+/** A dry run of removeDependency: the readable refusal, or null when the removal is allowed. */
+const removalError = (loop: LoopDefinition, from: string, to: string): string | null => {
+  try {
+    removeDependency(loop, from, to);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
 
 /** The dependencies leaving and entering a step, named for a list a person can read. */
 export const linksOf = (
@@ -42,6 +60,7 @@ export const linksOf = (
     to,
     fromName: name(from),
     toName: name(to),
+    reason: removalError(loop, from, to),
   });
   return {
     outgoing: loop.dependencies

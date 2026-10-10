@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStarterDraft } from "../src/domain/starter-templates.js";
+import { joined, repeated } from "./support/loop-editor-builders.js";
 import type { LoopDefinition } from "../src/domain/loop.js";
 import { LoopEditor } from "../src/ui/features/loops/LoopEditor.js";
 import { loopEditorViewStorageKey } from "../src/ui/features/loops/loop-editor-view.js";
@@ -76,7 +77,8 @@ describe("keyboard linking in the Graph view", () => {
     expect(implement.textContent).toContain(cycle);
     expect(implement.getAttribute("aria-disabled")).toBe("true");
     await user.click(implement);
-    expect(announced()).toContain(cycle);
+    // The reason is read out where a screen reader can reach it: inside the open dialog.
+    expect(within(dialog).getByRole("status").textContent).toContain(cycle);
     expect(screen.getByRole("alert", { hidden: true }).textContent).toContain(cycle);
     // The dialog stays open so another target can be chosen; nothing was added.
     expect(screen.getByRole("dialog", { name: "Connect Validate to…" })).toBeTruthy();
@@ -93,6 +95,7 @@ describe("keyboard linking in the Graph view", () => {
     const review = within(dialog).getByRole("button", { name: /^Review/u });
     expect(review.textContent).toContain("Already connected");
     await user.click(review);
+    expect(within(dialog).getByRole("status").textContent).toBe("Already connected");
     expect(edgeNames()).toHaveLength(2);
     expect(disabled("Undo")).toBe(true);
   });
@@ -134,13 +137,13 @@ describe("keyboard linking in the Graph view", () => {
     );
   });
 
-  it("moves focus to the neighbouring step with Alt and an arrow, and says which", async () => {
+  it("moves focus to the neighbouring step with Alt and an arrow, and says when there is none", async () => {
     const user = userEvent.setup();
     await open();
     step("Implement").focus();
     await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+    // Focus moving is announced by the card's own label; no extra speech is added.
     expect(document.activeElement).toBe(step("Review"));
-    expect(announced()).toBe("Review");
     await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
     expect(document.activeElement).toBe(step("Implement"));
     await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
@@ -148,10 +151,106 @@ describe("keyboard linking in the Graph view", () => {
     expect(disabled("Undo")).toBe(true);
   });
 
-  it("does not treat C or D as shortcuts while typing in a field", async () => {
+  it("leaves Ctrl and Meta arrows to the browser and the screen reader", async () => {
+    await open();
+    step("Implement").focus();
+    for (const modifier of ["ctrlKey", "metaKey"] as const)
+      expect(fireEvent.keyDown(step("Implement"), { key: "ArrowRight", [modifier]: true })).toBe(
+        true,
+      );
+    expect(document.activeElement).toBe(step("Implement"));
+  });
+
+  it("does not treat C or D as shortcuts from a field or button inside a step card", async () => {
+    await open();
+    const card = step("Implement");
+    const field = document.createElement("input");
+    const button = document.createElement("button");
+    card.append(field, button);
+    for (const target of [field, button]) {
+      expect(fireEvent.keyDown(target, { key: "c" })).toBe(true);
+      expect(fireEvent.keyDown(target, { key: "Enter" })).toBe(true);
+    }
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The same keys on the card itself do act, so the guard is what held them back.
+    expect(fireEvent.keyDown(card, { key: "c" })).toBe(false);
+    expect(await screen.findByRole("dialog", { name: "Connect Implement to…" })).toBeTruthy();
+  });
+
+  it("opens Connect and Disconnect with Caps Lock on or a non-Latin layout", async () => {
+    await open();
+    fireEvent.keyDown(step("Implement"), { key: "C", code: "KeyC" });
+    expect(await screen.findByRole("dialog", { name: "Connect Implement to…" })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.keyDown(step("Implement"), { key: "в", code: "KeyD" });
+    expect(await screen.findByRole("dialog", { name: "Disconnect Implement" })).toBeTruthy();
+  });
+
+  it("ends the dialog when Undo removes its step, and Redo does not bring it back", async () => {
     const user = userEvent.setup();
     await open();
-    await user.type(screen.getByRole("textbox", { name: "Loop title" }), "cd");
+    await user.click(screen.getByRole("button", { name: "Add step to 2. Plan" }));
+    const added = step("New agent step");
+    added.focus();
+    await user.keyboard("c");
+    await screen.findByRole("dialog", { name: "Connect New agent step to…" });
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("keyboard linking on structured loops", () => {
+  const openLoop = async (loop: LoopDefinition) => {
+    render(editor(loop));
+    await screen.findByRole("region", { name: "Graph view" });
+  };
+
+  it("shows why a removal is refused, up front and in the dialog, and changes nothing", async () => {
+    const user = userEvent.setup();
+    await openLoop(repeated());
+    step("c").focus();
+    await user.keyboard("d");
+    const dialog = await screen.findByRole("dialog", { name: "Disconnect c" });
+    const exit = within(dialog).getByRole("button", { name: /Remove c → d/u });
+    expect(exit.getAttribute("aria-disabled")).toBe("true");
+    const reason = exit.textContent?.replace("Remove c → d", "") ?? "";
+    expect(reason.length).toBeGreaterThan(0);
+    await user.click(exit);
+    expect(within(dialog).getByRole("status").textContent).toBe(reason);
+    expect(disabled("Undo")).toBe(true);
+  });
+
+  it("asks before a removal that collapses a join, then announces it and returns focus", async () => {
+    const user = userEvent.setup();
+    await openLoop(joined());
+    step("b").focus();
+    await user.keyboard("d");
+    const dialog = await screen.findByRole("dialog", { name: "Disconnect b" });
+    await user.click(within(dialog).getByRole("button", { name: "Remove b → d" }));
+    const confirm = await screen.findByRole("dialog", { name: "Apply this change?" });
+    await user.click(within(confirm).getByRole("button", { name: "Apply change" }));
+    await vi.waitFor(() => expect(announced()).toBe("Disconnected b from d"));
+    expect(document.activeElement).toBe(step("b"));
+    expect(edgeNames()).not.toContain("Dependency from b to d");
+  });
+
+  it("changes nothing and returns focus when the confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    await openLoop(joined());
+    step("b").focus();
+    await user.keyboard("d");
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Disconnect b" })).getByRole("button", {
+        name: "Remove b → d",
+      }),
+    );
+    const confirm = await screen.findByRole("dialog", { name: "Apply this change?" });
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    await vi.waitFor(() => expect(document.activeElement).toBe(step("b")));
+    expect(edgeNames()).toContain("Dependency from b to d");
+    expect(disabled("Undo")).toBe(true);
   });
 });

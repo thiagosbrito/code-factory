@@ -71,10 +71,15 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
   const selectedStep = graph.nodes.filter((node) => node.type === "step" && node.selected);
   const selectedId = selectedStep.length === 1 ? selectedStep[0]?.id : undefined;
   const selectedName = loop.steps.find((step) => step.id === selectedId)?.name;
-  const focusStep = (stepId: string) =>
-    section.current
-      ?.querySelector<HTMLElement>(`.react-flow__node-step[data-id="${CSS.escape(stepId)}"]`)
-      ?.focus();
+  // Focus goes back to the step a dialog was opened from; if it is gone (Undo removed it), to the graph.
+  const focusStep = (stepId: string | null) => {
+    const step = stepId
+      ? section.current?.querySelector<HTMLElement>(
+          `.react-flow__node-step[data-id="${CSS.escape(stepId)}"]`,
+        )
+      : null;
+    (step ?? section.current?.querySelector<HTMLElement>(".react-flow"))?.focus();
+  };
   const laneActions = {
     addStep: (stage: Stage) => {
       if (apply((current) => addStepToLane(current, stage)))
@@ -86,17 +91,16 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
       <p className="border-b px-4 py-2 text-xs text-muted-foreground">
         Drag from a step&apos;s right handle to another step&apos;s left handle to connect them.
         Select a connection and press Delete to remove it. Drop a step in another lane to change its
-        stage. By keyboard: Tab to a step, press C to connect it, D to disconnect it, Enter to open
-        it, and Alt with an arrow to move to a neighbouring step. Groups, joins and decisions are
-        shown here and edited in the Board view.
+        stage. By keyboard: Tab to a step, then Space selects it, C connects it, D disconnects it,
+        Enter opens it, and Alt with an arrow moves to a neighbouring step. Groups, joins and
+        decisions are shown here and edited in the Board view.
       </p>
-      <div
-        role="toolbar"
-        aria-label="Step connections"
-        className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm"
-      >
+      <fieldset className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 border-b px-4 py-2 text-sm">
+        <legend className="sr-only">Step connections</legend>
         <span className="text-muted-foreground">
-          {selectedName ? `Selected: ${selectedName}` : "Select one step to connect it by keyboard"}
+          {selectedName
+            ? `Selected: ${selectedName}`
+            : "Focus a step and press Space to select it, then use these buttons"}
         </span>
         <Button
           size="sm"
@@ -114,7 +118,7 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
         >
           Disconnect…
         </Button>
-      </div>
+      </fieldset>
       <output aria-label="Graph announcements" className="sr-only">
         {graph.announcement}
       </output>
@@ -162,10 +166,12 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
         request={linking.request}
         onConnect={linking.connect}
         onRefused={linking.refused}
+        notice={linking.notice}
         onDisconnect={linking.disconnect}
         onClose={linking.close}
         onClosed={() => {
-          const stepId = linking.openedFor();
+          const stepId = linking.dialogClosed();
+          // A confirmation that follows takes focus itself; otherwise go back to the step.
           if (stepId) focusStep(stepId);
         }}
       />
@@ -173,7 +179,7 @@ const LoopGraphView = ({ loop, apply, openDrawer, stepFacts }: LoopGraphViewProp
         warnings={warnings}
         onConfirm={confirm}
         onCancel={cancel}
-        onClosed={() => section.current?.querySelector<HTMLElement>(".react-flow")?.focus()}
+        onClosed={() => focusStep(linking.confirmationClosed())}
       />
     </section>
   );

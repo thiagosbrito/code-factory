@@ -55,7 +55,8 @@ test("a refused connection is read out with the reason shown, and Escape closes 
   await expect(implement).toContainText("Dependency cycles are not allowed");
   await implement.focus();
   await page.keyboard.press("Enter");
-  await expect(announcements(page)).toContainText("Dependency cycles are not allowed");
+  // Read out inside the open dialog, where assistive technology can reach it.
+  await expect(dialog.getByRole("status")).toContainText("Dependency cycles are not allowed");
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);

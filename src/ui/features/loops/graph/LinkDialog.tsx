@@ -18,6 +18,7 @@ export const LinkDialog = ({
   request,
   onConnect,
   onRefused,
+  notice,
   onDisconnect,
   onClose,
   onClosed,
@@ -26,6 +27,8 @@ export const LinkDialog = ({
   request: LinkRequest | null;
   onConnect: (from: string, to: string) => void;
   onRefused: (reason: string) => void;
+  /** The last refusal, shown (and read out) inside the dialog, where assistive tech can reach it. */
+  notice: string;
   onDisconnect: (link: StepLink) => void;
   onClose: () => void;
   /** Called once the dialog has closed, so focus can return to the step it was opened from. */
@@ -62,11 +65,11 @@ export const LinkDialog = ({
                   type="button"
                   className={itemClass}
                   aria-disabled={target.connected || target.reason !== null}
-                  onClick={() =>
-                    target.reason
-                      ? onRefused(target.reason)
-                      : !target.connected && onConnect(step?.id ?? "", target.id)
-                  }
+                  onClick={() => {
+                    if (target.reason) onRefused(target.reason);
+                    else if (target.connected) onRefused("Already connected");
+                    else onConnect(step?.id ?? "", target.id);
+                  }}
                 >
                   <span className="font-medium">{target.name}</span>
                   {target.connected && (
@@ -101,9 +104,15 @@ export const LinkDialog = ({
                       <button
                         type="button"
                         className={itemClass}
+                        aria-disabled={link.reason !== null}
                         onClick={() => onDisconnect(link)}
                       >
-                        Remove {link.fromName} → {link.toName}
+                        <span className="font-medium">
+                          Remove {link.fromName} → {link.toName}
+                        </span>
+                        {link.reason && (
+                          <span className="text-xs text-muted-foreground">{link.reason}</span>
+                        )}
                       </button>
                     </li>
                   ))}
@@ -113,7 +122,8 @@ export const LinkDialog = ({
             ))}
           </div>
         )}
-        <div className="mt-5 flex justify-end">
+        <output className="mt-3 block min-h-5 text-sm text-red-700">{notice}</output>
+        <div className="mt-2 flex justify-end">
           <Button variant="outline" onClick={onClose}>
             Close
           </Button>

@@ -193,14 +193,17 @@ describe("arrow keys the editor leaves alone", () => {
     expect(drawnAt(implement)).toEqual(implementBefore);
   });
 
-  it("keeps Ctrl, Meta and Alt arrows for moving focus: they never move or record the step", async () => {
+  it("leaves Ctrl and Meta arrows to the browser and uses Alt for moving focus; none move the step", async () => {
     const user = userEvent.setup();
     await open();
     await selectStep(user, reviewNode());
     const before = drawnAt(reviewNode());
-    for (const modifier of ["ctrlKey", "metaKey", "altKey"] as const)
-      expect(fireEvent.keyDown(reviewNode(), { key: "ArrowDown", [modifier]: true })).toBe(false);
-    // Claimed for focus movement, so not recorded and not moved in the library's flow state.
+    // Not cancelled: the browser and the screen reader keep these.
+    for (const modifier of ["ctrlKey", "metaKey"] as const)
+      expect(fireEvent.keyDown(reviewNode(), { key: "ArrowDown", [modifier]: true })).toBe(true);
+    // Claimed for moving focus between steps.
+    expect(fireEvent.keyDown(reviewNode(), { key: "ArrowDown", altKey: true })).toBe(false);
+    // Neither recorded nor moved in the library's flow state.
     expect(isDisabled("Undo")).toBe(true);
     expect(drawnAt(reviewNode())).toEqual(before);
   });
