@@ -3,7 +3,7 @@ import { ZodError } from "zod";
 import type { AgentConnection } from "../../../adapters/contract.js";
 import { parseLoop, type LoopDefinition } from "../../../domain/loop.js";
 import { bindingError } from "../../shared/connection";
-import { commit, redo, undo, type History } from "./loop-editor-model";
+import { amend, commit, redo, undo, type History } from "./loop-editor-model";
 import { api, loopResponseSchema, type ProjectResponse } from "../../shared/project-api";
 
 const describeError = (error: unknown): string => {
@@ -71,10 +71,25 @@ export const useLoopEditorController = ({
       return () => clearTimeout(timeout);
     }
   }, [selectedId, selected]);
-  const apply = (action: (current: LoopDefinition) => LoopDefinition) => {
+  // The last coalescing apply and the loop it produced: a later one with the same key folds into
+  // the same undo entry only while nothing else (another edit, Undo, Redo) has changed the loop.
+  const coalesced = useRef<{ key: string; present: LoopDefinition } | null>(null);
+  const apply = (
+    action: (current: LoopDefinition) => LoopDefinition,
+    options?: { coalesce?: string },
+  ) => {
     if (busyRef.current) return false;
     try {
-      setHistory(commit(history, action(history.present)));
+      const key = options?.coalesce;
+      const folds =
+        key !== undefined &&
+        coalesced.current?.key === key &&
+        coalesced.current.present === history.present &&
+        history.past.length > 0;
+      const next = action(history.present);
+      const updated = folds ? amend(history, next) : commit(history, next);
+      coalesced.current = key === undefined ? null : { key, present: updated.present };
+      setHistory(updated);
       setMessage("");
       return true;
     } catch (cause) {

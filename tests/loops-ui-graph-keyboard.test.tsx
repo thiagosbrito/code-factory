@@ -2,9 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { LoopDefinition } from "../src/domain/loop.js";
 import { createStarterDraft } from "../src/domain/starter-templates.js";
 import { LoopEditor } from "../src/ui/features/loops/LoopEditor.js";
 import { loopEditorViewStorageKey } from "../src/ui/features/loops/loop-editor-view.js";
+import { build } from "./support/loop-editor-builders.js";
 import { project } from "./support/loops-ui.js";
 import { stubReactFlowGlobals } from "./support/react-flow.js";
 
@@ -18,10 +20,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const open = async () => {
+const open = async (initial: LoopDefinition = createStarterDraft("compact", "starter")) => {
   render(
     <LoopEditor
-      initial={createStarterDraft("compact", "starter")}
+      initial={initial}
       project={project}
       agents={[]}
       onBack={() => undefined}
@@ -43,6 +45,7 @@ const edgeNames = () =>
     item.getAttribute("aria-label"),
   );
 const isDisabled = (name: string) => screen.getByRole("button", { name }).hasAttribute("disabled");
+const status = () => screen.getByRole("status", { name: "Graph announcements" }).textContent;
 
 const selectEdge = (label: string) => {
   const target = document.querySelector(`.react-flow__edge[aria-label="${label}"]`);
@@ -51,40 +54,69 @@ const selectEdge = (label: string) => {
   target.focus();
 };
 
+/** Focuses a step and selects it the way a keyboard user does. */
+const selectStep = async (user: ReturnType<typeof userEvent.setup>, node: HTMLElement) => {
+  node.focus();
+  await user.keyboard("{Enter}");
+  expect(node.classList.contains("selected")).toBe(true);
+};
+
 describe("moving a selected step with the arrow keys", () => {
-  it("records the move in the loop as one undo entry that Undo restores", async () => {
+  it("records the moves in the loop as one undo entry that Undo restores", async () => {
     const user = userEvent.setup();
     await open();
     const before = drawnAt(reviewNode());
-    reviewNode().focus();
-    await user.keyboard("{Enter}");
+    await selectStep(user, reviewNode());
     expect(isDisabled("Undo")).toBe(true);
     await user.keyboard("{ArrowRight}");
     // The loop recorded the move; moving only the flow state would leave Undo and Save disabled.
     await vi.waitFor(() => expect(isDisabled("Undo")).toBe(false));
     expect(isDisabled("Save draft")).toBe(false);
-    expect(drawnAt(reviewNode())).toEqual({ x: before.x + 5, y: before.y });
+    expect(drawnAt(reviewNode())).toEqual({ x: before.x + 10, y: before.y });
     await user.keyboard("{Shift>}{ArrowDown}{/Shift}");
-    expect(drawnAt(reviewNode()).y).toBe(before.y + 20);
+    expect(drawnAt(reviewNode()).y).toBe(before.y + 40);
+    expect(status()).toBe("Review moved down");
     // The node keeps keyboard focus so the next key press still reaches it.
     expect(document.activeElement).toBe(reviewNode());
     await user.click(screen.getByRole("button", { name: "Undo" }));
-    await user.click(screen.getByRole("button", { name: "Undo" }));
     await vi.waitFor(() => expect(drawnAt(reviewNode())).toEqual(before));
+    expect(isDisabled("Undo")).toBe(true);
     expect(isDisabled("Save draft")).toBe(true);
   });
 
-  it("keeps a step inside its lane instead of drawing it where the loop cannot store it", async () => {
+  it("holding an arrow is one undo entry, and moving focus away starts a new one", async () => {
     const user = userEvent.setup();
     await open();
-    reviewNode().focus();
-    await user.keyboard("{Enter}");
     const before = drawnAt(reviewNode());
-    await user.keyboard("{Shift>}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{/Shift}");
-    await vi.waitFor(() => expect(isDisabled("Undo")).toBe(false));
-    // The lane allows 8 px of padding at its left edge, so 80 px of key presses stop 8 px short.
+    await selectStep(user, reviewNode());
+    for (let press = 0; press < 10; press += 1) await user.keyboard("{ArrowDown}");
+    expect(drawnAt(reviewNode()).y).toBe(before.y + 100);
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+    await vi.waitFor(() => expect(drawnAt(reviewNode())).toEqual(before));
+    expect(isDisabled("Undo")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Redo" }));
+    reviewNode().focus();
+    await user.keyboard("{ArrowDown}");
+    reviewNode().blur();
+    reviewNode().focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+    await vi.waitFor(() => expect(drawnAt(reviewNode()).y).toBe(before.y + 110));
+    expect(isDisabled("Undo")).toBe(false);
+  });
+
+  it("keeps a step inside its lane and says when it is at the edge", async () => {
+    const user = userEvent.setup();
+    await open();
+    await selectStep(user, reviewNode());
+    const before = drawnAt(reviewNode());
+    await user.keyboard("{Shift>}{ArrowLeft}{/Shift}");
+    // The lane allows 8 px of padding at its left edge, so 40 px of key press stops 8 px short.
     const after = drawnAt(reviewNode());
     expect(after).toEqual({ x: before.x - 8, y: before.y });
+    await user.keyboard("{ArrowLeft}");
+    expect(status()).toBe("Review is at the lane edge");
+    expect(drawnAt(reviewNode())).toEqual(after);
     // Undo and Redo redraw the node from the loop; only a recorded position survives that.
     await user.click(screen.getByRole("button", { name: "Undo" }));
     await vi.waitFor(() => expect(drawnAt(reviewNode())).toEqual(before));
@@ -92,12 +124,63 @@ describe("moving a selected step with the arrow keys", () => {
     await vi.waitFor(() => expect(drawnAt(reviewNode())).toEqual(after));
   });
 
-  it("does not move a step that was never selected", async () => {
+  it("never moves the step the wrong way near a neighbour and records nothing once blocked", async () => {
+    const user = userEvent.setup();
+    await open(build(["a", "b"]));
+    const a = () => screen.getByRole("group", { name: /^a, Role/ });
+    const start = drawnAt(a());
+    await selectStep(user, a());
+    const seen: number[] = [];
+    for (let press = 0; press < 8; press += 1) {
+      await user.keyboard("{ArrowDown}");
+      seen.push(drawnAt(a()).y);
+    }
+    // 10 px down is still clear of b (110 px away); the next press would overlap it, and the
+    // nearest free row is the step's old one, which is UP: that press is blocked instead.
+    expect(seen.every((y) => y >= start.y)).toBe(true);
+    expect(new Set(seen)).toEqual(new Set([start.y + 10]));
+    expect(status()).toBe("a cannot move further down");
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+    await vi.waitFor(() => expect(drawnAt(a())).toEqual(start));
+    expect(isDisabled("Undo")).toBe(true);
+  });
+});
+
+describe("arrow keys the editor leaves alone", () => {
+  it("does nothing, and does not cancel the key, on a focused step that is not selected", async () => {
     const user = userEvent.setup();
     await open();
-    reviewNode().focus();
-    await user.keyboard("{ArrowDown}");
+    await selectStep(user, screen.getByRole("group", { name: /^Implement, / }));
+    const implement = screen.getByRole("group", { name: /^Implement, / });
+    const implementBefore = drawnAt(implement);
+    const review = reviewNode();
+    const before = drawnAt(review);
+    review.focus();
+    // fireEvent returns false when the default was cancelled: here nothing handles the key.
+    expect(fireEvent.keyDown(review, { key: "ArrowDown" })).toBe(true);
     expect(isDisabled("Undo")).toBe(true);
+    expect(drawnAt(review)).toEqual(before);
+    // The selected step is not dragged along by a key pressed on another step.
+    expect(drawnAt(implement)).toEqual(implementBefore);
+  });
+
+  it("leaves Ctrl, Meta and Alt arrows to the browser and to keyboard linking", async () => {
+    const user = userEvent.setup();
+    await open();
+    await selectStep(user, reviewNode());
+    const before = drawnAt(reviewNode());
+    for (const modifier of ["ctrlKey", "metaKey", "altKey"] as const)
+      expect(fireEvent.keyDown(reviewNode(), { key: "ArrowDown", [modifier]: true })).toBe(true);
+    // Not cancelled, not recorded, and not moved in the library's flow state either.
+    expect(isDisabled("Undo")).toBe(true);
+    expect(drawnAt(reviewNode())).toEqual(before);
+  });
+
+  it("claims an arrow on a selected step so the page does not scroll", async () => {
+    const user = userEvent.setup();
+    await open();
+    await selectStep(user, reviewNode());
+    expect(fireEvent.keyDown(reviewNode(), { key: "ArrowDown" })).toBe(false);
   });
 });
 

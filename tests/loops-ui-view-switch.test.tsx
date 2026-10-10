@@ -184,7 +184,7 @@ describe("lazy graph view failure", () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
-  it("says honestly that Retry may not help and what to do instead", async () => {
+  it("tells the user to try again and, if that keeps failing, to save the draft and reload", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const load = vi.fn<() => Promise<never>>().mockRejectedValue(new Error("chunk 404"));
     render(
@@ -197,7 +197,7 @@ describe("lazy graph view failure", () => {
     );
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain(
-      "Retry may not help for a failed download; save the draft and reload the page.",
+      "Try again; if it keeps failing, save the draft and reload the page.",
     );
   });
 

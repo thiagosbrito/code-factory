@@ -4,7 +4,6 @@ import {
   connectionError,
   disconnectAction,
   dropAction,
-  nudgeRightAction,
   planDrops,
   refuse,
   connectEndRefusal,
@@ -273,29 +272,5 @@ describe("refusals reported without changing anything", () => {
 
   it("refuse throws its message so apply shows it and records no history", () => {
     expect(() => refuse("nope")(chain())).toThrow("nope");
-  });
-});
-
-describe("nudging a step right", () => {
-  const lane = laneOriginX("implementation");
-
-  it("writes every position, not a lone coordinate, for a loop with none", () => {
-    const loop = chain();
-    const next = nudgeRightAction("b")(loop);
-    expect(next.steps.every((step) => step.position)).toBe(true);
-    expect(next.steps.find((step) => step.id === "b")?.position).toEqual({
-      x: lane + 36,
-      y: displayPositions(loop).get("b")?.y,
-    });
-    expect(next.steps.find((step) => step.id === "a")?.position).toEqual(
-      displayPositions(loop).get("a"),
-    );
-  });
-
-  it("refuses with a message when the step is already at its lane's right edge", () => {
-    const once = nudgeRightAction("b")(chain());
-    expect(() => nudgeRightAction("b")(once)).toThrow(
-      "This step is already at the right edge of its lane.",
-    );
   });
 });

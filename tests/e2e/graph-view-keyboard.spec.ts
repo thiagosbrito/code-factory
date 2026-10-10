@@ -19,8 +19,22 @@ const tabToStep = async (page: Page) => {
 
 const focusRing = (page: Page) =>
   page.evaluate(() => {
-    const style = getComputedStyle(document.activeElement ?? document.body);
-    return { style: style.outlineStyle, width: style.outlineWidth };
+    const focused = document.activeElement ?? document.body;
+    const style = getComputedStyle(focused);
+    // The colour the theme's --ring token resolves to, read the way the browser resolves it.
+    const probe = document.createElement("span");
+    probe.style.color = "var(--ring)";
+    document.body.append(probe);
+    const ring = getComputedStyle(probe).color;
+    probe.remove();
+    const surface = getComputedStyle(focused.firstElementChild ?? focused).backgroundColor;
+    return {
+      style: style.outlineStyle,
+      width: style.outlineWidth,
+      color: style.outlineColor,
+      ring,
+      surface,
+    };
   });
 
 test("a keyboard-focused step shows a focus ring in both themes", async ({ page, harness }) => {
@@ -29,7 +43,11 @@ test("a keyboard-focused step shows a focus ring in both themes", async ({ page,
     if (theme === "dark") await page.getByRole("button", { name: "Switch to dark mode" }).click();
     await tabToStep(page);
     await expect(page.locator(".react-flow__node-step:focus-visible")).toHaveCount(1);
-    expect(await focusRing(page), theme).toEqual({ style: "solid", width: "2px" });
+    const ring = await focusRing(page);
+    expect([ring.style, ring.width], theme).toEqual(["solid", "2px"]);
+    expect(ring.color, theme).toBe(ring.ring);
+    expect(ring.color, theme).not.toBe("rgba(0, 0, 0, 0)");
+    expect(ring.color, theme).not.toBe(ring.surface);
   }
 });
 

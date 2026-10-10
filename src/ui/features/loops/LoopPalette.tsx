@@ -1,6 +1,6 @@
 import type { LoopDefinition } from "../../../domain/loop.js";
 import { Button } from "@/shared/components/button";
-import { completePositions } from "./graph/graph-layout";
+import { completePositions } from "./loop-editor-placement";
 import { addStep } from "./loop-editor-model";
 import { LoopGroups } from "./LoopGroups";
 

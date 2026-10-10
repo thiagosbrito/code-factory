@@ -2,6 +2,7 @@
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { parseLoop, type LoopDefinition } from "../src/domain/loop.js";
 import { createStarterDraft } from "../src/domain/starter-templates.js";
 import { LoopEditor } from "../src/ui/features/loops/LoopEditor.js";
@@ -151,6 +152,23 @@ describe("Graph view gestures delivered through the component", () => {
     await vi.waitFor(() => expect(saves).toHaveLength(1));
     expect(saves[0]?.steps).toHaveLength(4);
     expect(saves[0]?.steps.every((step) => step.position !== undefined)).toBe(true);
+  });
+
+  it("ignores arrow keys while a pointer drag is in progress", async () => {
+    const user = userEvent.setup();
+    await open();
+    const node = screen.getByRole("group", { name: /^Review, Reviewer/ });
+    node.focus();
+    await user.keyboard("{Enter}");
+    const dragged = props().nodes?.find((item) => item.id === "review");
+    if (!dragged) throw new Error("missing node");
+    act(() => props().onNodeDragStart?.(new MouseEvent("mousedown"), dragged, [dragged]));
+    await user.keyboard("{ArrowDown}");
+    expect(button("Undo").hasAttribute("disabled")).toBe(true);
+    // The drag ends without moving the step; the same key now works again.
+    act(() => props().onNodeDragStop?.(new MouseEvent("mouseup"), dragged, [dragged]));
+    await user.keyboard("{ArrowDown}");
+    await vi.waitFor(() => expect(button("Undo").hasAttribute("disabled")).toBe(false));
   });
 
   it("does not open the step drawer when a drag ends", async () => {

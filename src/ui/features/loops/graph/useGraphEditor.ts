@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   type KeyboardEvent,
 } from "react";
 import {
@@ -23,11 +24,12 @@ import {
   disconnectAction,
   dropAction,
   planDrops,
+  planKeyboardMove,
   refuse,
   type Apply,
   type ConnectEnd,
 } from "./graph-actions";
-import type { Point } from "./graph-layout";
+import { displayPositions, type Point } from "./graph-layout";
 import {
   buildGraph,
   type DependencyFlowEdge,
@@ -54,8 +56,14 @@ const isTextTarget = (target: EventTarget): boolean =>
   (target.matches('input, textarea, select, [contenteditable=""], [contenteditable="true"]') ||
     target.closest("button, .react-flow__controls") !== null);
 
-/** The library moves a selected step by this many px per arrow press (Shift multiplies by 4). */
-const ARROW_STEP = 5;
+/** One arrow press moves a selected step this many px (Shift multiplies by 4). */
+const ARROW_STEP = 10;
+const ARROW_WORD: Record<string, string | undefined> = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+};
 const ARROW_DIRECTION: Record<string, Point | undefined> = {
   ArrowUp: { x: 0, y: -1 },
   ArrowDown: { x: 0, y: 1 },
@@ -89,6 +97,10 @@ export const useGraphEditor = ({
   // A reseed during a drag (for example Undo pressed mid-drag) would yank the node from under the
   // pointer; the drop handler reconciles with the newest loop once the drag ends.
   const dragging = useRef(false);
+  // Keyboard moves fold into one undo entry per session; a blur or a pointer drag starts a new one.
+  const session = useRef(0);
+  const stalled = useRef<{ loop: LoopDefinition; spec: string } | null>(null);
+  const [announcement, setAnnouncement] = useState("");
 
   const reseed = useCallback(() => {
     const { seed: next } = latest.current;
@@ -144,31 +156,71 @@ export const useGraphEditor = ({
 
   // The library moves selected steps on arrow keys inside its own flow state, where onNodeDragStop
   // never fires: the step would be drawn where the loop does not record it and snap back on the
-  // next reseed. The capture phase sees the key first, so the move is routed through the same
-  // planner and `apply` as a drag instead and the library's handler never runs. Enter, Space and
-  // Escape (selection) are left to the library, which keeps keyboard selection working.
+  // next reseed. The capture phase sees the key first, so a move of a SELECTED step is routed
+  // through the planner and `apply` instead and the library's handler never runs. Enter, Space and
+  // Escape (selection) and arrows on a step that is not selected are left alone; modified arrows
+  // keep their default but do not reach the library. Moves are based on the loop, not the flow
+  // state, and are ignored while a pointer drag is in progress.
   const onKeyDownCapture = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       const direction = ARROW_DIRECTION[event.key];
-      if (!direction || isTextTarget(event.target) || !(event.target instanceof Element)) return;
-      if (!event.target.closest(".react-flow__node-step, .react-flow__nodesselection-rect")) return;
-      event.preventDefault();
+      if (!direction) return;
+      if (isTextTarget(event.target) || !(event.target instanceof Element)) return;
+      const step = event.target.closest(".react-flow__node-step");
+      const rectangle = event.target.closest(".react-flow__nodesselection-rect");
+      const { loop: current, nodes: flow } = latest.current;
+      const selected = flow.filter(
+        (node): node is StepFlowNode => isStepNode(node) && node.selected === true,
+      );
+      if (!step && !rectangle) return;
+      if (!rectangle && !selected.some((node) => node.id === step?.getAttribute("data-id"))) return;
       event.stopPropagation();
+      // Modified arrows stay the browser's (and, later, keyboard linking's): their default is not
+      // cancelled, but the library's flow-only move must not run for them either.
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      if (dragging.current || !selected.length) return;
+      const spec = `${event.key}${event.shiftKey ? "+Shift" : ""}`;
+      // A held key repeats a press that changed nothing: skip the planning until the loop changes.
+      if (event.repeat && stalled.current?.loop === current && stalled.current.spec === spec)
+        return;
+      const drawn = displayPositions(current);
       const distance = ARROW_STEP * (event.shiftKey ? 4 : 1);
-      const moves = latest.current.nodes
-        .filter((node): node is StepFlowNode => isStepNode(node) && node.selected === true)
-        .map(({ id, position }) => ({
-          id,
-          position: {
-            x: position.x + direction.x * distance,
-            y: position.y + direction.y * distance,
-          },
-        }));
-      const drops = planDrops(latest.current.loop, moves);
-      if (drops.length) apply(dropAction(drops));
+      const moves = selected.flatMap(({ id }) => {
+        const base = drawn.get(id);
+        return base
+          ? [
+              {
+                id,
+                position: {
+                  x: base.x + direction.x * distance,
+                  y: base.y + direction.y * distance,
+                },
+              },
+            ]
+          : [];
+      });
+      const label =
+        selected.length === 1
+          ? (current.steps.find((item) => item.id === selected[0]?.id)?.name ?? "Step")
+          : `${selected.length} steps`;
+      const word = ARROW_WORD[event.key] ?? "";
+      const plan = planKeyboardMove(current, moves, direction);
+      stalled.current = plan.kind === "moved" ? null : { loop: current, spec };
+      if (plan.kind === "edge") setAnnouncement(`${label} is at the lane edge`);
+      else if (plan.kind === "blocked") setAnnouncement(`${label} cannot move further ${word}`);
+      else {
+        const coalesce = `keyboard:${session.current}:${selected.map((node) => node.id).join(",")}`;
+        if (apply(dropAction(plan.drops), { coalesce })) setAnnouncement(`${label} moved ${word}`);
+      }
     },
     [apply],
   );
+
+  // Moving focus away ends a run of keyboard moves, so the next one is its own undo entry.
+  const onBlur = useCallback(() => {
+    session.current += 1;
+  }, []);
 
   // The library announces onEdgesDelete before it removes anything, so a refusal could not be
   // undone there. Deleting through onBeforeDelete lets the loop decide: the gesture is turned into
@@ -183,6 +235,7 @@ export const useGraphEditor = ({
 
   const onNodeDragStart = useCallback<OnNodeDrag<GraphNode>>(() => {
     dragging.current = true;
+    session.current += 1;
   }, []);
 
   const commitDrag = useCallback(
@@ -204,6 +257,7 @@ export const useGraphEditor = ({
   // onSelectionDrag* instead of onNodeDrag*; it commits exactly like a node drag.
   const onSelectionDragStart = useCallback((_event: unknown, _dragged: GraphNode[]) => {
     dragging.current = true;
+    session.current += 1;
   }, []);
 
   const onSelectionDragStop = useCallback(
@@ -232,6 +286,8 @@ export const useGraphEditor = ({
     reportConnectEnd,
     onKeyDown,
     onKeyDownCapture,
+    onBlur,
+    announcement,
     onBeforeDelete,
     onNodeDragStart,
     onNodeDragStop,

@@ -48,7 +48,7 @@ test("a failed graph chunk shows an error, keeps the Board usable and a reload r
   await page.getByRole("button", { name: "Graph" }).click();
   await expect(failure).toContainText("could not be loaded");
   await expect(failure).toContainText(
-    "Retry may not help for a failed download; save the draft and reload the page.",
+    "Try again; if it keeps failing, save the draft and reload the page.",
   );
   expect(requests).toBe(1);
   // Whether Chromium asks the network again for a failed module URL is its own business (it can

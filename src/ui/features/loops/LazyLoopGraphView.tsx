@@ -19,7 +19,10 @@ class GraphErrorBoundary extends Component<
   }
   componentDidUpdate(_previous: unknown, previousState: { failed: boolean }) {
     // A failure after Retry is announced where the user just pressed: move focus to the new alert.
-    if (this.state.failed && !previousState.failed && this.retried) this.alert.current?.focus();
+    if (this.state.failed && !previousState.failed && this.retried) {
+      this.retried = false;
+      this.alert.current?.focus();
+    }
   }
   render() {
     if (!this.state.failed) return this.props.children;
@@ -31,8 +34,8 @@ class GraphErrorBoundary extends Component<
         className="m-6 rounded-lg border bg-card p-4 text-sm focus-visible:outline-2 focus-visible:outline-ring"
       >
         <p>
-          The graph view could not be loaded. Your draft is unchanged. Retry may not help for a
-          failed download; save the draft and reload the page.
+          The graph view could not be loaded. Your draft is unchanged. Try again; if it keeps
+          failing, save the draft and reload the page.
         </p>
         <div className="mt-3 flex gap-2">
           <Button

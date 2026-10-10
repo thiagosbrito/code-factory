@@ -52,6 +52,9 @@ const LoopGraphView = ({ loop, apply, openDrawer }: LoopGraphViewProps) => {
         Select a connection and press Delete to remove it. Drop a step in another lane to change its
         stage.
       </p>
+      <output aria-label="Graph announcements" className="sr-only">
+        {graph.announcement}
+      </output>
       <div className="h-[clamp(480px,75vh,900px)] min-w-0">
         <ReactFlow
           nodes={graph.nodes}
@@ -76,6 +79,7 @@ const LoopGraphView = ({ loop, apply, openDrawer }: LoopGraphViewProps) => {
           deleteKeyCode={null}
           onKeyDown={graph.onKeyDown}
           onKeyDownCapture={graph.onKeyDownCapture}
+          onBlur={graph.onBlur}
           tabIndex={-1}
           selectNodesOnDrag={false}
           onInit={openReadably}

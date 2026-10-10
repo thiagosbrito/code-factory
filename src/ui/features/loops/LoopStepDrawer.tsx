@@ -8,7 +8,6 @@ import { Textarea } from "@/shared/components/textarea";
 import type { ProjectResponse } from "../../shared/project-api";
 import { StepBindingSelectors } from "../../shared/StepBindingSelectors";
 import { LoopJoinSection, LoopDecisionSection } from "./LoopGraphSections";
-import { nudgeRightAction } from "./graph/graph-actions";
 import { deleteStep, stageOf, type EditorStep } from "./loop-editor-model";
 
 const label = "block w-full text-sm font-medium";
@@ -41,6 +40,18 @@ export const LoopStepDrawer = ({
         ),
       }),
     );
+  // The nudge belongs to the Graph view's layout code, which loads on demand: the Board's main
+  // bundle does not carry it.
+  const nudgeRight = async () => {
+    try {
+      const { nudgeStepRight } = await import("./graph/graph-layout");
+      apply((current) => nudgeStepRight(current, selected.id));
+    } catch {
+      apply(() => {
+        throw new Error("The nudge could not be loaded. Try again.");
+      });
+    }
+  };
   return (
     <DialogPrimitive.Root
       open
@@ -136,11 +147,7 @@ export const LoopStepDrawer = ({
               <LoopDecisionSection loop={loop} selected={selected} apply={apply} />
               <div className="mt-6 border-t pt-4">
                 <h4 className="font-semibold">Canvas position</h4>
-                <Button
-                  className="mt-2"
-                  variant="outline"
-                  onClick={() => apply(nudgeRightAction(selected.id))}
-                >
+                <Button className="mt-2" variant="outline" onClick={() => void nudgeRight()}>
                   Nudge visual right
                 </Button>
                 <p className="mt-1 text-xs text-muted-foreground">

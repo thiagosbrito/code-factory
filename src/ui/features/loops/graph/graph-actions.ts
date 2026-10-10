@@ -7,6 +7,7 @@ import {
   laneAtX,
   laneHeight,
   nudgeToFreeRow,
+  overlaps,
   type Point,
 } from "./graph-layout";
 
@@ -14,7 +15,12 @@ import {
  * Pure decisions behind the Graph handlers. Each returns a loop transformation for the editor's
  * `apply`, which commits it as one undo entry or reports the thrown Error inline and keeps the loop.
  */
-export type Apply = (action: (current: LoopDefinition) => LoopDefinition) => boolean;
+/** `coalesce` folds consecutive applies with the same key into one undo entry (see the editor). */
+export type ApplyOptions = { coalesce?: string };
+export type Apply = (
+  action: (current: LoopDefinition) => LoopDefinition,
+  options?: ApplyOptions,
+) => boolean;
 export type LoopAction = (current: LoopDefinition) => LoopDefinition;
 
 const hasEdge = (loop: LoopDefinition, from: string, to: string): boolean =>
@@ -147,19 +153,46 @@ export const dropAction =
       return moveVisual(staged, drop.id, drop.position.x, drop.position.y);
     }, current);
 
-const NUDGE = 20;
+export type KeyboardMove =
+  | { kind: "moved"; drops: PlannedDrop[] }
+  | { kind: "edge" }
+  | { kind: "blocked" };
 
 /**
- * Moves a step a little to the right of where it is drawn, through the same planner as a drop, so
- * the result is clamped into its lane and positions stay all-or-none. A step already at the lane's
- * right edge is refused with a message instead of storing a coordinate that is clamped away.
+ * Plans an arrow-key move. Unlike a drop, a key press must go in the direction pressed: when the
+ * lane's edge stops every step it is the "edge"; when the planner would push a step sideways,
+ * back, or onto another step (the nearest free row can be the step's own old one) the press is
+ * "blocked" and nothing is written. Steps move together or not at all.
  */
-export const nudgeRightAction =
-  (id: string): LoopAction =>
-  (current) => {
-    const drawn = displayPositions(current).get(id);
-    if (!drawn) throw new Error("Select an existing step.");
-    const drops = planDrops(current, [{ id, position: { x: drawn.x + NUDGE, y: drawn.y } }]);
-    if (!drops.length) throw new Error("This step is already at the right edge of its lane.");
-    return dropAction(drops)(current);
-  };
+export const planKeyboardMove = (
+  loop: LoopDefinition,
+  moves: StepMove[],
+  direction: Point,
+): KeyboardMove => {
+  const drawn = displayPositions(loop);
+  const height = laneHeight(loop);
+  const there = (id: string) => drawn.get(id) ?? { x: 0, y: 0 };
+  const stays = moves.every((move) => {
+    const base = there(move.id);
+    const stage = laneAtX(move.position.x);
+    const clamped = clampIntoLane(stage, move.position, height);
+    return clamped.x === base.x && clamped.y === base.y;
+  });
+  if (stays) return { kind: "edge" };
+  const drops = planDrops(loop, moves);
+  const final = new Map([...drawn, ...drops.map((drop) => [drop.id, drop.position] as const)]);
+  const progressed = moves.every((move) => {
+    const drop = drops.find((item) => item.id === move.id);
+    if (!drop) return false;
+    const base = there(move.id);
+    const along =
+      (drop.position.x - base.x) * direction.x + (drop.position.y - base.y) * direction.y;
+    const across =
+      (drop.position.x - base.x) * direction.y + (drop.position.y - base.y) * direction.x;
+    const clear = ![...final].some(
+      ([id, other]) => id !== move.id && overlaps(drop.position, other),
+    );
+    return along > 0 && across === 0 && clear;
+  });
+  return progressed ? { kind: "moved", drops } : { kind: "blocked" };
+};

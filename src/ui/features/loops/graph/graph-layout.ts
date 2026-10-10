@@ -1,5 +1,33 @@
 import { parseLoop, type LoopDefinition } from "../../../../domain/loop.js";
 import { stageOf, stages, type Stage } from "../loop-editor-model";
+import {
+  completePositions,
+  DEFAULT_OFFSET_X,
+  FIRST_ROW_Y,
+  firstFreeRowY,
+  LANE_WIDTH,
+  laneOriginX,
+  NODE_HEIGHT,
+  overlaps,
+  ROW_HEIGHT,
+  RUN_NODE_WIDTH,
+  stageIndex,
+  type Point,
+} from "../loop-editor-placement";
+
+export {
+  completePositions,
+  DEFAULT_OFFSET_X,
+  FIRST_ROW_Y,
+  LANE_WIDTH,
+  laneOriginX,
+  NODE_HEIGHT,
+  overlaps,
+  ROW_HEIGHT,
+  RUN_NODE_WIDTH,
+  stageIndex,
+  type Point,
+};
 
 /**
  * Pure geometry for the Graph view. Every coordinate is an ABSOLUTE canvas coordinate, the same
@@ -7,26 +35,12 @@ import { stageOf, stages, type Stage } from "../loop-editor-model";
  * left edge; it exists only inside these helpers and is never stored.
  */
 
-export type Point = { x: number; y: number };
-
-export const LANE_WIDTH = 260;
 /** The visible lane is a little narrower than its slot so neighbouring lanes show a gutter. */
 export const LANE_DRAWN_WIDTH = LANE_WIDTH - 16;
 export const NODE_WIDTH = 200;
-/** The Runs graph draws every node at least 210 x 102; overlap and row spacing use that size. */
-export const RUN_NODE_WIDTH = 210;
-export const NODE_HEIGHT = 102;
-export const ROW_HEIGHT = 120;
-export const FIRST_ROW_Y = 48;
-export const DEFAULT_OFFSET_X = 16;
 export const MIN_LANE_HEIGHT = 520;
 const LANE_PADDING = 8;
 const LANE_HEADER_HEIGHT = 40;
-
-export const stageIndex = (stage: Stage): number => stages.findIndex((item) => item.id === stage);
-
-/** The x of a lane's left edge. */
-export const laneOriginX = (stage: Stage): number => stageIndex(stage) * LANE_WIDTH;
 
 export const toAbsoluteX = (stage: Stage, offsetX: number): number => laneOriginX(stage) + offsetX;
 
@@ -87,9 +101,6 @@ export const defaultPositions = (loop: LoopDefinition): Map<string, Point> => {
   return positions;
 };
 
-const overlaps = (left: Point, right: Point): boolean =>
-  Math.abs(left.x - right.x) < RUN_NODE_WIDTH && Math.abs(left.y - right.y) < NODE_HEIGHT;
-
 const storedHeight = (loop: LoopDefinition): number =>
   Math.max(
     MIN_LANE_HEIGHT,
@@ -121,9 +132,7 @@ const placedPositions = (loop: LoopDefinition): Map<string, Point> => {
     const stage = stageOf(step);
     const x = defaults.get(step.id)?.x ?? toAbsoluteX(stage, DEFAULT_OFFSET_X);
     const others = taken.get(stage) ?? [];
-    let y = FIRST_ROW_Y;
-    while (others.some((other) => overlaps({ x, y }, other))) y += ROW_HEIGHT;
-    take(stage, step.id, { x, y });
+    take(stage, step.id, { x, y: firstFreeRowY(x, others) });
   }
   return positions;
 };
@@ -163,19 +172,35 @@ export const displayPositions = (loop: LoopDefinition): Map<string, Point> => {
   );
 };
 
-/**
- * Keeps positions all-or-none: when any step has a stored position, every step without one is
- * written at the position it is drawn at; a loop with no positions at all is returned unchanged.
- * The Runs graph reads a stored position as absolute and lays out the rest on its own grid, so a
- * partly positioned loop would overlap there.
- */
-export const completePositions = (loop: LoopDefinition): LoopDefinition => {
-  if (!loop.steps.some((step) => step.position) || loop.steps.every((step) => step.position))
-    return loop;
+/** Writes the drawn position of every step that has none yet. */
+const fillPositions = (loop: LoopDefinition): LoopDefinition => {
+  if (loop.steps.every((step) => step.position)) return loop;
   const drawn = displayPositions(loop);
   return parseLoop({
     ...loop,
     steps: loop.steps.map((step) => ({ ...step, position: step.position ?? drawn.get(step.id) })),
+  });
+};
+
+const NUDGE = 20;
+
+/**
+ * Moves a step a little to the right of where it is drawn, keeping its row (so it cannot start to
+ * overlap a node it did not already overlap) and its lane, and writing every position so they stay
+ * all-or-none. A step already at its lane's right edge is refused with a message instead of
+ * storing a coordinate that is clamped away. Kept here, free of the drop planner, because the
+ * Board's step drawer uses it and the planner belongs to the lazily loaded Graph view.
+ */
+export const nudgeStepRight = (loop: LoopDefinition, id: string): LoopDefinition => {
+  const step = loop.steps.find((item) => item.id === id);
+  const drawn = displayPositions(loop).get(id);
+  if (!step || !drawn) throw new Error("Select an existing step.");
+  const moved = clampIntoLane(stageOf(step), { x: drawn.x + NUDGE, y: drawn.y }, laneHeight(loop));
+  if (moved.x === drawn.x) throw new Error("This step is already at the right edge of its lane.");
+  const filled = fillPositions(loop);
+  return parseLoop({
+    ...filled,
+    steps: filled.steps.map((item) => (item.id === id ? { ...item, position: moved } : item)),
   });
 };
 
