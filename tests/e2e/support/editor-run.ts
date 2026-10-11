@@ -53,10 +53,16 @@ export const untilAborted = (signal: AbortSignal) =>
     else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
 
-export const test = base.extend<{ harness: Harness; fakeClaude: boolean }>({
+export const test = base.extend<{
+  harness: Harness;
+  fakeClaude: boolean;
+  agentSteering: "supported" | "unsupported";
+}>({
+  /** Whether the fixture Codex agent can take guidance; "unsupported" is what Kiro reports. */
+  agentSteering: ["supported", { option: true }],
   /** Detect a fake `claude` CLI so the real Claude Code adapter runs against it. */
   fakeClaude: [false, { option: true }],
-  harness: async ({ browserName: _browserName, fakeClaude }, use) => {
+  harness: async ({ browserName: _browserName, fakeClaude, agentSteering }, use) => {
     // A disposable parent keeps every Git artifact of the journey inside one removable folder.
     const parentDirectory = await mkdtemp(join(tmpdir(), "code-factory-e2e-"));
     const projectDirectory = join(parentDirectory, "repo");
@@ -126,7 +132,7 @@ export const test = base.extend<{ harness: Harness; fakeClaude: boolean }>({
         provider: "codex" as const,
         capabilities: {
           streaming: "supported",
-          steering: "supported",
+          steering: agentSteering,
           resume: "supported",
           pause: "unsupported",
           waitingInput: "supported",
@@ -142,7 +148,7 @@ export const test = base.extend<{ harness: Harness; fakeClaude: boolean }>({
             authentication: "authenticated",
             capabilities: {
               streaming: "supported",
-              steering: "supported",
+              steering: agentSteering,
               resume: "supported",
               pause: "unsupported",
               waitingInput: "supported",

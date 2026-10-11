@@ -7,6 +7,12 @@ import { scopeEvidence, type RunScope } from "./run-view-model";
 
 type Submit = (input: { stepId: string; attemptId: string; message: string }) => Promise<void>;
 
+/**
+ * Step guidance for the selected attempt. It is shown only when that attempt's agent can take
+ * guidance (Claude Code and some Codex versions); for an agent that cannot (Kiro, an unknown
+ * Codex version) or with no attempt selected, nothing is rendered rather than a control that
+ * could never work.
+ */
 export const RunGuidance = ({
   run,
   scope,
@@ -37,24 +43,19 @@ export const RunGuidance = ({
   const steering = connection?.capabilities.steering ?? "unknown";
   const verified =
     connection?.authentication === "authenticated" || connection?.authentication === "not-required";
-  const canSend = Boolean(
-    target && connected && verified && steering === "supported" && message.trim() && !sending,
-  );
+  const canSend = Boolean(target && connected && verified && message.trim() && !sending);
   const guidance = scopeEvidence(run, scope).filter((item) => item.kind === "guidance");
   const latest = guidance.filter(
     (item, index) => !guidance.slice(index + 1).some((other) => other.messageId === item.messageId),
   );
   const status = !connected
     ? "Runtime disconnected. Draft preserved until it reconnects."
-    : !target
-      ? "Select one step attempt to address guidance."
-      : !verified
-        ? "A verified agent connection is required. Draft preserved."
-        : steering !== "supported"
-          ? `Steering is ${steering} for this connection. Draft preserved.`
-          : run.status !== "running"
-            ? `Run ${run.status}. Guidance for a finished attempt is recorded as undelivered.`
-            : "Guidance is queued for this exact attempt. Delivery does not interrupt or restart work.";
+    : !verified
+      ? "A verified agent connection is required. Draft preserved."
+      : run.status !== "running"
+        ? `Run ${run.status}. Guidance for a finished attempt is recorded as undelivered.`
+        : "Guidance is queued for this exact attempt. Delivery does not interrupt or restart work.";
+  if (!target || steering !== "supported") return null;
   return (
     <section className="border-t p-4" aria-label="Step guidance">
       <h3 className="text-sm font-semibold">Step guidance</h3>
@@ -100,7 +101,6 @@ export const RunGuidance = ({
           className="min-h-20"
           value={message}
           onChange={(event) => setDrafts((current) => ({ ...current, [key]: event.target.value }))}
-          disabled={!target}
           maxLength={10000}
         />
         {error && (

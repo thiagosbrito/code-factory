@@ -41,7 +41,6 @@ test("guidance can be queued for a running Claude Code step", async ({ page, har
   const message = page.getByLabel("Message for selected attempt");
   await expect(message).toBeEnabled();
   await expect(page.getByRole("button", { name: "Queue guidance" })).toBeDisabled();
-  await expect(page.getByText(/Steering is (unsupported|unknown)/)).toHaveCount(0);
   await message.fill("Check the accessible name before finishing.");
   const queue = page.getByRole("button", { name: "Queue guidance" });
   await expect(queue).toBeEnabled();
