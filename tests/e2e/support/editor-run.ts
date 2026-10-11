@@ -318,7 +318,9 @@ export const test = base.extend<{
       await new Promise<void>((resolve, reject) =>
         runtime.server.close((error) => (error ? reject(error) : resolve())),
       );
-      await rm(parentDirectory, { recursive: true, force: true });
+      // A step that is finishing can still be writing evidence as the project is removed; retry
+      // instead of failing the journey with ENOTEMPTY.
+      await rm(parentDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   },
 });
@@ -347,6 +349,22 @@ export const executeWithDefaultTools = async (
   });
   await prompt.getByRole("button", { name: "Keep commands sandboxed" }).click();
   await expect(prompt).toHaveCount(0);
+};
+
+/**
+ * Cancels the run and waits until it is canceled, so no step is still writing evidence when the
+ * fixture removes the project folder at the end of a journey.
+ */
+export const cancelRunAndSettle = async (page: import("@playwright/test").Page, origin: string) => {
+  await page.getByRole("button", { name: "Cancel run" }).click();
+  await runProgress
+    .poll(async () => {
+      const body = (await (await page.request.get(`${origin}/api/runs`)).json()) as {
+        runs: { status: string }[];
+      };
+      return body.runs[0]?.status;
+    })
+    .toBe("canceled");
 };
 
 export const finishSetup = async (page: import("@playwright/test").Page, origin: string) => {

@@ -1,5 +1,11 @@
 import { expect } from "@playwright/test";
-import { executeWithDefaultTools, finishSetup, runProgress, test } from "./support/editor-run.js";
+import {
+  cancelRunAndSettle,
+  executeWithDefaultTools,
+  finishSetup,
+  runProgress,
+  test,
+} from "./support/editor-run.js";
 
 const startRun = async (page: import("@playwright/test").Page, origin: string, task: string) => {
   await finishSetup(page, origin);
@@ -31,6 +37,7 @@ test.describe("an agent that cannot take guidance", () => {
     await expect(page.getByRole("region", { name: "Step guidance" })).toHaveCount(0);
     await expect(page.getByLabel("Message for selected attempt")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Queue guidance" })).toHaveCount(0);
+    await cancelRunAndSettle(page, harness.origin);
     harness.releaseReviews();
   });
 });
@@ -54,5 +61,6 @@ test("a capable agent shows the field only for a step that has an attempt", asyn
   await runProgress(running).toBeVisible();
   await running.click();
   await expect(page.getByLabel("Message for selected attempt")).toBeEnabled();
+  await cancelRunAndSettle(page, harness.origin);
   harness.releaseReviews();
 });
