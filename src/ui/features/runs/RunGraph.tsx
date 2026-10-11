@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../../../adapters/contract.js";
 import type { RunRecord } from "../../../domain/run.js";
 import { Button } from "@/shared/components/button";
 import { RetryIcon } from "../../shared/icons";
 import { StepFactsLines } from "../../shared/StepFactsLines";
 import { stepFacts } from "../../shared/step-facts";
-import { useCanvasPan } from "./useCanvasPan";
+import { useCanvasViewport } from "./useCanvasViewport";
 import { NOT_REACHED, stepDisplayStatus } from "./run-view-model";
 import { StepElapsed } from "./StepElapsed";
 
@@ -64,29 +63,15 @@ export const RunGraph = ({
   /** Connected agents, used to show model display names. */
   agents?: AgentConnection[];
 }) => {
-  // "fit" follows the canvas width, so the whole graph shows without scrolling until the user
-  // zooms by hand; the buttons switch to a fixed zoom and "Fit view" returns to following.
-  const [manualZoom, setManualZoom] = useState<number | null>(null);
-  const [canvasWidth, setCanvasWidth] = useState(0);
-  const canvasRef = useRef<HTMLElement>(null);
-  const panHandlers = useCanvasPan(canvasRef);
   const layout = positions(run);
   const width = Math.max(700, ...[...layout.values()].map((point) => point.x + nodeWidth + 60));
   const height = Math.max(340, ...[...layout.values()].map((point) => point.y + nodeHeight + 70));
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const measure = () => setCanvasWidth(canvas.clientWidth);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, []);
-  const fitZoom = canvasWidth ? Math.max(0.25, Math.min(1, (canvasWidth - 2) / width)) : 1;
-  const zoom = manualZoom ?? fitZoom;
+  // The canvas is a window over the diagram: drag pans, the wheel and the buttons zoom, and
+  // "Fit view" returns to showing all of it. Floating controls keep a band of the top clear.
+  const { canvasRef, handlers, view, fitted, zoomBy, fitToCanvas, reveal, ...canvasSize } =
+    useCanvasViewport({ content: { width, height }, insetTop: overlay ? 56 : 0 });
+  const zoom = view.zoom;
   const retryPoint = retry ? layout.get(retry.stepId) : undefined;
-  const setZoom = (next: (value: number) => number) => setManualZoom(next(zoom));
   const moveSelection = (id: string, direction: number) => {
     const ids = run.snapshot.loop.steps.map((step) => step.id);
     const index = ids.indexOf(id);
@@ -106,29 +91,14 @@ export const RunGraph = ({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            aria-label="Zoom out"
-            onClick={() => setZoom((value) => Math.max(0.25, +(value - 0.1).toFixed(2)))}
-          >
+          <Button size="sm" variant="outline" aria-label="Zoom out" onClick={() => zoomBy(-0.1)}>
             −
           </Button>
           <output className="min-w-11 text-center text-xs">{Math.round(zoom * 100)}%</output>
-          <Button
-            size="sm"
-            variant="outline"
-            aria-label="Zoom in"
-            onClick={() => setZoom((value) => Math.min(1.5, +(value + 0.1).toFixed(2)))}
-          >
+          <Button size="sm" variant="outline" aria-label="Zoom in" onClick={() => zoomBy(0.1)}>
             +
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            aria-pressed={manualZoom === null}
-            onClick={() => setManualZoom(null)}
-          >
+          <Button size="sm" variant="outline" aria-pressed={fitted} onClick={fitToCanvas}>
             Fit view
           </Button>
         </div>
@@ -141,153 +111,159 @@ export const RunGraph = ({
         )}
         <section
           ref={canvasRef}
-          className="run-graph-canvas cursor-grab overflow-auto rounded-lg border active:cursor-grabbing"
+          className="run-graph-canvas relative cursor-grab touch-none overflow-clip rounded-lg border active:cursor-grabbing"
+          style={{ height: canvasSize.height }}
           aria-label="Step graph"
-          {...panHandlers}
+          {...handlers}
         >
-          {/* An empty band above the graph keeps the floating controls off the nodes. */}
           <div
-            className="relative"
-            style={{ width: width * zoom, height: height * zoom, marginTop: overlay ? 56 : 0 }}
+            className="absolute left-0 top-0 origin-top-left"
+            style={{
+              width,
+              height,
+              transform: `translate(${view.x}px, ${view.y}px) scale(${zoom})`,
+            }}
           >
-            <div
-              className="absolute left-0 top-0 origin-top-left"
-              style={{ width, height, transform: `scale(${zoom})` }}
+            {run.snapshot.loop.groups.map((group) => {
+              const points = group.stepIds
+                .map((id) => layout.get(id))
+                .filter((point): point is Point => Boolean(point));
+              if (!points.length) return null;
+              const left = Math.min(...points.map((point) => point.x)) - 18;
+              const top = Math.min(...points.map((point) => point.y)) - 34;
+              const right = Math.max(...points.map((point) => point.x)) + nodeWidth + 18;
+              const bottom = Math.max(...points.map((point) => point.y)) + nodeHeight + 18;
+              return (
+                <div
+                  key={group.id}
+                  className="absolute rounded-xl border border-dashed border-primary/40 bg-primary/5"
+                  style={{ left, top, width: right - left, height: bottom - top }}
+                >
+                  <span className="absolute -top-5 left-2 text-xs font-semibold text-primary">
+                    {group.name} · {group.kind}
+                  </span>
+                </div>
+              );
+            })}
+            <svg
+              className="pointer-events-none absolute inset-0"
+              width={width}
+              height={height}
+              aria-hidden="true"
             >
-              {run.snapshot.loop.groups.map((group) => {
-                const points = group.stepIds
-                  .map((id) => layout.get(id))
-                  .filter((point): point is Point => Boolean(point));
-                if (!points.length) return null;
-                const left = Math.min(...points.map((point) => point.x)) - 18;
-                const top = Math.min(...points.map((point) => point.y)) - 34;
-                const right = Math.max(...points.map((point) => point.x)) + nodeWidth + 18;
-                const bottom = Math.max(...points.map((point) => point.y)) + nodeHeight + 18;
+              <defs>
+                <marker
+                  id="run-graph-arrow"
+                  markerWidth="8"
+                  markerHeight="8"
+                  refX="7"
+                  refY="4"
+                  orient="auto"
+                >
+                  <path d="M0 0 L8 4 L0 8" fill="none" style={{ stroke: "var(--graph-edge)" }} />
+                </marker>
+              </defs>
+              {run.snapshot.loop.dependencies.map((edge) => {
+                const from = layout.get(edge.from);
+                const to = layout.get(edge.to);
+                if (!from || !to) return null;
+                const x1 = from.x + nodeWidth;
+                const y1 = from.y + nodeHeight / 2;
+                const x2 = to.x;
+                const y2 = to.y + nodeHeight / 2;
                 return (
-                  <div
-                    key={group.id}
-                    className="absolute rounded-xl border border-dashed border-primary/40 bg-primary/5"
-                    style={{ left, top, width: right - left, height: bottom - top }}
-                  >
-                    <span className="absolute -top-5 left-2 text-xs font-semibold text-primary">
-                      {group.name} · {group.kind}
-                    </span>
-                  </div>
+                  <path
+                    key={`${edge.from}:${edge.to}`}
+                    d={`M${x1} ${y1} C${x1 + 40} ${y1},${x2 - 40} ${y2},${x2 - 8} ${y2}`}
+                    fill="none"
+                    style={{ stroke: "var(--graph-edge)" }}
+                    strokeWidth="1.5"
+                    markerEnd="url(#run-graph-arrow)"
+                  />
                 );
               })}
-              <svg
-                className="pointer-events-none absolute inset-0"
-                width={width}
-                height={height}
-                aria-hidden="true"
-              >
-                <defs>
-                  <marker
-                    id="run-graph-arrow"
-                    markerWidth="8"
-                    markerHeight="8"
-                    refX="7"
-                    refY="4"
-                    orient="auto"
-                  >
-                    <path d="M0 0 L8 4 L0 8" fill="none" style={{ stroke: "var(--graph-edge)" }} />
-                  </marker>
-                </defs>
-                {run.snapshot.loop.dependencies.map((edge) => {
-                  const from = layout.get(edge.from);
-                  const to = layout.get(edge.to);
-                  if (!from || !to) return null;
-                  const x1 = from.x + nodeWidth;
-                  const y1 = from.y + nodeHeight / 2;
-                  const x2 = to.x;
-                  const y2 = to.y + nodeHeight / 2;
-                  return (
-                    <path
-                      key={`${edge.from}:${edge.to}`}
-                      d={`M${x1} ${y1} C${x1 + 40} ${y1},${x2 - 40} ${y2},${x2 - 8} ${y2}`}
-                      fill="none"
-                      style={{ stroke: "var(--graph-edge)" }}
-                      strokeWidth="1.5"
-                      markerEnd="url(#run-graph-arrow)"
+            </svg>
+            {run.snapshot.loop.steps.map((definition) => {
+              const point = layout.get(definition.id);
+              const step = run.steps.find((item) => item.stepId === definition.id);
+              if (!point) return null;
+              const status = step?.status ?? "pending";
+              const shown = stepDisplayStatus(run, step);
+              const facts =
+                definition.kind === "check"
+                  ? null
+                  : stepFacts({
+                      binding: definition.binding,
+                      projectDefault: run.snapshot.bindings[definition.id],
+                      agents,
+                    });
+              return (
+                <button
+                  key={definition.id}
+                  id={`run-node-${definition.id}`}
+                  type="button"
+                  style={{ left: point.x, top: point.y, width: nodeWidth, height: nodeHeight }}
+                  className={`run-graph-node run-graph-node-${status} absolute overflow-hidden rounded-lg border bg-card p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
+                  aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts${facts ? `, agent ${facts.agent}, model ${facts.model}, effort ${facts.effort}` : ""}`}
+                  aria-pressed={selectedStepId === definition.id}
+                  onClick={() => onSelect(definition.id)}
+                  onFocus={() =>
+                    reveal({
+                      x: point.x,
+                      y: point.y,
+                      width: nodeWidth,
+                      height: nodeHeight,
+                    })
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                      event.preventDefault();
+                      moveSelection(definition.id, 1);
+                    }
+                    if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                      event.preventDefault();
+                      moveSelection(definition.id, -1);
+                    }
+                  }}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span
+                      className={`run-status ${shown === NOT_REACHED ? "run-status-not-reached" : `run-status-${status}`}`}
+                    >
+                      {shown}
+                    </span>
+                    <StepElapsed
+                      key={
+                        step?.attempts.find((attempt) => attempt.status === "running")?.id ?? "idle"
+                      }
+                      step={step}
                     />
-                  );
-                })}
-              </svg>
-              {run.snapshot.loop.steps.map((definition) => {
-                const point = layout.get(definition.id);
-                const step = run.steps.find((item) => item.stepId === definition.id);
-                if (!point) return null;
-                const status = step?.status ?? "pending";
-                const shown = stepDisplayStatus(run, step);
-                const facts =
-                  definition.kind === "check"
-                    ? null
-                    : stepFacts({
-                        binding: definition.binding,
-                        projectDefault: run.snapshot.bindings[definition.id],
-                        agents,
-                      });
-                return (
-                  <button
-                    key={definition.id}
-                    id={`run-node-${definition.id}`}
-                    type="button"
-                    style={{ left: point.x, top: point.y, width: nodeWidth, height: nodeHeight }}
-                    className={`run-graph-node run-graph-node-${status} absolute overflow-hidden rounded-lg border bg-card p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedStepId === definition.id ? "ring-2 ring-primary" : ""}`}
-                    aria-label={`${definition.name}, ${shown}, ${step?.attempts.length ?? 0} attempts${facts ? `, agent ${facts.agent}, model ${facts.model}, effort ${facts.effort}` : ""}`}
-                    aria-pressed={selectedStepId === definition.id}
-                    onClick={() => onSelect(definition.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-                        event.preventDefault();
-                        moveSelection(definition.id, 1);
-                      }
-                      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-                        event.preventDefault();
-                        moveSelection(definition.id, -1);
-                      }
-                    }}
-                  >
-                    <span className="flex items-center justify-between gap-2">
-                      <span
-                        className={`run-status ${shown === NOT_REACHED ? "run-status-not-reached" : `run-status-${status}`}`}
-                      >
-                        {shown}
-                      </span>
-                      <StepElapsed
-                        key={
-                          step?.attempts.find((attempt) => attempt.status === "running")?.id ??
-                          "idle"
-                        }
-                        step={step}
-                      />
-                    </span>
-                    <strong className="mt-2 line-clamp-2 block text-sm">{definition.name}</strong>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {definition.role} · {step?.attempts.length ?? 0} attempts
-                    </span>
-                    {facts && <StepFactsLines inline facts={facts} className="mt-1.5" />}
-                  </button>
-                );
-              })}
-            </div>
-            {retryPoint && retry && (
-              <Button
-                size="sm"
-                aria-label={retry.label}
-                title={retry.label}
-                disabled={retry.disabled}
-                className="absolute z-10 h-8 w-8 rounded-full p-0 shadow-md"
-                style={{
-                  left: (retryPoint.x + nodeWidth) * zoom - 16,
-                  top: retryPoint.y * zoom - 16,
-                }}
-                onClick={retry.onRetry}
-              >
-                <RetryIcon />
-              </Button>
-            )}
+                  </span>
+                  <strong className="mt-2 line-clamp-2 block text-sm">{definition.name}</strong>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {definition.role} · {step?.attempts.length ?? 0} attempts
+                  </span>
+                  {facts && <StepFactsLines inline facts={facts} className="mt-1.5" />}
+                </button>
+              );
+            })}
           </div>
+          {retryPoint && retry && (
+            <Button
+              size="sm"
+              aria-label={retry.label}
+              title={retry.label}
+              disabled={retry.disabled}
+              className="absolute z-10 h-8 w-8 rounded-full p-0 shadow-md"
+              style={{
+                left: view.x + (retryPoint.x + nodeWidth) * zoom - 16,
+                top: view.y + retryPoint.y * zoom - 16,
+              }}
+              onClick={retry.onRetry}
+            >
+              <RetryIcon />
+            </Button>
+          )}
         </section>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
