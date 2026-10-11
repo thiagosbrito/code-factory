@@ -41,6 +41,9 @@ export const CLAUDE_CODE_WRITE_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit"]
  */
 export const claudeCodeArgs = (input: StepExecutionInput): string[] => [
   "-p",
+  // The instruction and any later guidance arrive as stream-json messages on stdin.
+  "--input-format",
+  "stream-json",
   "--output-format",
   "stream-json",
   "--verbose",
@@ -56,9 +59,11 @@ export const claudeCodeArgs = (input: StepExecutionInput): string[] => [
     : input.toolGrant?.provider === "claude-code"
       ? ["--allowedTools", ...input.toolGrant.scope]
       : ["--disallowedTools", "Bash"]),
-  "--",
-  input.instruction,
 ];
+
+/** One user message in the CLI's stream-json input format. */
+const userMessage = (text: string): string =>
+  `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`;
 
 const contentBlock = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
@@ -111,13 +116,21 @@ const toolDetail = (input: unknown): string | undefined => {
   return (file_path ?? notebook_path ?? command ?? pattern ?? url)?.slice(0, TOOL_DETAIL_LIMIT);
 };
 
-/** One `claude -p` stream-json invocation executes one assigned step. It cannot be reattached. */
+/**
+ * One `claude -p` stream-json invocation executes one assigned step. It cannot be reattached.
+ * Its stdin stays open until the step's result so guidance can reach the running turn: the CLI
+ * folds a message sent mid-turn into that turn instead of starting or interrupting another.
+ */
 export class ClaudeCodeAdapter implements AgentAdapter {
   private readonly children = new Set<ReturnType<typeof spawn>>();
+  /** Stdin of each running step, by the CLI's session id. */
+  private readonly inputs = new Map<string, NodeJS.WritableStream & { destroyed: boolean }>();
+  /** Sessions that were sent guidance; a late message can legitimately add a second result. */
+  private readonly steered = new Set<string>();
   readonly provider = "claude-code" as const;
   readonly capabilities = {
     streaming: "supported",
-    steering: "unsupported",
+    steering: "supported",
     resume: "unsupported",
     pause: "unsupported",
     waitingInput: "unsupported",
@@ -162,11 +175,14 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     if (signal.aborted) throw new Error("Claude Code execution aborted before launch");
     const child = spawn(this.executable, claudeCodeArgs(input), {
       cwd: input.projectDirectory,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       // Claude Code starts tool processes; own its process group so cancellation reaches them.
       detached: process.platform !== "win32",
     });
     const abort = () => terminateChild(child);
+    // The CLI may exit before it reads a message; that surfaces through "close", not a crash.
+    child.stdin.on("error", () => undefined);
+    child.stdin.write(userMessage(input.instruction));
     this.children.add(child);
     signal.addEventListener("abort", abort, { once: true });
     let stderr = "";
@@ -203,17 +219,23 @@ export class ClaudeCodeAdapter implements AgentAdapter {
             sessionId: event.session_id,
             turnId: randomUUID(),
           };
+          this.inputs.set(session.sessionId, child.stdin);
           yield { type: "started", ...session };
           continue;
         }
         if (event.session_id !== session.sessionId) throw new Error("Claude Code session mismatch");
         if (event.type === "system") continue;
         if (event.type === "result") {
-          if (completion) throw new Error("Duplicate Claude Code result event");
+          // Guidance that lands as the turn ends can run as one more turn; its result is the last.
+          if (completion && !this.steered.has(session.sessionId))
+            throw new Error("Duplicate Claude Code result event");
           completion = {
             outcome: event.subtype === "success" && !event.is_error ? "succeeded" : "failed",
             output: event.result ?? "",
           };
+          // The turn is over; closing stdin lets the CLI exit and ends the step.
+          this.inputs.delete(session.sessionId);
+          child.stdin.end();
           continue;
         }
         if (typeof event.message.content === "string") {
@@ -256,6 +278,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       yield { type: "completed", ...session, ...completion };
     } finally {
       signal.removeEventListener("abort", abort);
+      if (session) {
+        this.inputs.delete(session.sessionId);
+        this.steered.delete(session.sessionId);
+      }
       if (child.exitCode === null) terminateChild(child);
       await closed.catch(() => undefined);
       this.children.delete(child);
@@ -266,8 +292,15 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     throw new Error("Claude Code print sessions cannot be resumed");
   }
 
-  async steer(_session: StepSession, _guidance: string): Promise<"unsupported"> {
-    return "unsupported";
+  async steer(session: StepSession, guidance: string): Promise<"supported"> {
+    const input = this.inputs.get(session.sessionId);
+    if (!input || input.destroyed)
+      throw new Error("Claude Code is no longer taking guidance for this step");
+    this.steered.add(session.sessionId);
+    await new Promise<void>((resolve, reject) =>
+      input.write(userMessage(guidance), (error) => (error ? reject(error) : resolve())),
+    );
+    return "supported";
   }
 
   close(): void {

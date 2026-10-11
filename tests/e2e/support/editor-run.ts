@@ -13,6 +13,7 @@ import {
 } from "../../../src/adapters/contract.js";
 import { ConnectionRegistry } from "../../../src/runtime/connections.js";
 import { startLocalServer } from "../../../src/runtime/server.js";
+import { writeFakeClaude } from "./fake-claude.js";
 import { trustProject } from "../../../src/runtime/trust.js";
 
 export type Harness = {
@@ -24,6 +25,8 @@ export type Harness = {
   setRequestInput: (value: boolean) => void;
   inputReplies: Record<string, { answers: string[] }>[];
   steered: string[];
+  /** Only with `fakeClaude`: make the next Claude Code step wait for guidance. */
+  holdNextClaudeStep: () => Promise<void>;
 };
 
 export const detectedCodex: AgentConnection = {
@@ -50,8 +53,16 @@ export const untilAborted = (signal: AbortSignal) =>
     else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
 
-export const test = base.extend<{ harness: Harness }>({
-  harness: async ({ browserName: _browserName }, use) => {
+export const test = base.extend<{
+  harness: Harness;
+  fakeClaude: boolean;
+  agentSteering: "supported" | "unsupported";
+}>({
+  /** Whether the fixture Codex agent can take guidance; "unsupported" is what Kiro reports. */
+  agentSteering: ["supported", { option: true }],
+  /** Detect a fake `claude` CLI so the real Claude Code adapter runs against it. */
+  fakeClaude: [false, { option: true }],
+  harness: async ({ browserName: _browserName, fakeClaude, agentSteering }, use) => {
     // A disposable parent keeps every Git artifact of the journey inside one removable folder.
     const parentDirectory = await mkdtemp(join(tmpdir(), "code-factory-e2e-"));
     const projectDirectory = join(parentDirectory, "repo");
@@ -89,9 +100,19 @@ export const test = base.extend<{ harness: Harness }>({
     const pendingInput = new Map<string, () => void>();
     const sessions = new Map<string, StepSession>();
     const guidanceBySession = new Map<string, string>();
+    const claude = fakeClaude ? await writeFakeClaude(parentDirectory) : null;
     const registry = new ConnectionRegistry(
       projectDirectory,
       async () => [
+        ...(claude
+          ? [
+              {
+                ...detectedCodex,
+                provider: "claude-code" as const,
+                executable: claude.executable,
+              },
+            ]
+          : []),
         detectedCodex,
         {
           provider: "kiro",
@@ -111,7 +132,7 @@ export const test = base.extend<{ harness: Harness }>({
         provider: "codex" as const,
         capabilities: {
           streaming: "supported",
-          steering: "supported",
+          steering: agentSteering,
           resume: "supported",
           pause: "unsupported",
           waitingInput: "supported",
@@ -127,7 +148,7 @@ export const test = base.extend<{ harness: Harness }>({
             authentication: "authenticated",
             capabilities: {
               streaming: "supported",
-              steering: "supported",
+              steering: agentSteering,
               resume: "supported",
               pause: "unsupported",
               waitingInput: "supported",
@@ -285,6 +306,7 @@ export const test = base.extend<{ harness: Harness }>({
         },
         inputReplies,
         steered,
+        holdNextClaudeStep: async () => claude?.holdNextStep(),
       });
     } finally {
       releaseReviews();

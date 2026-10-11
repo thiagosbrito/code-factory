@@ -218,6 +218,8 @@ describe("adapter mapping", () => {
       });
     const base = [
       "-p",
+      "--input-format",
+      "stream-json",
       "--output-format",
       "stream-json",
       "--verbose",
@@ -231,8 +233,9 @@ describe("adapter mapping", () => {
       "--effort",
       "high",
     ];
-    expect(claude()).toEqual([...base, "--disallowedTools", "Bash", "--", "Review it"]);
-    expect(claude(claudeGrant)).toEqual([...base, "--allowedTools", "Bash", "--", "Review it"]);
+    // The instruction travels as a stdin message, so nothing follows the variadic tool list.
+    expect(claude()).toEqual([...base, "--disallowedTools", "Bash"]);
+    expect(claude(claudeGrant)).toEqual([...base, "--allowedTools", "Bash"]);
     expect(claude(kiroGrant)).toEqual(claude());
     for (const args of [claude(), claude(claudeGrant)]) {
       expect(args).not.toContain("bypassPermissions");
@@ -244,7 +247,7 @@ describe("adapter mapping", () => {
     for (const grant of [undefined, claudeGrant]) {
       const args = claudeCodeArgs({ ...input(grant), readOnly: true });
       expect(args).not.toContain("--allowedTools");
-      expect(args.slice(args.indexOf("--disallowedTools"), args.indexOf("--"))).toEqual([
+      expect(args.slice(args.indexOf("--disallowedTools"))).toEqual([
         "--disallowedTools",
         "Bash",
         "Edit",

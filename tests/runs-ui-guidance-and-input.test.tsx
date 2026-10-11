@@ -13,27 +13,68 @@ import { type AgentConnection } from "../src/adapters/contract.js";
 import { type RunScope } from "../src/ui/features/runs/run-view-model.js";
 import { makeRun } from "./support/runs-ui.js";
 
-it("preserves a scoped guidance draft through disconnect and gates it on verified steering", async () => {
+const guidanceFixture = () => {
   const run = makeRun();
   const attemptId = run.steps.find((step) => step.stepId === "build")?.attempts[0]?.id;
   if (!attemptId) throw new Error("Missing attempt");
   const scope: RunScope = { kind: "step", stepId: "build", attemptId };
-  const connection: AgentConnection = {
+  const connection = (steering: "supported" | "unsupported" | "unknown"): AgentConnection => ({
     provider: "mock",
     executable: null,
     installation: "built-in",
     authentication: "not-required",
     capabilities: {
       streaming: "supported",
-      steering: "unknown",
+      steering,
       resume: "unsupported",
       pause: "unsupported",
       waitingInput: "unknown",
     },
-  };
+  });
+  return { run, attemptId, scope, connection };
+};
+
+it("shows no guidance field when the agent cannot take guidance or no attempt is selected", () => {
+  const { run, scope, connection } = guidanceFixture();
   const onSend = vi.fn<() => Promise<void>>(async () => undefined);
+  for (const steering of ["unsupported", "unknown"] as const) {
+    const view = render(
+      <RunGuidance
+        run={run}
+        scope={scope}
+        connected
+        agents={[connection(steering)]}
+        onSend={onSend}
+      />,
+    );
+    expect(screen.queryByLabelText("Message for selected attempt")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Queue guidance" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Step guidance" })).toBeNull();
+    view.unmount();
+  }
+  // An agent that is not connected at all reports nothing, so there is nothing to show either.
+  render(<RunGuidance run={run} scope={scope} connected agents={[]} onSend={onSend} />);
+  expect(screen.queryByLabelText("Message for selected attempt")).toBeNull();
+  cleanup();
+  // A capable agent still shows nothing until one step attempt is selected.
+  render(
+    <RunGuidance
+      run={run}
+      scope={{ kind: "run" }}
+      connected
+      agents={[connection("supported")]}
+      onSend={onSend}
+    />,
+  );
+  expect(screen.queryByLabelText("Message for selected attempt")).toBeNull();
+});
+
+it("shows the guidance field for a capable agent, keeps the draft through a disconnect and sends it", async () => {
+  const { run, attemptId, scope, connection } = guidanceFixture();
+  const onSend = vi.fn<() => Promise<void>>(async () => undefined);
+  const agents = [connection("supported")];
   const view = render(
-    <RunGuidance run={run} scope={scope} connected={false} agents={[connection]} onSend={onSend} />,
+    <RunGuidance run={run} scope={scope} connected={false} agents={agents} onSend={onSend} />,
   );
   await userEvent.type(
     screen.getByLabelText("Message for selected attempt"),
@@ -43,25 +84,9 @@ it("preserves a scoped guidance draft through disconnect and gates it on verifie
     (screen.getByRole("button", { name: "Queue guidance" }) as HTMLButtonElement).disabled,
   ).toBe(true);
   expect(screen.getByText(/Runtime disconnected/)).toBeTruthy();
-  view.rerender(
-    <RunGuidance run={run} scope={scope} connected agents={[connection]} onSend={onSend} />,
-  );
+  view.rerender(<RunGuidance run={run} scope={scope} connected agents={agents} onSend={onSend} />);
   expect((screen.getByLabelText("Message for selected attempt") as HTMLTextAreaElement).value).toBe(
     "Check the edge case",
-  );
-  expect(
-    (screen.getByRole("button", { name: "Queue guidance" }) as HTMLButtonElement).disabled,
-  ).toBe(true);
-  view.rerender(
-    <RunGuidance
-      run={run}
-      scope={scope}
-      connected
-      agents={[
-        { ...connection, capabilities: { ...connection.capabilities, steering: "supported" } },
-      ]}
-      onSend={onSend}
-    />,
   );
   await userEvent.click(screen.getByRole("button", { name: "Queue guidance" }));
   expect(onSend).toHaveBeenCalledWith({

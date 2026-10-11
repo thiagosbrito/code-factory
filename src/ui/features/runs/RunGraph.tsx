@@ -5,6 +5,7 @@ import { Button } from "@/shared/components/button";
 import { RetryIcon } from "../../shared/icons";
 import { StepFactsLines } from "../../shared/StepFactsLines";
 import { stepFacts } from "../../shared/step-facts";
+import { useCanvasPan } from "./useCanvasPan";
 import { NOT_REACHED, stepDisplayStatus } from "./run-view-model";
 import { StepElapsed } from "./StepElapsed";
 
@@ -68,6 +69,7 @@ export const RunGraph = ({
   const [manualZoom, setManualZoom] = useState<number | null>(null);
   const [canvasWidth, setCanvasWidth] = useState(0);
   const canvasRef = useRef<HTMLElement>(null);
+  const panHandlers = useCanvasPan(canvasRef);
   const layout = positions(run);
   const width = Math.max(700, ...[...layout.values()].map((point) => point.x + nodeWidth + 60));
   const height = Math.max(340, ...[...layout.values()].map((point) => point.y + nodeHeight + 70));
@@ -139,8 +141,9 @@ export const RunGraph = ({
         )}
         <section
           ref={canvasRef}
-          className="run-graph-canvas overflow-auto rounded-lg border"
+          className="run-graph-canvas cursor-grab overflow-auto rounded-lg border active:cursor-grabbing"
           aria-label="Step graph"
+          {...panHandlers}
         >
           {/* An empty band above the graph keeps the floating controls off the nodes. */}
           <div
