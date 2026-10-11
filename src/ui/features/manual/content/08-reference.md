@@ -24,7 +24,7 @@ An agent has three separate facts, and Code Factory keeps them apart:
 
 Every agent also has **Agent default** as a model. It leaves the choice to the agent itself, and "no effort" is the slider's first stop.
 
-Each agent runs a step as follows. Kiro uses its v2 stream; Claude Code runs one `claude -p` stream-json invocation per step; Codex runs a turn through its app-server. Guidance and recovery are not available for Kiro or Claude Code; the **Guidance** and **Recovery** tiles in setup show **Unsupported** for them. For Codex they show what the connected version reports, which may be **Unknown for this connection**.
+Each agent runs a step as follows. Kiro uses its v2 stream; Claude Code runs one `claude -p` stream-json invocation per step; Codex runs a turn through its app-server. Guidance is available for Claude Code (it reaches the running step) but not for Kiro, and recovery is available for neither; the **Guidance** and **Recovery** tiles in setup show **Unsupported** for what is not available. For Codex they show what the connected version reports, which may be **Unknown for this connection**.
 
 ### Where choices are validated
 

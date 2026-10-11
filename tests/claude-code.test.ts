@@ -43,7 +43,13 @@ const signedIn = {
 /** A fake `claude` that answers the probes and prints `events` for a print-mode step. */
 const fixture = async (
   events: unknown[],
-  options: { exitCode?: number; auth?: unknown; authExit?: number; catalog?: "fail" } = {},
+  options: {
+    exitCode?: number;
+    auth?: unknown;
+    authExit?: number;
+    catalog?: "fail";
+    steer?: boolean;
+  } = {},
 ) => {
   const directory = await mkdtemp(join(tmpdir(), "code-factory-claude-"));
   directories.push(directory);
@@ -56,16 +62,34 @@ const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('2.1.295 (Claude Code)'); process.exit(0); }
 if (args.join(' ') === 'auth status --json') { console.log(${JSON.stringify(JSON.stringify(options.auth ?? signedIn))}); process.exit(${options.authExit ?? 0}); }
 if (args[0] !== '-p') process.exit(3);
-if (args.includes('--input-format')) {
+if (args.includes('--permission-mode')) {
+  // A step: the instruction (and later guidance) arrive as stream-json user messages on stdin.
+  const messages = [];
+  const say = (event) => console.log(typeof event === 'string' ? event : JSON.stringify(event));
+  const record = () => require('fs').writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify({ args, messages }));
+  require('readline').createInterface({ input: process.stdin }).on('line', (line) => {
+    messages.push(JSON.parse(line).message.content);
+    record();
+    if (${JSON.stringify(options.steer === true)}) {
+      if (messages.length === 1) say(${JSON.stringify(events[0] ?? null)});
+      else {
+        say({ type: 'assistant', session_id: 'session-1', message: { content: [{ type: 'text', text: 'Got: ' + messages[1] }] } });
+        say(${JSON.stringify(events[1] ?? null)});
+        process.exit(0);
+      }
+      return;
+    }
+    for (const event of ${JSON.stringify(events)}) say(event);
+    process.exit(${options.exitCode ?? 0});
+  });
+} else if (args.includes('--input-format')) {
   require('readline').createInterface({ input: process.stdin }).on('line', (line) => {
     const request = JSON.parse(line);
     if (${JSON.stringify(options.catalog === "fail")}) process.exit(1);
     console.log(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: request.request_id, response: { account: { email: 'person@example.com' }, models: ${JSON.stringify(catalog)} } } }));
   });
 } else {
-require('fs').writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(args));
-for (const event of ${JSON.stringify(events)}) console.log(typeof event === 'string' ? event : JSON.stringify(event));
-process.exit(${options.exitCode ?? 0});
+  process.exit(3);
 }
 `,
   );
@@ -123,7 +147,7 @@ describe("Claude Code connection", () => {
         identity: "Claude Code",
         version: "2.1.295",
         protocol: "claude-code-stream-json",
-        capabilities: { streaming: "supported", steering: "unsupported", resume: "unsupported" },
+        capabilities: { streaming: "supported", steering: "supported", resume: "unsupported" },
         models: [
           {
             id: "claude-haiku-4-5-20251001",
@@ -224,9 +248,55 @@ describe("Claude Code stream adapter", () => {
       { title: "Bash", state: "failed" },
     ]);
     expect(events.at(-1)).toMatchObject({ outcome: "succeeded", output: "pass\nAll checks hold." });
-    const argv = JSON.parse(await readFile(argvFile, "utf8")) as string[];
-    expect(argv).toEqual(expect.arrayContaining(["--model", "sonnet", "--effort", "low"]));
-    expect(argv.slice(-2)).toEqual(["--", "Write the change"]);
+    const sent = JSON.parse(await readFile(argvFile, "utf8")) as {
+      args: string[];
+      messages: string[];
+    };
+    expect(sent.args).toEqual(
+      expect.arrayContaining([
+        "--model",
+        "sonnet",
+        "--effort",
+        "low",
+        "--input-format",
+        "stream-json",
+      ]),
+    );
+    // The instruction travels as a stdin message, never on the command line.
+    expect(sent.args).not.toContain("Write the change");
+    expect(sent.messages).toEqual(["Write the change"]);
+  });
+
+  it("declares steering supported and delivers guidance into the running step", async () => {
+    const { directory, executable, argvFile } = await fixture([init, result("pass\nGuided.")], {
+      steer: true,
+    });
+    const adapter = new ClaudeCodeAdapter(executable, "2.1.295");
+    expect(adapter.capabilities.steering).toBe("supported");
+    const events: AdapterEvent[] = [];
+    let steered: string | undefined;
+    for await (const event of adapter.execute(input(directory), new AbortController().signal)) {
+      events.push(event);
+      if (event.type === "started")
+        steered = await adapter.steer(event, "Check the accessible name.");
+    }
+    expect(steered).toBe("supported");
+    expect(events.filter((event) => event.type === "message")).toMatchObject([
+      { text: "Got: Check the accessible name." },
+    ]);
+    expect(events.at(-1)).toMatchObject({ outcome: "succeeded", output: "pass\nGuided." });
+    const sent = JSON.parse(await readFile(argvFile, "utf8")) as { messages: string[] };
+    expect(sent.messages).toEqual(["Write the change", "Check the accessible name."]);
+  });
+
+  it("refuses guidance for a step that has finished", async () => {
+    const { directory, executable } = await fixture([init, result("done")]);
+    const adapter = new ClaudeCodeAdapter(executable, "2.1.295");
+    let session: Extract<AdapterEvent, { type: "started" }> | undefined;
+    for await (const event of adapter.execute(input(directory), new AbortController().signal))
+      if (event.type === "started") session = event;
+    if (!session) throw new Error("the step never started");
+    await expect(adapter.steer(session, "too late")).rejects.toThrow("no longer taking guidance");
   });
 
   it("completes a failed result as a failed step even when the CLI exits nonzero", async () => {
