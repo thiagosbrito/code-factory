@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import { runProgress, test } from "./support/editor-run.js";
+import { cancelRunAndSettle, runProgress, test } from "./support/editor-run.js";
 
 // The real Claude Code adapter runs against a fake `claude` CLI, so what the browser shows is what
 // a Claude Code user gets: a connection that declares steering, and guidance that reaches the step.
@@ -53,5 +53,5 @@ test("guidance can be queued for a running Claude Code step", async ({ page, har
   await runProgress(
     page.getByText(/Guidance received: Check the accessible name/).first(),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Cancel run" }).click();
+  await cancelRunAndSettle(page, harness.origin);
 });
