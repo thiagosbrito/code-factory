@@ -17,6 +17,46 @@ Do not hardcode provider/model branding into portable loop semantics. Detecting 
 
 Do not present mocks as connected providers. Keep unsupported controls explicit. Agent secrets remain in agent-owned authentication mechanisms; do not copy them into factory configuration.
 
+## Cross-platform CI
+
+`.github/workflows/ci.yml` runs the same suites in separate GitHub-hosted environments on
+Ubuntu 24.04, Windows Server 2025 and macOS 15. The main jobs are **Running tests on Linux**,
+**Running tests on Windows** and **Running tests on macOS**. Each OS also runs the minimum
+Node 22.12 suite, fixture-backed Chrome journeys and packed npm installation smoke test.
+Matrices do not cancel other OS jobs when one fails. Browser failure reports, screenshots
+and traces are uploaded with the OS in the artifact name. The workflow can also be started
+manually from Actions. The tarball file-list audit runs once on Linux.
+
+Keep shared tests in the existing Vitest and Playwright suites; do not copy them per OS.
+For a genuinely OS-specific behavior, use an explicit condition on the test or suite:
+
+```ts
+// Native Windows file-sharing semantics cannot be exercised on POSIX.
+it.runIf(process.platform === "win32")("retries a Windows file lock", async () => {
+  // Exercise the native filesystem with a separate process holding the lock.
+});
+
+// NTFS does not expose POSIX executable permission bits.
+it.skipIf(process.platform === "win32")("detects executable-bit changes", async () => {
+  // Exercise chmod and candidate identity on Linux and macOS.
+});
+```
+
+For Playwright, call `test.skip(process.platform !== "win32", "Windows-only behavior")`
+inside an OS-specific test. State the reason next to every condition. Prefer portable Node
+fixtures for shared behavior; a Unix-only fixture is a harness limitation, not a reason to
+skip a product capability that should work on Windows. Do not hide platform failures with
+`continue-on-error` or blanket suite exclusions.
+
+A regression is verified when the test fails before the fix and passes afterward on its
+target OS. Local macOS success does not establish Windows/Linux success: inspect those CI
+jobs before claiming cross-platform verification. Windows Server fixtures do not establish
+Windows 11 desktop behavior or an authenticated native provider connection. Native proofs
+remain separate, opt-in checks requiring the corresponding installed, authenticated CLI.
+
+Job names now include the OS. If branch protection requires the former `Check` status,
+update required checks to the new matrix job names in GitHub repository settings.
+
 ## Structure and size limits
 
 - Layers depend inward only. `src/domain` never imports `ui`, `runtime`, `adapters` or `translators`; `adapters`, `translators` and `runtime` never import `ui`; the UI never imports `runtime` or `translators` (except the shared `translators/contract.js`). A UI feature (`features/runs`, `features/loops`, `features/setup`) imports `shared/` and the domain, not another feature or the app shell; `shared/` imports no feature. Oxlint rejects violations (`no-restricted-imports` in `.oxlintrc.json`).

@@ -11,10 +11,25 @@ const execute = promisify(execFile);
 const scratch = await mkdtemp(join(tmpdir(), "code-factory-package-"));
 const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+// Windows npm/pnpm shims need cmd.exe. Quote generated paths (which can contain spaces)
+// and refuse shell expansion characters; none of these arguments are user commands.
+const executePackage = (command, args, options) => {
+  if (process.platform !== "win32") return execute(command, args, options);
+  const quoted = [command, ...args].map((value) => {
+    assert(!/["%\r\n]/.test(value), "Package smoke arguments must not contain shell expansion");
+    return `"${value}"`;
+  });
+  return execute("cmd.exe", ["/d", "/v:off", "/s", "/c", `"${quoted.join(" ")}"`], {
+    ...options,
+    windowsVerbatimArguments: true,
+  });
+};
 let runtime;
 
 try {
-  await execute(packageManager, ["pack", "--pack-destination", scratch], { maxBuffer: 2_000_000 });
+  await executePackage(packageManager, ["pack", "--pack-destination", scratch], {
+    maxBuffer: 2_000_000,
+  });
   const tarball = (await readdir(scratch)).find((name) => name.endsWith(".tgz"));
   assert(tarball, "Pack must produce a tarball");
   const consumer = join(scratch, "consumer");
@@ -26,7 +41,7 @@ try {
     join(consumer, "package.json"),
     JSON.stringify({ private: true, type: "module" }),
   );
-  await execute(
+  await executePackage(
     npm,
     [
       "install",
@@ -165,10 +180,13 @@ try {
   );
   const exited = once(runtime, "exit");
   runtime.kill("SIGTERM");
-  assert.equal((await exited)[0], 0);
+  const [exitCode, signal] = await exited;
+  // Windows kill() force-terminates the process instead of delivering a POSIX signal.
+  if (process.platform === "win32") assert.equal(signal, "SIGTERM");
+  else assert.equal(exitCode, 0);
   runtime = undefined;
   console.log(
-    "Package smoke passed: npm production install, public API, --version, busy-port message, blank init, preservation, duplicate-init rejection, packaged UI/assets (with the lazy Graph chunk)/API with security headers behind the session token, and clean shutdown.",
+    "Package smoke passed: npm production install, public API, --version, busy-port message, blank init, preservation, duplicate-init rejection, packaged UI/assets (with the lazy Graph chunk)/API with security headers behind the session token, and process termination (graceful on POSIX).",
   );
 } finally {
   if (runtime && runtime.exitCode === null && runtime.signalCode === null) {
