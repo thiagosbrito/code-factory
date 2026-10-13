@@ -11,20 +11,13 @@ const execute = promisify(execFile);
 const scratch = await mkdtemp(join(tmpdir(), "code-factory-package-"));
 const packageManager = process.env.npm_execpath;
 assert(packageManager, "Run the package smoke through pnpm test:package");
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-// Windows npm/pnpm shims need cmd.exe. Quote generated paths (which can contain spaces)
-// and refuse shell expansion characters; none of these arguments are user commands.
-const executePackage = (command, args, options) => {
-  if (process.platform !== "win32") return execute(command, args, options);
-  const quoted = [command, ...args].map((value) => {
-    assert(!/["%\r\n]/.test(value), "Package smoke arguments must not contain shell expansion");
-    return `"${value}"`;
-  });
-  return execute("cmd.exe", ["/d", "/v:off", "/s", "/c", `"${quoted.join(" ")}"`], {
-    ...options,
-    windowsVerbatimArguments: true,
-  });
-};
+// Use Node's bundled npm entrypoint on Windows: PATH command shims can resolve
+// relative to the consumer cwd instead of their installation directory.
+const npmCommand = process.platform === "win32" ? process.execPath : "npm";
+const npmArgs =
+  process.platform === "win32"
+    ? [join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
+    : [];
 let runtime;
 
 try {
@@ -51,9 +44,10 @@ try {
     join(consumer, "package.json"),
     JSON.stringify({ private: true, type: "module" }),
   );
-  await executePackage(
-    npm,
+  await execute(
+    npmCommand,
     [
+      ...npmArgs,
       "install",
       "--omit=dev",
       "--ignore-scripts",

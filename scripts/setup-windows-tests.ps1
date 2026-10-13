@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 $temporary = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
 $launcher = Join-Path $temporary 'code-factory-node-fixture.exe'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-& $compiler /nologo /target:exe /out:$launcher scripts/windows-node-fixture.cs
+$source = Join-Path $PSScriptRoot 'windows-node-fixture.cs'
+& $compiler /nologo /target:exe /out:$launcher $source
 if ($LASTEXITCODE -ne 0) { throw 'Windows fixture compilation failed' }
 $env:CODE_FACTORY_WINDOWS_FIXTURE = $launcher
 if ($env:GITHUB_ENV) {
