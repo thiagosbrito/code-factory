@@ -22,6 +22,7 @@ export const RunDetail = ({
   streamConnected,
   executing,
   interrupted = false,
+  executionError,
   onExecute,
   onCancel,
   onRetry,
@@ -39,11 +40,12 @@ export const RunDetail = ({
   // Computed once per render and shared by the status label and the banner.
   const connectionStep = trackerConnectionStep(run);
   // At most one banner: the tracker-connection banner already explains a failed issue lookup.
-  const stopCause = connectionStep ? undefined : runStopCause(run);
+  const stopCause = connectionStep || executionError ? undefined : runStopCause(run);
   const stopped = useStoppedRetry(run, stopCause, onRetry);
   const canCancel =
     connected &&
-    (executing || ["pending", "running", "waiting-input", "paused"].includes(run.status));
+    (executing ||
+      ["pending", "running", "waiting-input", "paused", "unavailable"].includes(run.status));
   // Nothing resumes on its own after a restart; the user resumes an interrupted run explicitly.
   const resumable = interrupted && ["running", "waiting-input", "paused"].includes(run.status);
   return (
@@ -61,6 +63,19 @@ export const RunDetail = ({
         onAccept={onAccept}
         onBack={onBack}
       />
+      {(interrupted || executionError) && (
+        <div role="alert" className="rounded-md border border-amber-400 p-3 text-sm">
+          <p>Execution is no longer active. The saved status may not include the latest result.</p>
+          {executionError && (
+            <p className="mt-1 break-words">Execution stopped: {executionError}</p>
+          )}
+          <p className="mt-1">
+            Inspect activity before resuming. Use Cancel run to end scheduling and release this
+            project without provider recovery. An interrupted attempt keeps an unknown native
+            outcome; stop any remaining agent process before starting another run.
+          </p>
+        </div>
+      )}
       <TrackerConnectionNotice
         run={run}
         step={connectionStep}

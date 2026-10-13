@@ -157,6 +157,7 @@ export const runAgentStep = async (ctx: RunContext, frame: StepFrame): Promise<S
     }
     if (!completed) throw new Error("Adapter stream ended without a verified completion.");
   } catch (error) {
+    if (ctx.writeFailed()) throw error;
     if (error instanceof CancellationUnconfirmedError) {
       cancellationUnconfirmed = true;
       result = { status: "unavailable", summary: error.message };

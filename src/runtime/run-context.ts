@@ -23,6 +23,7 @@ export type RunContext = {
   readonly setRecord: (next: RunRecord) => void;
   /** The one FIFO chain for this run: every write is serialized, so event sequences stay contiguous. */
   readonly commit: Commit;
+  readonly writeFailed: () => boolean;
 };
 
 export type RunWorkspace = {
@@ -59,14 +60,23 @@ export const createRunContext = (
   initial: RunRecord,
   signal: AbortSignal,
   resolveAdapter: Resolver,
+  onWriteFailure: (error: unknown) => void = () => undefined,
 ): RunContext => {
   let record: RunRecord = initial;
   let pendingCommit: Promise<void> = Promise.resolve();
+  let writeFailed = false;
   const commit: Commit = async (change) => {
     const work = pendingCommit.then(async () => {
-      record = await mutateRun(project, runId, change);
+      try {
+        record = await mutateRun(project, runId, change);
+      } catch (error) {
+        writeFailed = true;
+        onWriteFailure(error);
+        throw error;
+      }
     });
-    pendingCommit = work;
+    // Keep this caller's rejection, but let a later interruption/recovery write try again.
+    pendingCommit = work.catch(() => undefined);
     await work;
     return record;
   };
@@ -81,5 +91,6 @@ export const createRunContext = (
       record = next;
     },
     commit,
+    writeFailed: () => writeFailed,
   };
 };

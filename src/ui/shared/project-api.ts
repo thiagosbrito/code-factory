@@ -67,6 +67,7 @@ export const runResponseSchema = z.object({
   run: runRecordSchema,
   /** Unfinished, but this runtime is not executing it: offer Resume. */
   interrupted: z.boolean().optional(),
+  executionError: z.string().optional(),
 });
 export const evidenceResponseSchema = z.object({ summary: evidenceSummarySchema });
 export const acceptedEvidenceResponseSchema = z.object({

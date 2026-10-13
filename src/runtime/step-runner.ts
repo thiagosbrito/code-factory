@@ -139,6 +139,7 @@ export const runStep = async (
     if (isActiveStatus(ctx.record().steps.find((step) => step.stepId === stepId)?.status ?? ""))
       await commit((current) =>
         initial.steps.some((item) => item.stepId === stepId && isActiveStatus(item.status)) ||
+        ctx.writeFailed() ||
         (definition.kind !== "check" && !signal.aborted)
           ? interruptStep(
               current,

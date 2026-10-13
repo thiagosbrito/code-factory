@@ -11,13 +11,17 @@ export const useRunPolling = (
   setConnected: (connected: boolean) => void,
 ) => {
   // The runtime's own answer: unfinished, but not being executed (for example after a restart).
-  const [interrupted, setInterrupted] = useState<{ runId: string; value: boolean } | null>(null);
+  const [interrupted, setInterrupted] = useState<{
+    runId: string;
+    value: boolean;
+    error?: string | undefined;
+  } | null>(null);
   useEffect(() => {
     if (!pollingRunId || demo) return;
     const refresh = () => {
       void api(`/api/runs/${pollingRunId}`, runResponseSchema.parse)
-        .then(({ run, interrupted: stopped }) => {
-          setInterrupted({ runId: pollingRunId, value: Boolean(stopped) });
+        .then(({ run, interrupted: stopped, executionError }) => {
+          setInterrupted({ runId: pollingRunId, value: Boolean(stopped), error: executionError });
           setRuns((previous) => {
             const existing = previous.find((item) => item.snapshot.id === pollingRunId);
             return existing

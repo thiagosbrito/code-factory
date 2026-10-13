@@ -83,6 +83,7 @@ export const useFactoryRuns = (
     trustPrompt: permissions.trustPrompt,
     answerTrust: permissions.answerTrust,
     selectedRunInterrupted: interrupted?.runId === selectedRunId && interrupted.value,
+    selectedRunExecutionError: interrupted?.runId === selectedRunId ? interrupted.error : undefined,
     toolGrantReturnFocus: permissions.toolGrantReturnFocus,
     executingRunId: commands.executingRunId,
     connected: history.connected,
