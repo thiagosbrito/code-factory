@@ -1,6 +1,6 @@
-import { writeNodeExecutable } from "./support/node-executable.js";
+import { removeNodeFixtureDirectory, writeNodeExecutable } from "./support/node-executable.js";
 import { describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodexAdapter, createCodexAdapter } from "../src/adapters/codex.js";
@@ -113,7 +113,7 @@ describe("Codex adapter tool grant wiring", () => {
       });
     } finally {
       for (const adapter of adapters) adapter.close();
-      await rm(directory, { recursive: true, force: true });
+      await removeNodeFixtureDirectory(directory);
     }
   });
 });

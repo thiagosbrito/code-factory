@@ -1,5 +1,5 @@
-import { writeNodeExecutable } from "./support/node-executable.js";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { removeNodeFixtureDirectory, writeNodeExecutable } from "./support/node-executable.js";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,9 +16,7 @@ import type {
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 
 const directories: string[] = [];
-afterEach(async () =>
-  Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))),
-);
+afterEach(async () => Promise.all(directories.splice(0).map(removeNodeFixtureDirectory)));
 
 const catalog = [
   { value: "default", displayName: "Default (recommended)", supportsEffort: true },

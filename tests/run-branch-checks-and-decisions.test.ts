@@ -97,6 +97,7 @@ describe("in-project run branch", () => {
     expect(git(root, "status", "--porcelain", "--", ".", ":(exclude).code-factory")).toBe("");
   });
 
+  // Multiple real Git runs/API transitions need a bounded integration budget on hosted VMs.
   it("reads a decision from the first line and records why an undeclared one fails", async () => {
     const decide = {
       id: "adjudicate",
@@ -161,5 +162,5 @@ describe("in-project run branch", () => {
     expect(reason?.kind === "event" && reason.detail).toBe(
       "Undeclared decision outcome: Looks good to me",
     );
-  });
+  }, 30_000);
 });

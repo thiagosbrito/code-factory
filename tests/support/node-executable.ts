@@ -1,4 +1,4 @@
-import { chmod, copyFile, writeFile } from "node:fs/promises";
+import { chmod, copyFile, rm, writeFile } from "node:fs/promises";
 
 /** Real native processes on every OS; Windows uses a test-only launcher with inherited stdio. */
 export const writeNodeExecutable = async (path: string, script: string): Promise<void> => {
@@ -16,3 +16,7 @@ export const writeNodeExecutable = async (path: string, script: string): Promise
   await copyFile(launcher, path);
   await copyFile(launcher, `${path}.exe`);
 };
+
+/** Windows can retain executable handles briefly after the fixture has been stopped. */
+export const removeNodeFixtureDirectory = (path: string): Promise<void> =>
+  rm(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

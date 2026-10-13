@@ -50,6 +50,7 @@ describe("promotion and removal through the local API", () => {
         : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
     });
 
+  // Multiple real Git runs/API transitions need a bounded integration budget on hosted VMs.
   it("refuses promotion before acceptance and creates the ticket branch with the same commits after it", async () => {
     const { root } = await repository();
     const run = await createProjectRun(root, undefined, {
@@ -93,7 +94,7 @@ describe("promotion and removal through the local API", () => {
       expect(git(root, "symbolic-ref", "HEAD")).toBe(`refs/heads/${branch}`);
       expect((await post(`${base}/promote`, { branch: "other" })).status).toBe(409);
     });
-  });
+  }, 30_000);
 
   it("labels a description-only run's commits with the branch the user named", async () => {
     const { root } = await repository();
