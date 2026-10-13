@@ -40,12 +40,14 @@ const translate = <T>(run: () => T, source?: string): T => {
   }
 };
 export const nativeFormats = () =>
-  listTranslators().map(({ format, provider, label, export: exporter }) => ({
-    format,
-    provider,
-    label,
-    directions: exporter ? (["import", "export"] as const) : (["import"] as const),
-  }));
+  (process.platform === "win32" ? [] : listTranslators()).map(
+    ({ format, provider, label, export: exporter }) => ({
+      format,
+      provider,
+      label,
+      directions: exporter ? (["import", "export"] as const) : (["import"] as const),
+    }),
+  );
 
 export const nativeCandidates = async (project: string, format: string) => {
   const translator = translatorFor(format);

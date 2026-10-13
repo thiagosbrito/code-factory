@@ -48,6 +48,7 @@ export const NativeTranslation = ({
   disabled: boolean;
 }) => {
   const [direction, setDirection] = useState<Direction>("import");
+  const [formatsReady, setFormatsReady] = useState(false);
   const [formats, setFormats] = useState<z.infer<typeof formatsSchema>["formats"]>([]);
   const [format, setFormat] = useState("");
   const [name, setName] = useState(loop.id);
@@ -60,6 +61,7 @@ export const NativeTranslation = ({
     void api("/api/native/formats", formatsSchema.parse)
       .then((result) => {
         setFormats(result.formats);
+        setFormatsReady(true);
         setFormat((current) => current || result.formats[0]?.format || "");
       })
       .catch((error: unknown) =>
@@ -128,6 +130,12 @@ export const NativeTranslation = ({
       setWorking(false);
     }
   };
+  if (formatsReady && formats.length === 0)
+    return (
+      <section className="border-b px-4 py-3" aria-label="Native configuration translation">
+        <p>Native configuration translation is unavailable on this system.</p>
+      </section>
+    );
   return (
     <section
       className="border-b bg-slate-50 px-4 py-3"

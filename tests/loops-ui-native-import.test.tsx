@@ -207,3 +207,24 @@ it("marks Kiro workflows import-only and summarizes a multi-step import", async 
     await screen.findByText("Import requires an empty draft to preserve existing steps."),
   ).toBeTruthy();
 });
+
+it("shows unavailable native translation without requesting candidates when no formats exist", async () => {
+  const requests: string[] = [];
+  vi.stubGlobal("fetch", async (path: string) => {
+    requests.push(path);
+    if (path === "/api/native/formats") return Response.json({ formats: [] });
+    throw new Error(`Unexpected ${path}`);
+  });
+  render(
+    <NativeTranslation
+      loop={createLoopDraft("blank", "Blank")}
+      apply={() => true}
+      disabled={false}
+    />,
+  );
+  expect(
+    await screen.findByText("Native configuration translation is unavailable on this system."),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+  expect(requests).toEqual(["/api/native/formats"]);
+});

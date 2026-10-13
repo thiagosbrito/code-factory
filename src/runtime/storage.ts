@@ -1,15 +1,6 @@
+import { replaceStorageFile } from "./storage-replace.js";
 import { randomUUID } from "node:crypto";
-import {
-  link,
-  lstat,
-  mkdir,
-  readFile,
-  readdir,
-  realpath,
-  rename,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { link, lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ZodError } from "zod";
 import { parseLoop, type LoopDefinition } from "../domain/loop.js";
@@ -67,7 +58,7 @@ const atomicWrite = async (path: string, value: unknown): Promise<void> => {
   const temp = `${path}.${randomUUID()}.tmp`;
   await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
   try {
-    await rename(temp, path);
+    await replaceStorageFile(temp, path);
   } finally {
     await rm(temp, { force: true });
   }

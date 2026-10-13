@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { nativeCandidates } from "../src/runtime/native-translation.js";
+import { nativeCandidates, nativeFormats } from "../src/runtime/native-translation.js";
 import { startLocalServer } from "../src/runtime/server.js";
 
 // The secure native-file helper requires POSIX openat operations; fail explicitly on Windows.
@@ -19,6 +19,9 @@ it.runIf(process.platform === "win32")(
       port: 0,
     });
     try {
+      expect(nativeFormats()).toEqual([]);
+      const formats = await fetch(`${url}/api/native/formats`);
+      expect(await formats.json()).toEqual({ formats: [] });
       await expect(nativeCandidates(directory, "cursor-rule-mdc")).rejects.toMatchObject({
         status: 501,
       });
