@@ -8,7 +8,6 @@ import { createRunRecord, createRunSnapshot, type RunRecord } from "../src/domai
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 import { initializeProject } from "../src/runtime/project.js";
 import { startLocalServer } from "../src/runtime/server.js";
-import { nativeFormats } from "../src/runtime/native-translation.js";
 import { createRun } from "../src/runtime/storage.js";
 import { trustDirectory } from "../src/runtime/trust.js";
 import { exists, roots, servers, temporary } from "./support/trust.js";
@@ -336,7 +335,8 @@ describe("project trust", () => {
   });
 
   it("imports nothing from the project when Python lists native files", async () => {
-    const format = nativeFormats()[0]?.format ?? "";
+    // Probe a known raw endpoint even when the available-format inventory is empty.
+    const format = "cursor-rule-mdc";
     // A module and a package that shadow the helper's `json` import, as `python3 -c` would load
     // from the working directory; the runtime's working directory is the project under the CLI.
     for (const plant of [

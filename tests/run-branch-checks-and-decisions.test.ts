@@ -25,7 +25,8 @@ afterEach(async () => {
   await Promise.all(parents.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-describe("in-project run branch", () => {
+// These tests execute real Git processes and multiple persisted/API transitions.
+describe("in-project run branch", { timeout: 30_000 }, () => {
   it("gives checks the run's changed files and reviewers the same-candidate validation evidence", async () => {
     const { root } = await repository();
     const validate = {

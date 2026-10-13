@@ -40,7 +40,8 @@ const userState = (root: string) => ({
   ),
 });
 
-describe("in-project run branch", () => {
+// These tests execute real Git processes and multiple persisted/API transitions.
+describe("in-project run branch", { timeout: 30_000 }, () => {
   it("creates the run branch in the project, switches the checkout to it and runs every step there", async () => {
     const { root } = await repository();
     const run = await createProjectRun(root);
