@@ -1,4 +1,5 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { writeNodeExecutable } from "./support/node-executable.js";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -168,8 +169,8 @@ describe("connection registry and local handoff", () => {
     const directory = await temporaryProject();
     await trustProject(directory);
     const executable = join(directory, "agent");
-    await writeFile(executable, "#!/bin/sh\nexit 0\n");
-    await chmod(executable, 0o755);
+    await writeNodeExecutable(executable, "#!/usr/bin/env node\nprocess.exit(0);\n");
+
     let launches = 0;
     let closed = 0;
     const registry = new ConnectionRegistry(
@@ -239,8 +240,8 @@ describe("connection registry and local handoff", () => {
     const directory = await temporaryProject();
     await trustProject(directory);
     const executable = join(directory, "codex-compatible");
-    await writeFile(executable, "#!/bin/sh\nexit 0\n");
-    await chmod(executable, 0o755);
+    await writeNodeExecutable(executable, "#!/usr/bin/env node\nprocess.exit(0);\n");
+
     const registry = new ConnectionRegistry(
       directory,
       async () => detected("/bin/codex"),

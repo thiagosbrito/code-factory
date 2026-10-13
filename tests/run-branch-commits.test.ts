@@ -80,14 +80,18 @@ describe("in-project run branch", () => {
     expect((await readFile(index)).equals(before)).toBe(false);
   });
 
-  it("treats an executable-bit change as a new candidate", async () => {
-    const { root } = await repository();
-    const run = await createProjectRun(root);
-    const worktree = worktreeOf(root, run);
-    const before = await fileDigest(worktree, "git");
-    await chmod(join(worktree, "file.txt"), 0o755);
-    expect(await fileDigest(worktree, "git")).not.toBe(before);
-  });
+  // NTFS does not expose POSIX executable permission bits.
+  it.skipIf(process.platform === "win32")(
+    "treats an executable-bit change as a new candidate",
+    async () => {
+      const { root } = await repository();
+      const run = await createProjectRun(root);
+      const worktree = worktreeOf(root, run);
+      const before = await fileDigest(worktree, "git");
+      await chmod(join(worktree, "file.txt"), 0o755);
+      expect(await fileDigest(worktree, "git")).not.toBe(before);
+    },
+  );
 
   it("commits a step while the UI polls the workspace and inspection endpoints", async () => {
     const { root } = await repository();

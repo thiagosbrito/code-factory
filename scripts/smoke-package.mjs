@@ -9,7 +9,8 @@ import { once } from "node:events";
 
 const execute = promisify(execFile);
 const scratch = await mkdtemp(join(tmpdir(), "code-factory-package-"));
-const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const packageManager = process.env.npm_execpath;
+assert(packageManager, "Run the package smoke through pnpm test:package");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 // Windows npm/pnpm shims need cmd.exe. Quote generated paths (which can contain spaces)
 // and refuse shell expansion characters; none of these arguments are user commands.
@@ -27,9 +28,18 @@ const executePackage = (command, args, options) => {
 let runtime;
 
 try {
-  await executePackage(packageManager, ["pack", "--pack-destination", scratch], {
-    maxBuffer: 2_000_000,
-  });
+  await execute(
+    /\.[cm]?js$/.test(packageManager) ? process.execPath : packageManager,
+    [
+      ...(/\.[cm]?js$/.test(packageManager) ? [packageManager] : []),
+      "pack",
+      "--pack-destination",
+      scratch,
+    ],
+    {
+      maxBuffer: 2_000_000,
+    },
+  );
   const tarball = (await readdir(scratch)).find((name) => name.endsWith(".tgz"));
   assert(tarball, "Pack must produce a tarball");
   const consumer = join(scratch, "consumer");

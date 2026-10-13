@@ -42,8 +42,7 @@ describe("in-project run branch", () => {
       kind: "check",
       stage: "validation",
       role: "checker",
-      instruction:
-        'test "$CODE_FACTORY_CHANGED_FILES" = "feature.txt" && test -n "$CODE_FACTORY_BASE_REVISION"',
+      instruction: `node -e "if(process.env.CODE_FACTORY_CHANGED_FILES !== 'feature.txt' || !process.env.CODE_FACTORY_BASE_REVISION) process.exit(1)"`,
     };
     const run = await createProjectRun(
       root,

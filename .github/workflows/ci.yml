@@ -45,6 +45,10 @@ jobs:
           cache: pnpm
       # Runtime tests create commits in disposable repositories.
       - run: git config --global user.name "CI" && git config --global user.email "ci@example.invalid"
+      - name: Prepare Windows executable fixtures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/setup-windows-tests.ps1
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
 
@@ -75,6 +79,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: git config --global user.name "CI" && git config --global user.email "ci@example.invalid"
+      - name: Prepare Windows executable fixtures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/setup-windows-tests.ps1
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - uses: actions/setup-node@v6
@@ -109,6 +117,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: git config --global user.name "CI" && git config --global user.email "ci@example.invalid"
+      - name: Prepare Windows executable fixtures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/setup-windows-tests.ps1
       - run: pnpm install --frozen-lockfile
       # The config uses the Chrome channel; install it on every runner explicitly.
       - run: pnpm exec playwright install --with-deps chrome

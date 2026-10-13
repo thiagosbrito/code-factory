@@ -76,7 +76,7 @@ describe("project initialization", () => {
     await symlink(other, join(directory, ".code-factory"));
     await expect(initializeProject(directory)).rejects.toThrow(/regular directory/);
   });
-  it("keeps other factory and agent files when setup is saved and reports write failures", async () => {
+  it("keeps other factory and agent files when setup is saved", async () => {
     const directory = await temporaryProject();
     await mkdir(join(directory, ".kiro"));
     await writeFile(join(directory, ".kiro", "agent.txt"), "private instructions");
@@ -90,6 +90,12 @@ describe("project initialization", () => {
     expect(await readFile(join(directory, ".code-factory", "loops", "keep.txt"), "utf8")).toBe(
       "existing loop",
     );
+  });
+
+  // Windows directory ACLs cannot be made read-only with POSIX chmod.
+  it.skipIf(process.platform === "win32")("reports POSIX directory write failures", async () => {
+    const directory = await temporaryProject();
+    await saveProjectSetup(directory, { name: "Factory", revision: null });
     const folder = join(directory, ".code-factory");
     const revision = await projectRevision(directory);
     await chmod(folder, 0o500);

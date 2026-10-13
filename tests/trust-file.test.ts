@@ -40,13 +40,21 @@ describe("trust file", () => {
 
   it("ignores relative CODE_FACTORY_HOME and XDG_CONFIG_HOME, as the XDG specification says", () => {
     const xdg = join(tmpdir(), "xdg");
-    let restore = environment({ CODE_FACTORY_HOME: "relative/home", XDG_CONFIG_HOME: xdg });
+    let restore = environment({
+      CODE_FACTORY_HOME: "relative/home",
+      XDG_CONFIG_HOME: xdg,
+      APPDATA: undefined,
+    });
     try {
       expect(trustDirectory()).toBe(join(xdg, "code-factory"));
     } finally {
       restore();
     }
-    restore = environment({ CODE_FACTORY_HOME: "", XDG_CONFIG_HOME: "relative/config" });
+    restore = environment({
+      CODE_FACTORY_HOME: "",
+      XDG_CONFIG_HOME: "relative/config",
+      APPDATA: undefined,
+    });
     try {
       expect(trustDirectory()).toBe(join(homedir(), ".config", "code-factory"));
     } finally {
@@ -67,19 +75,24 @@ describe("trust file", () => {
     }
   });
 
-  it("keeps the trust folder private to the user", async () => {
-    const home = join(await temporary("factory-shared-home-"), "code-factory");
-    await mkdir(home, { mode: 0o777 });
-    await chmod(home, 0o777);
-    const project = await temporary("factory-private-");
-    const restore = environment({ CODE_FACTORY_HOME: home });
-    try {
-      await trustProject(project);
-      expect((await stat(home)).mode & 0o777).toBe(0o700);
-    } finally {
-      restore();
-    }
-  });
+  // Windows permissions use ACLs, not chmod mode bits.
+  it.skipIf(process.platform === "win32")(
+    "keeps the trust folder private to the user",
+    async () => {
+      const home = join(await temporary("factory-shared-home-"), "code-factory");
+      await mkdir(home, { mode: 0o777 });
+      await chmod(home, 0o777);
+      const project = await temporary("factory-private-");
+      const restore = environment({ CODE_FACTORY_HOME: home });
+      try {
+        await trustProject(project);
+        expect((await stat(home)).mode & 0o777).toBe(0o700);
+        expect((await stat(join(home, "trust.json"))).mode & 0o777).toBe(0o600);
+      } finally {
+        restore();
+      }
+    },
+  );
 
   it("loses no decision when several Code Factory processes change it at once", async () => {
     const home = await temporary("factory-shared-trust-");

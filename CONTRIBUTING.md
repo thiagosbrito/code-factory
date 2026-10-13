@@ -27,6 +27,13 @@ Matrices do not cancel other OS jobs when one fails. Browser failure reports, sc
 and traces are uploaded with the OS in the artifact name. The workflow can also be started
 manually from Actions. The tarball file-list audit runs once on Linux.
 
+Windows test jobs compile a test-only native launcher (`scripts/windows-node-fixture.cs`)
+that forwards literal arguments and inherited stdio to Node fixture sidecars. A Windows job
+object owns each fixture child tree. For local PowerShell testing, run
+`./scripts/setup-windows-tests.ps1` before `pnpm test` or `pnpm test:e2e`.
+Native filesystem translation is explicitly unsupported on Windows (HTTP 501); its POSIX
+integration tests run on Linux/macOS, with a separate Windows unsupported-response test.
+
 Keep shared tests in the existing Vitest and Playwright suites; do not copy them per OS.
 For a genuinely OS-specific behavior, use an explicit condition on the test or suite:
 

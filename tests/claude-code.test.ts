@@ -1,4 +1,5 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { writeNodeExecutable } from "./support/node-executable.js";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -55,7 +56,7 @@ const fixture = async (
   directories.push(directory);
   const executable = join(directory, "claude");
   const argvFile = join(directory, "argv.json");
-  await writeFile(
+  await writeNodeExecutable(
     executable,
     `#!/usr/bin/env node
 const args = process.argv.slice(2);
@@ -93,7 +94,6 @@ if (args.includes('--permission-mode')) {
 }
 `,
   );
-  await chmod(executable, 0o755);
   return { directory, executable, argvFile };
 };
 
@@ -184,8 +184,8 @@ describe("Claude Code connection", () => {
       "did not print an authentication status",
     );
     const other = join(directory, "other");
-    await writeFile(other, "#!/bin/sh\necho 'codex-cli 0.160.0'\n");
-    await chmod(other, 0o755);
+    await writeNodeExecutable(other, "#!/usr/bin/env node\nconsole.log('codex-cli 0.160.0');\n");
+
     await expect(createClaudeCodeAdapter(other)).rejects.toThrow("not a supported Claude Code CLI");
   });
 });
@@ -331,7 +331,7 @@ describe("Claude Code stream adapter", () => {
   it("terminates the process group when the connection is closed", async () => {
     const { directory, executable } = await fixture([]);
     const pidFile = join(directory, "child.pid");
-    await writeFile(
+    await writeNodeExecutable(
       executable,
       `#!/usr/bin/env node\nconst nested = require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'inherit'});\nrequire('fs').writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify([process.pid,nested.pid]));\nconsole.log(JSON.stringify(${JSON.stringify(init)}));\nsetInterval(()=>{},1000);\n`,
     );

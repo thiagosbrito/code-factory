@@ -88,7 +88,15 @@ export const terminateChild = (child: ReturnType<typeof spawn>): void => {
     if (process.platform === "win32") child.kill();
     else process.kill(-child.pid, "SIGTERM");
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ESRCH") return;
+    if (error instanceof Error && "code" in error) {
+      if (error.code === "ESRCH") return;
+      // macOS can deny a group signal while a CLI is exiting. The owned child's
+      // handle remains safe to terminate and must not mask a stream parser error.
+      if (error.code === "EPERM" && process.platform !== "win32") {
+        child.kill("SIGTERM");
+        return;
+      }
+    }
     throw error;
   }
 };
