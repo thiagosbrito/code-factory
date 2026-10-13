@@ -1,4 +1,5 @@
-import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { writeNodeExecutable } from "./support/node-executable.js";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -31,8 +32,7 @@ if (process.argv.includes('--model') && process.argv[10] !== 'fixture-model') pr
 for (const event of ${JSON.stringify(events)}) console.log(JSON.stringify(event));
 process.exit(${exitCode});
 `;
-  await writeFile(executable, script);
-  await chmod(executable, 0o755);
+  await writeNodeExecutable(executable, script);
   return { directory, executable };
 };
 
@@ -50,7 +50,7 @@ describe("Kiro v2 stream adapter", () => {
     const { directory, executable } = await fixture([]);
     const platform = Object.getOwnPropertyDescriptor(process, "platform");
     try {
-      await writeFile(
+      await writeNodeExecutable(
         executable,
         `#!/usr/bin/env node\nconsole.log(JSON.stringify({type:'metadata',data:{sessionId:'windows-fallback'}}));\nsetInterval(()=>{},1000);\n`,
       );
@@ -73,7 +73,7 @@ describe("Kiro v2 stream adapter", () => {
     const { directory, executable } = await fixture([]);
     try {
       const pidFile = join(directory, "child.pid");
-      await writeFile(
+      await writeNodeExecutable(
         executable,
         `#!/usr/bin/env node\nconst nested = require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'inherit'});\nrequire('fs').writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify([process.pid,nested.pid]));\nconsole.log(JSON.stringify({type:'metadata',data:{sessionId:'active'}}));\nsetInterval(()=>{},1000);\n`,
       );
@@ -118,8 +118,11 @@ describe("Kiro v2 stream adapter", () => {
   it("probes the CLI from a neutral directory, never the project's", async () => {
     const { directory, executable } = await fixture([]);
     const log = join(directory, "cwd.log");
-    const script = await readFile(executable, "utf8");
-    await writeFile(
+    const script = await readFile(
+      process.platform === "win32" ? `${executable}.cjs` : executable,
+      "utf8",
+    );
+    await writeNodeExecutable(
       executable,
       script.replace(
         "\n",
@@ -291,8 +294,7 @@ describe("Kiro connection probes", () => {
   const script = async (body: string) => {
     const directory = await mkdtemp(join(tmpdir(), "code-factory-kiro-probe-"));
     const executable = join(directory, "kiro-cli");
-    await writeFile(executable, `#!/usr/bin/env node\n${body}\n`);
-    await chmod(executable, 0o755);
+    await writeNodeExecutable(executable, `#!/usr/bin/env node\n${body}\n`);
     return { directory, executable };
   };
 

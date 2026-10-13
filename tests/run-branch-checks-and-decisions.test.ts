@@ -25,7 +25,8 @@ afterEach(async () => {
   await Promise.all(parents.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-describe("in-project run branch", () => {
+// These tests execute real Git processes and multiple persisted/API transitions.
+describe("in-project run branch", { timeout: 30_000 }, () => {
   it("gives checks the run's changed files and reviewers the same-candidate validation evidence", async () => {
     const { root } = await repository();
     const validate = {
@@ -42,8 +43,7 @@ describe("in-project run branch", () => {
       kind: "check",
       stage: "validation",
       role: "checker",
-      instruction:
-        'test "$CODE_FACTORY_CHANGED_FILES" = "feature.txt" && test -n "$CODE_FACTORY_BASE_REVISION"',
+      instruction: `node -e "if(process.env.CODE_FACTORY_CHANGED_FILES !== 'feature.txt' || !process.env.CODE_FACTORY_BASE_REVISION) process.exit(1)"`,
     };
     const run = await createProjectRun(
       root,
@@ -98,6 +98,7 @@ describe("in-project run branch", () => {
     expect(git(root, "status", "--porcelain", "--", ".", ":(exclude).code-factory")).toBe("");
   });
 
+  // Multiple real Git runs/API transitions need a bounded integration budget on hosted VMs.
   it("reads a decision from the first line and records why an undeclared one fails", async () => {
     const decide = {
       id: "adjudicate",
@@ -162,5 +163,5 @@ describe("in-project run branch", () => {
     expect(reason?.kind === "event" && reason.detail).toBe(
       "Undeclared decision outcome: Looks good to me",
     );
-  });
+  }, 30_000);
 });

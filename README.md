@@ -95,6 +95,8 @@ Run activity is persisted with contiguous event sequence numbers and exposed at 
 
 Optional Linear retrieval is configured by supplying `CODE_FACTORY_LINEAR_API_KEY` in the runtime process environment. The key is never written to the project or returned by the API. The runtime removes it from its own environment as soon as it reads it, so agents, check and setup commands never inherit it. Without it, description-only intake remains available.
 
+Native configuration import/export currently requires Python 3 on Linux or macOS. On Windows these operations return an explicit unsupported response (HTTP 501); portable loop import/export remains available.
+
 ## Packaging
 
 ```sh

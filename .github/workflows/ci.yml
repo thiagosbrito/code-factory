@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -12,12 +13,30 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # Bash is available on all hosted runners, including Git Bash on Windows.
+    shell: bash
+
 jobs:
   check:
-    name: Check
-    runs-on: ubuntu-latest
+    name: Running tests on ${{ matrix.os }}
+    strategy:
+      # A Windows failure must not cancel the Linux/macOS evidence.
+      fail-fast: false
+      matrix:
+        include:
+          - os: Linux
+            runner: ubuntu-24.04
+          - os: Windows
+            runner: windows-2025
+          - os: macOS
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
+      # Keep fixture scripts and Git candidate hashes consistent across checkouts.
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
@@ -26,16 +45,33 @@ jobs:
           cache: pnpm
       # Runtime tests create commits in disposable repositories.
       - run: git config --global user.name "CI" && git config --global user.email "ci@example.invalid"
+      - name: Prepare Windows executable fixtures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/setup-windows-tests.ps1
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
 
   # The package supports Node 22.12, but pnpm itself needs 22.13, so install and build with a
   # newer Node and run the tests and the built CLI on the minimum supported one.
   minimum-node:
-    name: Tests on Node 22.12
-    runs-on: ubuntu-latest
+    name: Node 22.12 tests on ${{ matrix.os }}
+    strategy:
+      # A Windows failure must not cancel the Linux/macOS evidence.
+      fail-fast: false
+      matrix:
+        include:
+          - os: Linux
+            runner: ubuntu-24.04
+          - os: Windows
+            runner: windows-2025
+          - os: macOS
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
+      # Keep fixture scripts and Git candidate hashes consistent across checkouts.
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
@@ -43,20 +79,37 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: git config --global user.name "CI" && git config --global user.email "ci@example.invalid"
+      - name: Prepare Windows executable fixtures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/setup-windows-tests.ps1
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - uses: actions/setup-node@v6
         with:
           node-version: 22.12.0
       - run: node --version
-      - run: node_modules/.bin/vitest run
+      - run: node node_modules/vitest/vitest.mjs run
       - run: node dist/node/cli.js --version
 
   e2e:
-    name: Browser journeys
-    runs-on: ubuntu-latest
+    name: Browser journeys on ${{ matrix.os }}
+    strategy:
+      # A Windows failure must not cancel the Linux/macOS evidence.
+      fail-fast: false
+      matrix:
+        include:
+          - os: Linux
+            runner: ubuntu-24.04
+          - os: Windows
+            runner: windows-2025
+          - os: macOS
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
+      # Keep fixture scripts and Git candidate hashes consistent across checkouts.
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
@@ -64,24 +117,42 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: git config --global user.name "CI" && git config --global user.email "ci@example.invalid"
+      - name: Prepare Windows executable fixtures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/setup-windows-tests.ps1
       - run: pnpm install --frozen-lockfile
-      # The Playwright config drives the Chrome that ships on GitHub's Ubuntu runners.
+      # The config uses the Chrome channel; install it on every runner explicitly.
+      - run: pnpm exec playwright install --with-deps chrome
       - run: pnpm build
       - run: pnpm test:e2e
       - uses: actions/upload-artifact@v6
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.os }}
           path: |
             playwright-report
             test-results
           retention-days: 7
 
   package:
-    name: Packed tarball
-    runs-on: ubuntu-latest
+    name: Packed tarball on ${{ matrix.os }}
+    strategy:
+      # A Windows failure must not cancel the Linux/macOS evidence.
+      fail-fast: false
+      matrix:
+        include:
+          - os: Linux
+            runner: ubuntu-24.04
+          - os: Windows
+            runner: windows-2025
+          - os: macOS
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
+      # Keep fixture scripts and Git candidate hashes consistent across checkouts.
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
@@ -92,6 +163,8 @@ jobs:
       - run: pnpm test:package
       # The published file list is a contract: nothing outside these paths may ship.
       - name: Tarball contents
+        # The shell-based inventory check runs once; installation runs on every OS.
+        if: runner.os == 'Linux'
         run: |
           pnpm pack --pack-destination "$RUNNER_TEMP"
           unexpected=$(tar -tzf "$RUNNER_TEMP"/*.tgz | grep -Ev '^package/(dist/|LICENSE$|README\.md$|package\.json$|docs/architecture\.md$)' || true)

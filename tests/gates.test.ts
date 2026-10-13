@@ -1,5 +1,6 @@
+import { writeNodeExecutable } from "./support/node-executable.js";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -26,11 +27,10 @@ const project = async (files: Record<string, string> = {}) => {
 const tool = async (root: string, name: string, body: string) => {
   await mkdir(join(root, "node_modules", ".bin"), { recursive: true });
   const path = join(root, "node_modules", ".bin", name);
-  await writeFile(
+  await writeNodeExecutable(
     path,
     `#!/usr/bin/env node\nrequire("fs").writeFileSync(${JSON.stringify(join(root, `${name}.args`))}, JSON.stringify(process.argv.slice(2)))\n${body}\n`,
   );
-  await chmod(path, 0o755);
 };
 
 const gate = (root: string, name: string, changed: string[]) => {

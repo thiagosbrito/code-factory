@@ -40,7 +40,8 @@ const userState = (root: string) => ({
   ),
 });
 
-describe("in-project run branch", () => {
+// These tests execute real Git processes and multiple persisted/API transitions.
+describe("in-project run branch", { timeout: 30_000 }, () => {
   it("creates the run branch in the project, switches the checkout to it and runs every step there", async () => {
     const { root } = await repository();
     const run = await createProjectRun(root);
@@ -64,7 +65,7 @@ describe("in-project run branch", () => {
     });
     const done = await executeRun(root, run.snapshot.id, () => recording);
     expect(outcome(done)).toEqual({ status: "succeeded", failures: [] });
-    expect(directories).toEqual([realpathSync(root), realpathSync(root)]);
+    expect(directories).toEqual([realpathSync.native(root), realpathSync.native(root)]);
     // Reviewers always run read-only; writers do not.
     expect(readOnly).toEqual({ implement: undefined, review: true });
     // The user's own folder holds the change, committed on the run branch with their identity.

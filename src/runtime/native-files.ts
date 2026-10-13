@@ -95,6 +95,8 @@ const pythonUnavailable = () =>
  * the project is never imported. Every path it opens is absolute, from `request.project`.
  */
 export const nativeFile = async (request: NativeFileRequest) => {
+  // The pinned-directory helper requires POSIX openat semantics, unavailable on Windows.
+  if (process.platform === "win32") throw pythonUnavailable();
   const python = await systemCommand("python3").catch(() => {
     throw pythonUnavailable();
   });

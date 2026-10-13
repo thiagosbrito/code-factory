@@ -106,7 +106,7 @@ it("replays committed events after a cursor and deduplicates out-of-order delive
 });
 
 it("bounds persisted output from a noisy check and records truncation", async () => {
-  const { root, record } = await fixture("node -e 'process.stdout.write(\"x\".repeat(100000))'");
+  const { root, record } = await fixture(`node -e "process.stdout.write('x'.repeat(100000))"`);
   const finished = await executeRun(root, record.snapshot.id, () => mockAdapter);
   const output = eventsAfter(finished, -1).filter((event) => event.title === "Check output");
   expect(finished.status).toBe("succeeded");

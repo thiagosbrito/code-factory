@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentConnection } from "../../../adapters/contract.js";
 import { effortChoices } from "../../../domain/binding-catalog.js";
 import type { ProviderId } from "../../../domain/loop.js";
-import { formatCommandLine, parseCommandLine } from "../../../domain/project.js";
+import { customAgentSchema, formatCommandLine, parseCommandLine } from "../../../domain/project.js";
 import {
   bindingError,
   connectionViewModel,
@@ -139,7 +139,10 @@ export const useSetupController = ({
       setError(validation);
       return;
     }
-    if (customExecutable.trim() && !customExecutable.trim().startsWith("/")) {
+    if (
+      customExecutable.trim() &&
+      !customAgentSchema.shape.executable.safeParse(customExecutable).success
+    ) {
       setError("Enter an absolute custom executable path.");
       return;
     }

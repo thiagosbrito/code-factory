@@ -1,5 +1,6 @@
+import { removeNodeFixtureDirectory, writeNodeExecutable } from "./support/node-executable.js";
 import { describe, expect, it } from "vitest";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodexAdapter, createCodexAdapter } from "../src/adapters/codex.js";
@@ -73,8 +74,7 @@ describe("Codex adapter tool grant wiring", () => {
       await mkdir(outside);
       const log = join(directory, "replies.jsonl");
       const executable = join(directory, "codex");
-      await writeFile(executable, fakeCodexServer(log, join(project, "src"), outside));
-      await chmod(executable, 0o755);
+      await writeNodeExecutable(executable, fakeCodexServer(log, join(project, "src"), outside));
       // createCodexAdapter wires the stdio RPC's approval hook to the adapter's thread policies.
       const adapter = await createCodexAdapter(executable);
       adapters.push(adapter);
@@ -113,7 +113,7 @@ describe("Codex adapter tool grant wiring", () => {
       });
     } finally {
       for (const adapter of adapters) adapter.close();
-      await rm(directory, { recursive: true, force: true });
+      await removeNodeFixtureDirectory(directory);
     }
   });
 });

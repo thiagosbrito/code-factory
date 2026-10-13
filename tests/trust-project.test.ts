@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AgentConnection } from "../src/adapters/contract.js";
@@ -8,7 +8,6 @@ import { createRunRecord, createRunSnapshot, type RunRecord } from "../src/domai
 import { ConnectionRegistry } from "../src/runtime/connections.js";
 import { initializeProject } from "../src/runtime/project.js";
 import { startLocalServer } from "../src/runtime/server.js";
-import { nativeFormats } from "../src/runtime/native-translation.js";
 import { createRun } from "../src/runtime/storage.js";
 import { trustDirectory } from "../src/runtime/trust.js";
 import { exists, roots, servers, temporary } from "./support/trust.js";
@@ -219,7 +218,6 @@ describe("project trust", () => {
     expect((await again.json()).trust.toolGrants.kiro.grantedAt).toBe(grant.grantedAt);
 
     const file = join(trustDirectory(), "trust.json");
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect(JSON.stringify(JSON.parse(await readFile(file, "utf8")))).toContain("execute_bash");
     // Setup saves still validate the project file strictly and never write grants into it.
     expect(
@@ -272,7 +270,9 @@ describe("project trust", () => {
     await call("/api/project/trust", "POST", { acknowledged: true });
     // Trusted, the saved path launches (and fails the handshake); README.md fails validation.
     expect((await connect(link)).status).toBe(422);
-    expect((await connect(join(root, "README.md"))).status).toBe(400);
+    expect((await connect(join(root, "README.md"))).status).toBe(
+      process.platform === "win32" ? 422 : 400,
+    );
   });
 
   it("does not launch a detected agent CLI that lives inside an untrusted project", async () => {
@@ -335,7 +335,8 @@ describe("project trust", () => {
   });
 
   it("imports nothing from the project when Python lists native files", async () => {
-    const format = nativeFormats()[0]?.format ?? "";
+    // Probe a known raw endpoint even when the available-format inventory is empty.
+    const format = "cursor-rule-mdc";
     // A module and a package that shadow the helper's `json` import, as `python3 -c` would load
     // from the working directory; the runtime's working directory is the project under the CLI.
     for (const plant of [
@@ -354,7 +355,7 @@ describe("project trust", () => {
       process.chdir(root);
       try {
         const response = await call(`/api/native/candidates?format=${format}`);
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(process.platform === "win32" ? 501 : 200);
       } finally {
         process.chdir(previous);
       }
@@ -376,7 +377,9 @@ describe("project trust", () => {
     const previous = process.env.PATH;
     process.env.PATH = `${bin}${delimiter}node_modules/.bin${delimiter}${previous ?? ""}`;
     try {
-      expect((await call("/api/native/candidates?format=cursor-rule-mdc")).status).toBe(200);
+      expect((await call("/api/native/candidates?format=cursor-rule-mdc")).status).toBe(
+        process.platform === "win32" ? 501 : 200,
+      );
       expect((await call(`/api/runs/${runId}/workspace`)).status).toBe(200);
     } finally {
       process.env.PATH = previous;

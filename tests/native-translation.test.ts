@@ -40,7 +40,8 @@ const request = (loop: unknown, name = "sample") => ({
 });
 const rulePath = (root: string, name = "sample") => join(root, ".cursor", "rules", `${name}.mdc`);
 
-describe("native configuration translation", () => {
+// Secure native filesystem translation currently requires POSIX directory operations.
+describe.runIf(process.platform !== "win32")("native configuration translation", () => {
   it("round trips representable name and instructions without implying a runner", async () => {
     const root = await project();
     const loop = parseLoop({
@@ -212,7 +213,7 @@ describe("native configuration translation", () => {
   });
 });
 
-describe("Kiro workflow import", () => {
+describe.runIf(process.platform !== "win32")("Kiro workflow import", () => {
   const servers: { close: (callback: () => void) => void }[] = [];
   afterEach(async () => {
     await Promise.all(

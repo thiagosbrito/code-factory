@@ -53,6 +53,10 @@ test("native configuration export requires preview and writes only after apply",
   page,
   harness,
 }) => {
+  test.skip(
+    process.platform === "win32",
+    "Secure native translation requires POSIX directory operations",
+  );
   await finishSetup(page, harness.origin);
   await page.getByRole("button", { name: "Loops" }).click();
   await page.getByRole("button", { name: "Create empty loop" }).first().click();

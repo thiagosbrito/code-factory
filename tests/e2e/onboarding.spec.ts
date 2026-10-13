@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, realpath, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer as createViteServer } from "vite";
@@ -182,7 +182,9 @@ test("fresh setup is blank, uses the trusted path, and saves without an agent", 
 }) => {
   await page.goto(harness.origin);
   await expect(page.getByRole("heading", { name: "Connect your first project" })).toBeVisible();
-  await expect(page.getByLabel("Canonical project path")).toContainText(harness.projectDirectory);
+  await expect(page.getByLabel("Canonical project path")).toContainText(
+    await realpath(harness.projectDirectory),
+  );
   await expect(page.getByRole("textbox", { name: "Project name" })).toBeFocused();
   await expect(page.getByRole("combobox", { name: "Project default model" })).toBeDisabled();
   await expect.poll(() => harness.config()).toBeNull();

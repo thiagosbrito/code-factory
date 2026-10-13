@@ -1,5 +1,6 @@
+import { writeNodeExecutable } from "./support/node-executable.js";
 import { describe, expect, it } from "vitest";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -102,8 +103,11 @@ describe("portable adapter conformance", () => {
     const directory = await mkdtemp(join(tmpdir(), "factory-executable-"));
     try {
       const executable = join(directory, "codex");
-      await writeFile(executable, "#!/bin/sh\necho other-cli 1.2.3\n");
-      await chmod(executable, 0o755);
+      await writeNodeExecutable(
+        executable,
+        "#!/usr/bin/env node\nconsole.log('other-cli 1.2.3');\n",
+      );
+
       await expect(createCodexAdapter(executable)).rejects.toThrow(/not a supported Codex CLI/);
     } finally {
       await rm(directory, { recursive: true, force: true });

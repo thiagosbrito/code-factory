@@ -25,7 +25,8 @@ afterEach(async () => {
   await Promise.all(parents.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-describe("in-project run branch", () => {
+// These tests execute real Git processes and multiple persisted/API transitions.
+describe("in-project run branch", { timeout: 30_000 }, () => {
   it("fails a reviewer or check that changes project files, reports what changed and reverts nothing", async () => {
     const { root } = await repository();
     const touchingReviewer = acting(async (input) => {

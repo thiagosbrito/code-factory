@@ -1,4 +1,5 @@
-import { chmod, rm, writeFile } from "node:fs/promises";
+import { writeNodeExecutable } from "../../support/node-executable.js";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -50,8 +51,7 @@ if (!args.includes('--permission-mode')) {
 
 export const writeFakeClaude = async (directory: string) => {
   const executable = join(directory, "claude");
-  await writeFile(executable, script);
-  await chmod(executable, 0o755);
+  await writeNodeExecutable(executable, script);
   const hold = join(directory, "hold");
   return {
     executable,
