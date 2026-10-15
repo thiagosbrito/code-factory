@@ -1,4 +1,5 @@
 import { planLaunch } from "./launch.js";
+import { killProcessTree } from "./process.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
@@ -96,6 +97,6 @@ export class CodexStdioRpc implements CodexRpc {
   }
 
   close(): void {
-    this.child.kill();
+    killProcessTree(this.child);
   }
 }

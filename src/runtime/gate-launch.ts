@@ -7,7 +7,7 @@
 export const GATE_LAUNCH_SOURCE = String.raw`const LAUNCHABLE = [".exe", ".cmd", ".bat"]
 const CMD_META = /([()\][%!^"\x60<>&|;, *?])/g
 const resolveGateBin = (path, platform, exists) => {
-  if (platform !== "win32") return path
+  if (platform !== "win32" || !/[\\/]/.test(path)) return path
   if (LAUNCHABLE.some(extension => path.toLowerCase().endsWith(extension))) return path
   return LAUNCHABLE.map(extension => path + extension).find(exists) || path
 }
@@ -24,8 +24,15 @@ const planGateLaunch = (path, args, platform, exists, comspec) => {
   if (!/\.(cmd|bat)$/i.test(resolved)) return { command: resolved, args, verbatim: false }
   for (const value of [resolved, ...args])
     if (/[\r\n\0]/.test(value)) throw new Error(resolved + " is a Windows command script and cannot receive an argument with a line break.")
-  const doubleEscape = /node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i.test(resolved)
+  if (!exists(resolved)) {
+    const missing = new Error(resolved + " was not found")
+    missing.code = "ENOENT"
+    throw missing
+  }
+  const doubleEscape = /\.cmd$/i.test(resolved)
   const line = [resolved.replace(CMD_META, "^$1"), ...args.map(value => escapeGateArgument(value, doubleEscape))].join(" ")
+  if (comspec.length + line.length + 12 > 8191)
+    throw new Error("The command line for " + resolved + " would exceed the 8191 characters cmd.exe accepts; too many changed files for this tool.")
   return { command: comspec, args: ["/d", "/s", "/c", '"' + line + '"'], verbatim: true }
 }
 `;

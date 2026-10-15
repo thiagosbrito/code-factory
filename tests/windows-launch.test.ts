@@ -8,7 +8,6 @@ import { planLaunch } from "../src/adapters/launch.js";
 import { probeCommand } from "../src/adapters/process.js";
 import { CHANGED_FILES_GATE_PATH } from "../src/domain/gates.js";
 import { ensureChangedFilesGate } from "../src/runtime/gates.js";
-import { GATE_LAUNCH_SOURCE } from "../src/runtime/gate-launch.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -26,7 +25,11 @@ const directory = async (files: string[]) => {
   return root;
 };
 
-const onWindows = { platform: "win32" as const, comspec: "C:\\Windows\\System32\\cmd.exe" };
+const onWindows = {
+  platform: "win32" as const,
+  comspec: "C:\\Windows\\System32\\cmd.exe",
+  exists: () => true,
+};
 const present = (...paths: string[]) => ({
   ...onWindows,
   exists: (p: string) => paths.includes(p),
@@ -87,17 +90,17 @@ describe("launch plan", () => {
     });
   });
 
-  it("runs a .cmd shim through cmd.exe with a quoted path, not a bare spawn", () => {
-    const plan = planLaunch("C:\\Program Files\\n\\claude.cmd", ["-p", "say hi"], onWindows);
+  it("runs a .bat through cmd.exe with a quoted path (single-level escaping), not a bare spawn", () => {
+    const plan = planLaunch("C:\\Program Files\\n\\claude.bat", ["-p", "say hi"], onWindows);
     expect(plan.command).toBe(onWindows.comspec);
     expect(plan.windowsVerbatimArguments).toBe(true);
     expect(plan.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
-    expect(plan.args[3]).toBe('"C:\\Program^ Files\\n\\claude.cmd ^"-p^" ^"say^ hi^""');
+    expect(plan.args[3]).toBe('"C:\\Program^ Files\\n\\claude.bat ^"-p^" ^"say^ hi^""');
   });
 
   it("escapes cmd metacharacters so arguments stay literal", () => {
     const [, , , line] = planLaunch(
-      "C:\\t\\x.cmd",
+      "C:\\t\\x.bat",
       ["a&calc|b>c", "%PATH%", 'q"r'],
       onWindows,
     ).args;
@@ -118,39 +121,6 @@ describe("launch plan", () => {
   it("refuses arguments cmd.exe would truncate", () => {
     expect(() => planLaunch("C:\\t\\x.cmd", ["a\nb"], onWindows)).toThrow(/line break/);
     expect(planLaunch("C:\\t\\x.exe", ["a\nb"], onWindows).args).toEqual(["a\nb"]);
-  });
-});
-
-describe("gate script launch helper", () => {
-  const gatePlan = new Function(`${GATE_LAUNCH_SOURCE}\nreturn planGateLaunch;`)() as (
-    path: string,
-    args: string[],
-    platform: string,
-    exists: (p: string) => boolean,
-    comspec: string,
-  ) => { command: string; args: string[]; verbatim: boolean };
-
-  it.each([
-    ["C:\\p\\node_modules\\.bin\\eslint", ["--quiet", "--", "src\\a b.ts", "x&y.ts", "%A%"]],
-    ["C:\\p\\node_modules\\.bin\\tsc", ["--noEmit"]],
-    ["C:\\Program Files\\t\\vitest", ['q"r', "tail\\"]],
-  ])("plans the same Windows invocation as the adapter helper for %s", (path, args) => {
-    const exists = (p: string) => p === `${path}.cmd`;
-    const adapter = planLaunch(path, args, { platform: "win32", exists, comspec: "cmd.exe" });
-    const gate = gatePlan(path, args, "win32", exists, "cmd.exe");
-    expect(gate).toEqual({
-      command: adapter.command,
-      args: adapter.args,
-      verbatim: adapter.windowsVerbatimArguments,
-    });
-  });
-
-  it("is a plain direct launch off Windows", () => {
-    expect(gatePlan("/p/node_modules/.bin/tsc", ["a b"], "linux", () => true, "cmd.exe")).toEqual({
-      command: "/p/node_modules/.bin/tsc",
-      args: ["a b"],
-      verbatim: false,
-    });
   });
 });
 

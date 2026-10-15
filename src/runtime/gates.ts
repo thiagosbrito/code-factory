@@ -33,6 +33,11 @@ const run = (command, args) => {
     return { status: null, stdout: "", stderr: "", error }
   }
 }
+// A tool that cannot start is a setup problem, not a failed gate.
+const started = (result, command) => {
+  if (result.error) done(2, "Could not start " + command + ": " + result.error.message)
+  return result
+}
 const print = result => {
   if (result.stdout) process.stdout.write(result.stdout)
   if (result.stderr) process.stderr.write(result.stderr)
@@ -64,7 +69,7 @@ const lint = changed => {
   if (!files.length) done(0, "No changed JS/TS files to lint.")
   if (!has("eslint")) done(0, "ESLint is not installed in this project; lint gate not applicable.")
   console.log("Linting " + files.length + " changed file(s):\n" + files.join("\n"))
-  const result = run(bin("eslint"), ["--quiet", "--", ...files])
+  const result = started(run(bin("eslint"), ["--quiet", "--", ...files]), "ESLint")
   print(result)
   done(result.status === 0 ? 0 : 1, result.status === 0 ? "Lint passed for changed files." : "Lint failed for changed files.")
 }
@@ -76,7 +81,7 @@ const types = changed => {
   if (!files.size) done(0, "No changed TypeScript files to type-check.")
   if (!has("tsc") || !existsSync(join(root, "tsconfig.json")))
     done(0, "TypeScript (tsc and tsconfig.json) is not set up in this project; type gate not applicable.")
-  const result = run(bin("tsc"), ["--noEmit", "--pretty", "false"])
+  const result = started(run(bin("tsc"), ["--noEmit", "--pretty", "false"]), "tsc")
   if (result.status === 0) done(0, "Type check passed (" + files.size + " changed file(s) included).")
   const errors = (result.stdout + result.stderr).split("\n").filter(line => /^[^\s(]+\(\d+,\d+\): error /.test(line))
   if (!errors.length) {
@@ -112,7 +117,7 @@ const coverage = changed => {
   const directory = mkdtempSync(join(tmpdir(), "code-factory-coverage-"))
   try {
     console.log("Running " + runner + " tests related to " + sources.length + " changed source file(s):\n" + sources.join("\n"))
-    const result = run(bin(runner), coverageArgs(runner, sources, directory))
+    const result = started(run(bin(runner), coverageArgs(runner, sources, directory)), runner)
     print(result)
     if (result.status !== 0) done(1, "Related tests failed, so coverage was not evaluated.")
     const summaryPath = join(directory, "coverage-summary.json")

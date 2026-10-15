@@ -22,7 +22,7 @@ export interface LaunchEnvironment {
 }
 
 const COMMAND_SCRIPT = /\.(cmd|bat)$/i;
-const NPM_BIN_SHIM = /node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i;
+const CMD_LINE_LIMIT = 8191;
 // Characters cmd.exe treats specially; each is prefixed with ^ inside the prepared command line.
 const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
 
@@ -31,6 +31,8 @@ export const resolveWindowsExecutable = (
   path: string,
   exists: (candidate: string) => boolean = existsSync,
 ): string => {
+  // A bare name is looked up through PATH by discovery; never probe the working directory for it.
+  if (!/[\\/]/.test(path)) return path;
   const extension = extname(path).toLowerCase();
   if (WINDOWS_LAUNCHABLE_EXTENSIONS.some((launchable) => launchable === extension)) return path;
   return (
@@ -67,13 +69,23 @@ export const planLaunch = (
       throw new Error(
         `${resolved} is a Windows command script and cannot receive an argument with a line break; pass the text through a file or standard input instead.`,
       );
-  const doubleEscape = NPM_BIN_SHIM.test(resolved);
+  const exists = environment.exists ?? existsSync;
+  if (!exists(resolved))
+    throw Object.assign(new Error(`${resolved} was not found`), { code: "ENOENT" });
+  // npm's .cmd shims (local and global) expand %* inside another cmd.exe parse, so a .cmd needs a
+  // second level of escaping or a quote in an argument could end the quoted text there.
+  const doubleEscape = /\.cmd$/i.test(resolved);
   const line = [
     resolved.replace(CMD_META, "^$1"),
     ...args.map((value) => escapeCommandArgument(value, doubleEscape)),
   ].join(" ");
+  const comspec = environment.comspec ?? process.env.ComSpec ?? "cmd.exe";
+  if (comspec.length + line.length + 12 > CMD_LINE_LIMIT)
+    throw new Error(
+      `The command line for ${resolved} would exceed the ${CMD_LINE_LIMIT} characters cmd.exe accepts; use fewer or shorter arguments, or install an .exe launcher.`,
+    );
   return {
-    command: environment.comspec ?? process.env.ComSpec ?? "cmd.exe",
+    command: comspec,
     args: ["/d", "/s", "/c", `"${line}"`],
     windowsVerbatimArguments: true,
   };

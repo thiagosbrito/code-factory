@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import { planLaunch, type LaunchPlan } from "./launch.js";
 
@@ -41,7 +41,13 @@ export const probeCommand = (
     try {
       launch = planLaunch(executable, args);
     } catch (error) {
-      reject(error);
+      const code = error instanceof Error ? Reflect.get(error, "code") : undefined;
+      const reason = error instanceof Error ? error.message : String(error);
+      reject(
+        new Error(
+          `${command} could not start: ${typeof code === "string" ? `${code} ` : ""}${reason}`,
+        ),
+      );
       return;
     }
     const child = spawn(launch.command, launch.args, {
@@ -61,7 +67,7 @@ export const probeCommand = (
     });
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killProcessTree(child);
     }, timeoutMs);
     child.once("error", (error) => {
       clearTimeout(timer);
@@ -94,7 +100,7 @@ export const probeCommand = (
 export const terminateChild = (child: ReturnType<typeof spawn>): void => {
   if (!child.pid) return;
   try {
-    if (process.platform === "win32") child.kill();
+    if (process.platform === "win32") killProcessTree(child);
     else process.kill(-child.pid, "SIGTERM");
   } catch (error) {
     if (error instanceof Error && "code" in error) {
@@ -108,4 +114,35 @@ export const terminateChild = (child: ReturnType<typeof spawn>): void => {
     }
     throw error;
   }
+};
+
+/**
+ * Force-stop a child and everything it started. A `.cmd` launcher runs through cmd.exe, so on
+ * Windows killing the handle would stop only cmd.exe and orphan the agent; `taskkill /T /F` ends
+ * the whole tree and is started without a shell. Elsewhere the child is signalled directly.
+ */
+export const killProcessTree = (
+  child: Pick<ChildProcess, "pid" | "kill">,
+  options: {
+    platform?: NodeJS.Platform;
+    spawnProcess?: (
+      command: string,
+      args: readonly string[],
+      options: { stdio: "ignore"; windowsHide: true },
+    ) => { once(event: "error", listener: () => void): unknown };
+  } = {},
+): void => {
+  if ((options.platform ?? process.platform) !== "win32" || !child.pid) {
+    child.kill("SIGKILL");
+    return;
+  }
+  const killer = (options.spawnProcess ?? spawn)(
+    "taskkill",
+    ["/pid", String(child.pid), "/T", "/F"],
+    {
+      stdio: "ignore",
+      windowsHide: true,
+    },
+  );
+  killer.once("error", () => child.kill("SIGKILL"));
 };

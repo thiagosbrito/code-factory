@@ -31,6 +31,12 @@ Windows test jobs compile a test-only native launcher (`scripts/windows-node-fix
 that forwards literal arguments and inherited stdio to Node fixture sidecars. A Windows job
 object owns each fixture child tree. For local PowerShell testing, run
 `./scripts/setup-windows-tests.ps1` before `pnpm test` or `pnpm test:e2e`.
+Verification limits for Windows launching (`src/adapters/launch.ts`, the gate script): launch
+plans, quoting and discovery order are proven by fixtures on every OS, and the `runIf(win32)`
+tests run real `cmd.exe` shims, process-tree cancellation and gate tools on the Windows Server
+2025 job. Not verified: a Windows 11 desktop, or real npm-installed Claude Code, Codex or Kiro
+CLIs (including their own `.cmd` shim bodies). Kiro receives its instruction as an argument, so a
+multi-line instruction cannot reach a `.cmd` launcher and fails with a clear error.
 Native filesystem translation is explicitly unsupported on Windows (HTTP 501); its POSIX
 integration tests run on Linux/macOS, with a separate Windows unsupported-response test.
 
