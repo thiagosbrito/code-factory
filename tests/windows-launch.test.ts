@@ -181,9 +181,10 @@ describe.runIf(process.platform === "win32")("native Windows gate tools", () => 
     await mkdir(join(root, "src"));
     await writeFile(join(root, "src", "a b.ts"), "export const a = 1\n");
     await writeFile(join(bin, "eslint"), "#!/bin/sh\nexit 9\n");
+    await writeFile(join(bin, "eslint.cmd"), '@echo off\r\nnode "%~dp0eslint-args.cjs" %*\r\n');
     await writeFile(
-      join(bin, "eslint.cmd"),
-      "@echo off\r\nnode -e \"require('fs').writeFileSync('args.json', JSON.stringify(process.argv.slice(1)))\" %*\r\n",
+      join(bin, "eslint-args.cjs"),
+      "require('fs').writeFileSync('args.json', JSON.stringify(process.argv.slice(2)))\n",
     );
     await ensureChangedFilesGate(root);
     const result = spawnSync(process.execPath, [CHANGED_FILES_GATE_PATH, "lint"], {
