@@ -27,7 +27,7 @@ const bin = name => resolveGateBin(join(root, "node_modules", ".bin", name), pro
 const has = name => existsSync(bin(name))
 const run = (command, args) => {
   try {
-    const plan = planGateLaunch(command, args, process.platform, existsSync, /(^|[\\/])cmd\.exe$/i.test(process.env.ComSpec || "") ? process.env.ComSpec : "cmd.exe")
+    const plan = planGateLaunch(command, args, process.platform, existsSync, resolveGateCmd(process.env))
     return spawnSync(plan.command, plan.args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsVerbatimArguments: plan.verbatim })
   } catch (error) {
     return { status: null, stdout: "", stderr: "", error }

@@ -28,6 +28,7 @@ const directory = async (files: string[]) => {
 const onWindows = {
   platform: "win32" as const,
   comspec: "C:\\Windows\\System32\\cmd.exe",
+  systemRoot: "C:\\Windows",
   exists: () => true,
 };
 const present = (...paths: string[]) => ({
@@ -90,12 +91,12 @@ describe("launch plan", () => {
     });
   });
 
-  it("runs a .bat through cmd.exe with a quoted path (single-level escaping), not a bare spawn", () => {
+  it("runs a .bat through cmd.exe with a quoted path and double escaping, not a bare spawn", () => {
     const plan = planLaunch("C:\\Program Files\\n\\claude.bat", ["-p", "say hi"], onWindows);
     expect(plan.command).toBe(onWindows.comspec);
     expect(plan.windowsVerbatimArguments).toBe(true);
     expect(plan.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
-    expect(plan.args[3]).toBe('"C:\\Program^ Files\\n\\claude.bat ^"-p^" ^"say^ hi^""');
+    expect(plan.args[3]).toBe('"C:\\Program^ Files\\n\\claude.bat ^^^"-p^^^" ^^^"say^^^ hi^^^""');
   });
 
   it("escapes cmd metacharacters so arguments stay literal", () => {
@@ -104,9 +105,10 @@ describe("launch plan", () => {
       ["a&calc|b>c", "%PATH%", 'q"r'],
       onWindows,
     ).args;
-    expect(line).toContain("a^&calc^|b^>c");
-    expect(line).toContain("^%PATH^%");
-    expect(line).toContain('q\\^"r');
+    // A .bat expands %* in a second parse, just like npm's .cmd shims: escape twice.
+    expect(line).toContain("a^^^&calc^^^|b^^^>c");
+    expect(line).toContain("^^^%PATH^^^%");
+    expect(line).toContain('q\\^^^"r');
   });
 
   it("escapes twice for npm node_modules/.bin shims", () => {

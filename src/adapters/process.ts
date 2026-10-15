@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
-import { planLaunch, type LaunchPlan } from "./launch.js";
+import { planLaunch, windowsSystemExecutable, type LaunchPlan } from "./launch.js";
 
 export const PROBE_OUTPUT_LIMIT = 600;
 const PROBE_TIMEOUT_MS = 30_000;
@@ -97,10 +97,13 @@ export const probeCommand = (
   });
 
 /** Stop a child launched in its own process group, including the processes it started. */
-export const terminateChild = (child: ReturnType<typeof spawn>): void => {
+export const terminateChild = (
+  child: ReturnType<typeof spawn>,
+  options: KillOptions = {},
+): void => {
   if (!child.pid) return;
   try {
-    if (process.platform === "win32") killProcessTree(child);
+    if ((options.platform ?? process.platform) === "win32") killProcessTree(child, options);
     else process.kill(-child.pid, "SIGTERM");
   } catch (error) {
     if (error instanceof Error && "code" in error) {
@@ -122,33 +125,39 @@ export const terminateChild = (child: ReturnType<typeof spawn>): void => {
  * the whole tree and is started without a shell. Elsewhere the child is signalled directly.
  */
 export const killProcessTree = (
-  child: Pick<ChildProcess, "pid" | "kill">,
-  options: {
-    platform?: NodeJS.Platform;
-    spawnProcess?: (
-      command: string,
-      args: readonly string[],
-      options: { stdio: "ignore"; windowsHide: true },
-    ) => {
-      once(event: "error" | "close", listener: (code?: number | null) => void): unknown;
-    };
-  } = {},
+  child: Pick<ChildProcess, "pid" | "kill" | "exitCode" | "signalCode">,
+  options: KillOptions = {},
 ): void => {
+  // A reaped child's pid may already belong to an unrelated process; never signal it.
+  if (child.exitCode !== null || child.signalCode !== null) return;
   if ((options.platform ?? process.platform) !== "win32" || !child.pid) {
     child.kill("SIGKILL");
     return;
   }
   const killer = (options.spawnProcess ?? spawn)(
-    "taskkill",
+    windowsSystemExecutable("taskkill.exe", options.systemRoot),
     ["/pid", String(child.pid), "/T", "/F"],
-    {
-      stdio: "ignore",
-      windowsHide: true,
-    },
+    { stdio: "ignore", windowsHide: true },
   );
-  // taskkill failing (not found, access denied, process already gone) must still stop the handle.
-  killer.once("error", () => child.kill("SIGKILL"));
+  // taskkill failing (not found, access denied, process already gone) must still stop the handle,
+  // unless the child has exited in the meantime.
+  const fallback = () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  };
+  killer.once("error", fallback);
   killer.once("close", (code) => {
-    if (code !== 0) child.kill("SIGKILL");
+    if (code !== 0) fallback();
   });
 };
+
+export interface KillOptions {
+  platform?: NodeJS.Platform;
+  systemRoot?: string;
+  spawnProcess?: (
+    command: string,
+    args: readonly string[],
+    options: { stdio: "ignore"; windowsHide: true },
+  ) => {
+    once(event: "error" | "close", listener: (code?: number | null) => void): unknown;
+  };
+}

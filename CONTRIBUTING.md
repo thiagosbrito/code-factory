@@ -35,8 +35,13 @@ Verification limits for Windows launching (`src/adapters/launch.ts`, the gate sc
 plans, quoting and discovery order are proven by fixtures on every OS, and the `runIf(win32)`
 tests run real `cmd.exe` shims, process-tree cancellation and gate tools on the Windows Server
 2025 job. Not verified: a Windows 11 desktop, or real npm-installed Claude Code, Codex or Kiro
-CLIs (including their own `.cmd` shim bodies). Kiro receives its instruction as an argument, so a
-multi-line instruction cannot reach a `.cmd` launcher and fails with a clear error.
+CLIs (including their own `.cmd` shim bodies). Kiro receives its
+multi-line instruction as an argument, which a `.cmd`/`.bat` launcher cannot carry, so every Kiro
+step through one would fail; Kiro verification therefore reports such a launcher as unusable
+(use a `.exe`). Command scripts are launched through `cmd.exe` with arguments escaped twice
+(`%*` is parsed again by npm shims and `.bat` files), so a hand-written script that does not
+re-parse its arguments sees literal carets. Command lines over cmd.exe's 8191 characters (very
+large changed-file lists in a gate) are refused with a clear message.
 Native filesystem translation is explicitly unsupported on Windows (HTTP 501); its POSIX
 integration tests run on Linux/macOS, with a separate Windows unsupported-response test.
 

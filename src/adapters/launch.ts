@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { extname } from "node:path";
+import { extname, win32 } from "node:path";
 
 /**
  * Windows entries that CreateProcess or cmd.exe can launch, in preference order. npm writes an
@@ -19,7 +19,24 @@ export interface LaunchEnvironment {
   platform?: NodeJS.Platform;
   exists?: (path: string) => boolean;
   comspec?: string;
+  systemRoot?: string;
 }
+
+/** An executable in the Windows System32 directory, by absolute path (never found via PATH or cwd). */
+export const windowsSystemExecutable = (name: string, systemRoot?: string): string =>
+  win32.join(systemRoot || process.env.SystemRoot || "C:\\Windows", "System32", name);
+
+/**
+ * The cmd.exe to run command scripts with. ComSpec is environment input, so it is accepted only
+ * when it is exactly the System32 cmd.exe; otherwise that absolute path is used.
+ */
+export const resolveCmdExecutable = (env: {
+  ComSpec?: string | undefined;
+  SystemRoot?: string | undefined;
+}): string => {
+  const system = windowsSystemExecutable("cmd.exe", env.SystemRoot);
+  return env.ComSpec && env.ComSpec.toLowerCase() === system.toLowerCase() ? env.ComSpec : system;
+};
 
 const COMMAND_SCRIPT = /\.(cmd|bat)$/i;
 const CMD_LINE_LIMIT = 8191;
@@ -72,16 +89,19 @@ export const planLaunch = (
   const exists = environment.exists ?? existsSync;
   if (!exists(resolved))
     throw Object.assign(new Error(`${resolved} was not found`), { code: "ENOENT" });
-  // npm's .cmd shims (local and global) expand %* inside another cmd.exe parse, so a .cmd needs a
-  // second level of escaping or a quote in an argument could end the quoted text there.
-  const doubleEscape = /\.cmd$/i.test(resolved);
+  // npm's .cmd shims (local and global) and plain .bat files expand %* / %1 inside another cmd.exe
+  // parse, so both need a second level of escaping or a quote in an argument could end the quoted
+  // text there. Trade-off: a hand-written script that never re-parses its arguments sees the extra
+  // carets literally.
+  const doubleEscape = true;
   const line = [
     resolved.replace(CMD_META, "^$1"),
     ...args.map((value) => escapeCommandArgument(value, doubleEscape)),
   ].join(" ");
-  // ComSpec is environment input: only an actual cmd.exe is accepted, anything else falls back.
-  const configured = environment.comspec ?? process.env.ComSpec;
-  const comspec = configured && /(^|[\\/])cmd\.exe$/i.test(configured) ? configured : "cmd.exe";
+  const comspec = resolveCmdExecutable({
+    ComSpec: environment.comspec ?? process.env.ComSpec,
+    SystemRoot: environment.systemRoot ?? process.env.SystemRoot,
+  });
   if (comspec.length + line.length + 12 > CMD_LINE_LIMIT)
     throw new Error(
       `The command line for ${resolved} would exceed the ${CMD_LINE_LIMIT} characters cmd.exe accepts; use fewer or shorter arguments, or install an .exe launcher.`,

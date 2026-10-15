@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { kiroChatArgs } from "../src/adapters/kiro.js";
-import { planLaunch } from "../src/adapters/launch.js";
+import { kiroChatArgs, kiroLaunchBlocker } from "../src/adapters/kiro.js";
+import { planLaunch, resolveCmdExecutable } from "../src/adapters/launch.js";
 import { killProcessTree, probeCommand, terminateChild } from "../src/adapters/process.js";
 import { CHANGED_FILES_GATE_PATH } from "../src/domain/gates.js";
 import { GATE_LAUNCH_SOURCE } from "../src/runtime/gate-launch.js";
@@ -23,14 +23,23 @@ const scratch = async () => {
 
 const win = (...present: string[]) => ({
   platform: "win32" as const,
-  comspec: "cmd.exe",
+  comspec: "C:\\Windows\\System32\\cmd.exe",
+  systemRoot: "C:\\Windows",
   exists: (path: string) => present.includes(path),
 });
 
 describe("process tree termination", () => {
   const fakeChild = (pid: number | undefined) => {
     const killed: Array<string | number | undefined> = [];
-    return { child: { pid, kill: (signal?: string | number) => !!killed.push(signal) }, killed };
+    return {
+      child: {
+        pid,
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        kill: (signal?: string | number) => !!killed.push(signal),
+      },
+      killed,
+    };
   };
   const fakeSpawn = (emitError: boolean) => {
     const calls: Array<{ command: string; args: readonly string[]; options: unknown }> = [];
@@ -50,10 +59,14 @@ describe("process tree termination", () => {
   it("kills the whole tree with taskkill /T /F on Windows, without a shell", () => {
     const { child, killed } = fakeChild(4242);
     const spawned = fakeSpawn(false);
-    killProcessTree(child, { platform: "win32", spawnProcess: spawned.run });
+    killProcessTree(child, {
+      platform: "win32",
+      systemRoot: "C:\\Windows",
+      spawnProcess: spawned.run,
+    });
     expect(spawned.calls).toEqual([
       {
-        command: "taskkill",
+        command: "C:\\Windows\\System32\\taskkill.exe",
         args: ["/pid", "4242", "/T", "/F"],
         options: { stdio: "ignore", windowsHide: true },
       },
@@ -68,6 +81,35 @@ describe("process tree termination", () => {
     expect(killed).toEqual(["SIGKILL"]);
   });
 
+  it("does not run taskkill for a child that already exited (its pid may be reused)", () => {
+    const spawned = fakeSpawn(false);
+    for (const exited of [
+      { exitCode: 0 as number | null, signalCode: null as NodeJS.Signals | null },
+      { exitCode: null as number | null, signalCode: "SIGTERM" as NodeJS.Signals | null },
+    ]) {
+      const { child, killed } = fakeChild(4242);
+      killProcessTree({ ...child, ...exited }, { platform: "win32", spawnProcess: spawned.run });
+      expect(killed).toEqual([]);
+    }
+    expect(spawned.calls).toEqual([]);
+  });
+
+  it("does not fall back to killing the handle after the child exited meanwhile", async () => {
+    const { child, killed } = fakeChild(4242);
+    const state = { exitCode: null as number | null, signalCode: null };
+    const watched = {
+      ...child,
+      get exitCode() {
+        return state.exitCode;
+      },
+      signalCode: state.signalCode,
+    };
+    killProcessTree(watched, { platform: "win32", spawnProcess: fakeSpawn(true).run });
+    state.exitCode = 0;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(killed).toEqual([]);
+  });
+
   it("signals the child directly on other platforms", () => {
     const { child, killed } = fakeChild(4242);
     killProcessTree(child, { platform: "linux", spawnProcess: fakeSpawn(false).run });
@@ -75,7 +117,41 @@ describe("process tree termination", () => {
   });
 });
 
+describe("Windows system executables", () => {
+  it("uses absolute System32 paths and ignores a ComSpec elsewhere", () => {
+    expect(resolveCmdExecutable({ SystemRoot: "D:\\Win" })).toBe("D:\\Win\\System32\\cmd.exe");
+    expect(resolveCmdExecutable({})).toBe("C:\\Windows\\System32\\cmd.exe");
+    expect(
+      resolveCmdExecutable({
+        SystemRoot: "C:\\Windows",
+        ComSpec: "c:\\windows\\system32\\CMD.EXE",
+      }),
+    ).toBe("c:\\windows\\system32\\CMD.EXE");
+    expect(resolveCmdExecutable({ SystemRoot: "C:\\Windows", ComSpec: "C:\\evil\\cmd.exe" })).toBe(
+      "C:\\Windows\\System32\\cmd.exe",
+    );
+  });
+
+  it("refuses to verify a Kiro launcher that is a command script", () => {
+    const win32 = {
+      platform: "win32" as const,
+      exists: (p: string) => p === "C:\\k\\kiro-cli.cmd",
+    };
+    expect(kiroLaunchBlocker("C:\\k\\kiro-cli", win32)).toMatch(/\.cmd|\.bat/);
+    expect(kiroLaunchBlocker("C:\\k\\kiro-cli.cmd", { ...win32, exists: () => true })).toMatch(
+      /multi-line/,
+    );
+    expect(kiroLaunchBlocker("C:\\k\\kiro-cli.exe", { ...win32, exists: () => true })).toBeNull();
+    expect(kiroLaunchBlocker("/usr/bin/kiro-cli", { platform: "linux" })).toBeNull();
+  });
+});
+
 describe("command script quoting", () => {
+  it("double-escapes a .bat as well, because %1 and %* are parsed again", () => {
+    const [, , , line] = planLaunch("C:\\t\\x.bat", ['a"&b'], win("C:\\t\\x.bat")).args;
+    expect(line).toBe('"C:\\t\\x.bat ^^^"a\\^^^"^^^&b^^^""');
+  });
+
   it("double-escapes arguments for a global npm shim outside node_modules", () => {
     const [, , , line] = planLaunch(
       "C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd",
@@ -90,7 +166,7 @@ describe("command script quoting", () => {
       ...win("C:\\t\\x.bat"),
       comspec: "C:\\evil\\calc.exe",
     });
-    expect(plan.command).toBe("cmd.exe");
+    expect(plan.command).toBe("C:\\Windows\\System32\\cmd.exe");
   });
 
   it("refuses a command line longer than cmd.exe accepts", () => {
@@ -153,7 +229,7 @@ describe("gate script launch helper", () => {
         args,
         platform,
         exists,
-        "cmd.exe",
+        "C:\\Windows\\System32\\cmd.exe",
       ]);
       if (!isGatePlan(plan)) throw new Error("planGateLaunch returned an unexpected shape");
       return plan;
@@ -170,7 +246,12 @@ describe("gate script launch helper", () => {
     exists: (p: string) => boolean,
   ) => {
     try {
-      const plan = planLaunch(path, args, { platform, exists, comspec: "cmd.exe" });
+      const plan = planLaunch(path, args, {
+        platform,
+        exists,
+        comspec: "C:\\Windows\\System32\\cmd.exe",
+        systemRoot: "C:\\Windows",
+      });
       return { command: plan.command, args: plan.args, verbatim: plan.windowsVerbatimArguments };
     } catch (error) {
       if (error instanceof Error)
@@ -221,6 +302,18 @@ describe("gate script launch helper", () => {
         ? { error: { code: plan.error.code, failed: plan.error.message !== "" } }
         : plan;
     expect(comparable(gate)).toEqual(comparable(adapter));
+  });
+
+  it.each<[{ SystemRoot?: string; ComSpec?: string }]>([
+    [{}],
+    [{ SystemRoot: "D:\\Win\\" }],
+    [{ SystemRoot: "C:\\Windows", ComSpec: "c:\\windows\\system32\\CMD.EXE" }],
+    [{ SystemRoot: "C:\\Windows", ComSpec: "C:\\evil\\cmd.exe" }],
+  ])("resolves cmd.exe like the adapter for %j", (env) => {
+    const resolver: unknown = new Function(`${GATE_LAUNCH_SOURCE}\nreturn resolveGateCmd;`)();
+    if (typeof resolver !== "function") throw new Error("resolveGateCmd is not exported");
+    const normalized = { ...env, SystemRoot: env.SystemRoot?.replace(/\\+$/, "") };
+    expect(Reflect.apply(resolver, undefined, [env])).toBe(resolveCmdExecutable(normalized));
   });
 
   it.each(["linux", "darwin"] as const)("is a plain direct launch on %s", (platform) => {
@@ -289,6 +382,23 @@ describe.runIf(process.platform === "win32")("native Windows command scripts", (
       }
     }
     expect(alive).toBe(false);
+  });
+
+  it("keeps a quote-and-ampersand argument literal for a .bat launcher", async () => {
+    const root = await scratch();
+    await writeFile(
+      join(root, "args.cjs"),
+      'require("fs").writeFileSync(require("path").join(__dirname, "args.json"), JSON.stringify(process.argv.slice(2)))\n',
+    );
+    await writeFile(join(root, "tool.bat"), '@echo off\r\nnode "%~dp0args.cjs" %*\r\n');
+    const hostile = 'a" & echo pwned > pwned.txt & "';
+    await probeCommand(join(root, "tool.bat"), [hostile, "plain"], {
+      label: "tool",
+      timeoutHint: "",
+      cwd: root,
+    });
+    expect(JSON.parse(await readFile(join(root, "args.json"), "utf8"))).toEqual([hostile, "plain"]);
+    await expect(readFile(join(root, "pwned.txt"), "utf8")).rejects.toThrow(/ENOENT/);
   });
 
   it("keeps a quote-and-ampersand argument literal for a global-style shim", async () => {

@@ -6,6 +6,10 @@
  */
 export const GATE_LAUNCH_SOURCE = String.raw`const LAUNCHABLE = [".exe", ".cmd", ".bat"]
 const CMD_META = /([()\][%!^"\x60<>&|;, *?])/g
+const resolveGateCmd = env => {
+  const system = (env.SystemRoot || "C:\\Windows").replace(/[\\/]+$/, "") + "\\System32\\cmd.exe"
+  return env.ComSpec && env.ComSpec.toLowerCase() === system.toLowerCase() ? env.ComSpec : system
+}
 const resolveGateBin = (path, platform, exists) => {
   if (platform !== "win32" || !/[\\/]/.test(path)) return path
   if (LAUNCHABLE.some(extension => path.toLowerCase().endsWith(extension))) return path
@@ -29,7 +33,7 @@ const planGateLaunch = (path, args, platform, exists, comspec) => {
     missing.code = "ENOENT"
     throw missing
   }
-  const doubleEscape = /\.cmd$/i.test(resolved)
+  const doubleEscape = true
   const line = [resolved.replace(CMD_META, "^$1"), ...args.map(value => escapeGateArgument(value, doubleEscape))].join(" ")
   if (comspec.length + line.length + 12 > 8191)
     throw new Error("The command line for " + resolved + " would exceed the 8191 characters cmd.exe accepts; too many changed files for this tool.")

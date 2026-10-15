@@ -20,14 +20,31 @@ describe("adapter process termination", () => {
     expect(direct).not.toHaveBeenCalled();
   });
 
-  // taskkill cannot end this fake pid, so the handle is stopped directly as a fallback.
-  it.runIf(process.platform === "win32")("terminates the owned Windows child", async () => {
+  // The spawn function is injected so no real taskkill ever targets the arbitrary pid 12345.
+  it("terminates the owned Windows child tree through an injected taskkill", () => {
     const child = childWithPid();
     const group = vi.spyOn(process, "kill");
-    const direct = vi.spyOn(child, "kill").mockReturnValue(true);
-    terminateChild(child);
-    await vi.waitFor(() => expect(direct).toHaveBeenCalledOnce());
+    const calls: Array<{ command: string; args: readonly string[] }> = [];
+    terminateChild(child, {
+      platform: "win32",
+      systemRoot: "C:\\Windows",
+      spawnProcess: (command, args) => {
+        calls.push({ command, args });
+        return { once: () => undefined };
+      },
+    });
+    expect(calls).toEqual([
+      { command: "C:\\Windows\\System32\\taskkill.exe", args: ["/pid", "12345", "/T", "/F"] },
+    ]);
     expect(group).not.toHaveBeenCalled();
+  });
+
+  it("leaves a child that already exited alone on Windows", () => {
+    const child = childWithPid();
+    Object.defineProperty(child, "exitCode", { value: 0 });
+    const spawnProcess = vi.fn<() => { once: () => undefined }>(() => ({ once: () => undefined }));
+    terminateChild(child, { platform: "win32", spawnProcess });
+    expect(spawnProcess).not.toHaveBeenCalled();
   });
 
   describe.runIf(process.platform !== "win32")("POSIX process groups", () => {
