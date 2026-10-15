@@ -44,7 +44,8 @@ export const RunExecution = ({
             {executing ? "Executing…" : "Execute run"}
           </Button>
         )}
-        {(executing || ["running", "waiting-input", "paused"].includes(run.status)) &&
+        {(executing ||
+          ["running", "waiting-input", "paused", "unavailable"].includes(run.status)) &&
           connected && (
             <Button variant="outline" onClick={onCancel}>
               Cancel run

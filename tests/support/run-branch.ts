@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mockAdapter } from "../../src/adapters/mock.js";
@@ -16,6 +16,15 @@ import { createProjectRunBranch } from "../../src/runtime/run-branch.js";
 import { createRun } from "../../src/runtime/storage.js";
 
 export const parents: string[] = [];
+
+/** Windows can hold a just-used directory briefly, so retry removal instead of failing teardown. */
+export const removeParents = async (): Promise<void> => {
+  await Promise.all(
+    parents
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })),
+  );
+};
 
 export const savedEnv = { ...process.env };
 

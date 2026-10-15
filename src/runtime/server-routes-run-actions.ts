@@ -5,6 +5,7 @@ import { prepareStepRetry } from "../domain/scheduler.js";
 import { guidanceInputSchema, sendGuidance } from "./guidance.js";
 import { inputReplySchema, replyToInput } from "./input.js";
 import { ProjectError } from "./project.js";
+import { hasRunOwner } from "./run-ownership.js";
 import { assertProjectRunCanWrite } from "./run-branch.js";
 import { agentNotConnected, executeRun, isRunActive, retryStep } from "./scheduler.js";
 import { mutateRun, readRun } from "./storage.js";
@@ -38,6 +39,14 @@ export const handleRunActions: RouteHandler = async (ctx) => {
       return true;
     }
     if (!(await isProjectTrusted(projectDirectory))) throw projectNotTrusted();
+    if (
+      !isRunActive(projectDirectory, run.snapshot.id) &&
+      (await hasRunOwner(projectDirectory, run.snapshot.id))
+    )
+      throw new ProjectError(
+        "Run is owned by another runtime. Stop that runtime before recovery.",
+        409,
+      );
     // An interrupted run (waiting for input or paused when the runtime stopped) resumes here too.
     const resumable =
       ["waiting-input", "paused"].includes(run.status) &&
@@ -85,6 +94,14 @@ export const handleRunActions: RouteHandler = async (ctx) => {
       return true;
     }
     if (!(await isProjectTrusted(projectDirectory))) throw projectNotTrusted();
+    if (
+      !isRunActive(projectDirectory, run.snapshot.id) &&
+      (await hasRunOwner(projectDirectory, run.snapshot.id))
+    )
+      throw new ProjectError(
+        "Run is owned by another runtime. Stop that runtime before recovery.",
+        409,
+      );
     const { stepId, attemptId } = parsed.data;
     if (
       run.evidence.some(

@@ -2,7 +2,7 @@ import type { RunRecord } from "../domain/run.js";
 import type { StepInputs } from "./scheduler-inputs.js";
 import type { Resolver } from "./scheduler-constants.js";
 import type { FileSnapshot } from "./scheduler-evidence.js";
-import { mutateRun } from "./storage.js";
+import { mutateRun, isRunPersistenceError } from "./storage.js";
 import type { gitTreeState, ResolvedWorkspace } from "./workspace.js";
 
 export type Commit = (
@@ -23,6 +23,7 @@ export type RunContext = {
   readonly setRecord: (next: RunRecord) => void;
   /** The one FIFO chain for this run: every write is serialized, so event sequences stay contiguous. */
   readonly commit: Commit;
+  readonly writeFailed: () => boolean;
 };
 
 export type RunWorkspace = {
@@ -59,14 +60,26 @@ export const createRunContext = (
   initial: RunRecord,
   signal: AbortSignal,
   resolveAdapter: Resolver,
+  onWriteFailure: (error: unknown) => void = () => undefined,
 ): RunContext => {
   let record: RunRecord = initial;
   let pendingCommit: Promise<void> = Promise.resolve();
+  let writeFailed = false;
   const commit: Commit = async (change) => {
     const work = pendingCommit.then(async () => {
-      record = await mutateRun(project, runId, change);
+      try {
+        record = await mutateRun(project, runId, change);
+      } catch (error) {
+        // Only a failed storage write blocks persistence; a rejected change is a domain error.
+        if (isRunPersistenceError(error)) {
+          writeFailed = true;
+          onWriteFailure(error);
+        }
+        throw error;
+      }
     });
-    pendingCommit = work;
+    // Keep this caller's rejection, but let a later interruption/recovery write try again.
+    pendingCommit = work.catch(() => undefined);
     await work;
     return record;
   };
@@ -81,5 +94,6 @@ export const createRunContext = (
       record = next;
     },
     commit,
+    writeFailed: () => writeFailed,
   };
 };

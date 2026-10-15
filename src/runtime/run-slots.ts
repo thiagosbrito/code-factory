@@ -4,15 +4,45 @@ import { mutateRun, readRun } from "./storage.js";
 import { ProjectError } from "./project.js";
 import { executeOnce } from "./execute-run.js";
 import { isActiveStatus, type Resolver } from "./scheduler-constants.js";
+import { interruptStep } from "./scheduler-evidence.js";
+import { withRunOwnership } from "./run-ownership.js";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+
+const projectAliases = new Map<string, string>();
+// Synchronous so the check-and-set on `active` has no await before it and cannot reorder.
+const runKey = (project: string, runId: string): string => {
+  let canonical: string;
+  try {
+    canonical = realpathSync.native(project);
+  } catch {
+    // A missing project still yields a key; the later read reports the useful error.
+    canonical = resolve(project);
+  }
+  projectAliases.set(project, canonical);
+  return `${canonical}:${runId}`;
+};
+const knownRunKey = (project: string, runId: string): string =>
+  `${projectAliases.get(project) ?? project}:${runId}`;
 
 const active = new Map<
   string,
   { work: Promise<RunRecord>; controller: AbortController; retry?: string }
 >();
+// Runtime feedback remains readable even when replacing the durable run record is blocked.
+const executionErrors = new Map<string, string>();
+export const runExecutionError = (project: string, runId: string): string | undefined =>
+  executionErrors.get(knownRunKey(project, runId));
+
+const writeFailure = (key: string, controller: AbortController) => (error: unknown) => {
+  if (!executionErrors.has(key))
+    executionErrors.set(key, error instanceof Error ? error.message : String(error));
+  controller.abort(error);
+};
 
 /** Whether this runtime is executing the run now; an unfinished run that is not was interrupted. */
 export const isRunActive = (project: string, runId: string): boolean =>
-  active.has(`${project}:${runId}`);
+  active.has(knownRunKey(project, runId));
 
 /** Execute the persisted graph with one scheduler and per-step adapters. Duplicate calls share work. */
 export const executeRun = async (
@@ -20,14 +50,24 @@ export const executeRun = async (
   runId: string,
   resolveAdapter: Resolver,
 ): Promise<RunRecord> => {
-  const key = `${project}:${runId}`;
+  const key = runKey(project, runId);
   const existing = active.get(key);
   if (existing) {
     if (existing.retry) throw new Error("A selected retry is active.");
     return existing.work;
   }
   const controller = new AbortController();
-  const work = executeOnce(project, runId, resolveAdapter, controller.signal);
+  const work = withRunOwnership(project, runId, () => {
+    executionErrors.delete(key);
+    return executeOnce(
+      project,
+      runId,
+      resolveAdapter,
+      controller.signal,
+      undefined,
+      writeFailure(key, controller),
+    );
+  });
   active.set(key, { work, controller });
   try {
     return await work;
@@ -45,9 +85,9 @@ export const withIdleRunSlot = async (
   runId: string,
   work: () => Promise<RunRecord>,
 ): Promise<RunRecord | null> => {
-  const key = `${project}:${runId}`;
+  const key = runKey(project, runId);
   if (active.has(key)) return null;
-  const pending = work();
+  const pending = withRunOwnership(project, runId, work);
   active.set(key, { work: pending, controller: new AbortController() });
   try {
     return await pending;
@@ -64,7 +104,7 @@ export const retryStep = async (
   expectedAttemptId: string,
   resolveAdapter: Resolver,
 ): Promise<RunRecord> => {
-  const key = `${project}:${runId}`;
+  const key = runKey(project, runId);
   const retry = `${stepId}:${expectedAttemptId}`;
   const existing = active.get(key);
   if (existing) {
@@ -77,9 +117,19 @@ export const retryStep = async (
     return retryStep(project, runId, stepId, expectedAttemptId, resolveAdapter);
   }
   const controller = new AbortController();
-  const work = executeOnce(project, runId, resolveAdapter, controller.signal, {
-    stepId,
-    expectedAttemptId,
+  const work = withRunOwnership(project, runId, () => {
+    executionErrors.delete(key);
+    return executeOnce(
+      project,
+      runId,
+      resolveAdapter,
+      controller.signal,
+      {
+        stepId,
+        expectedAttemptId,
+      },
+      writeFailure(key, controller),
+    );
   });
   active.set(key, { work, controller, retry });
   try {
@@ -90,27 +140,35 @@ export const retryStep = async (
 };
 
 export const cancelRun = async (project: string, runId: string): Promise<RunRecord> => {
-  const running = active.get(`${project}:${runId}`);
+  const key = runKey(project, runId);
+  const running = active.get(key);
   if (running) {
     running.controller.abort();
     return running.work;
   }
-  // A run that is not executing (pending, or left "running" between steps by a restart) would
-  // otherwise hold an in-project checkout forever, so it can be canceled directly.
+  // Cancellation stops scheduling; interrupted attempts retain an unknown native outcome.
+  // Acquire cross-process ownership before reconciling any persisted active attempt.
   const record = await readRun(project, runId);
   if (!record) throw new ProjectError("Run not found.", 404);
-  if (
-    !["pending", "running"].includes(record.status) ||
-    record.steps.some((step) => isActiveStatus(step.status))
-  )
+  if (!["pending", "running", "waiting-input", "paused", "unavailable"].includes(record.status))
     throw new ProjectError("Run is not executing.", 409);
   return withIdleRunSlot(project, runId, () =>
     mutateRun(project, runId, (current) =>
-      ["pending", "running"].includes(current.status) &&
-      !current.steps.some((step) => isActiveStatus(step.status))
+      ["pending", "running", "waiting-input", "paused", "unavailable"].includes(current.status)
         ? runRecordSchema.parse({
             ...appendRunEvent(
-              current,
+              current.steps
+                .filter((step) => isActiveStatus(step.status))
+                .reduce(
+                  (latest, step) =>
+                    interruptStep(
+                      latest,
+                      step.stepId,
+                      "Runtime ownership ended; native outcome is unknown.",
+                      "execution-interrupted",
+                    ),
+                  current,
+                ),
               "lifecycle",
               "Run canceled",
               current.status === "pending"
@@ -119,11 +177,13 @@ export const cancelRun = async (project: string, runId: string): Promise<RunReco
               "canceled",
             ),
             status: "canceled",
+            revision: current.revision + 1,
           })
         : current,
     ),
   ).then((result) => {
     if (!result) throw new ProjectError("Run is not executing.", 409);
+    executionErrors.delete(key);
     return result;
   });
 };

@@ -18,6 +18,7 @@ export type RunDetailProps = {
   executing: boolean;
   /** Unfinished, but the runtime is not executing it (for example after a restart). */
   interrupted?: boolean;
+  executionError?: string | undefined;
   onExecute: () => void;
   onCancel: () => void;
   onRetry?: (stepId: string, attemptId: string, focusTarget?: HTMLElement | null) => void;

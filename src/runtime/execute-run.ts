@@ -8,7 +8,7 @@ import {
   settleRun,
   skipInactive,
 } from "../domain/scheduler.js";
-import { readRun } from "./storage.js";
+import { readRun, isRunPersistenceError } from "./storage.js";
 import { fileDigest } from "./workspace.js";
 import { FINISHED_RUN, isActiveStatus, type Resolver } from "./scheduler-constants.js";
 import { stepInputs } from "./scheduler-inputs.js";
@@ -22,13 +22,28 @@ export const executeOnce = async (
   resolveAdapter: Resolver,
   signal: AbortSignal,
   retry?: { stepId: string; expectedAttemptId: string },
+  onWriteFailure: (error: unknown) => void = () => undefined,
 ): Promise<RunRecord> => {
   const initial = await readRun(project, runId);
   if (!initial) throw new Error("Run not found.");
   // A run canceled (or otherwise finished) between the execute request and this slot stays put;
   // in particular its setup command must not run in the user's checkout after a cancel.
   if (!retry && FINISHED_RUN.has(initial.status)) return initial;
-  const ctx = createRunContext(project, runId, initial, signal, resolveAdapter);
+  const ctx = createRunContext(project, runId, initial, signal, resolveAdapter, onWriteFailure);
+  const runSteps = async (ids: string[]) => {
+    const results = await Promise.allSettled(
+      ids.map(async (id) => {
+        try {
+          await runStep(ctx, workspace, id);
+        } catch (error) {
+          if (ctx.writeFailed() || isRunPersistenceError(error)) onWriteFailure(error);
+          throw error;
+        }
+      }),
+    );
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  };
   const { commit } = ctx;
   const opened = await openRunWorkspace(ctx);
   if (opened.kind === "done") return opened.record;
@@ -52,7 +67,7 @@ export const executeOnce = async (
 
   const interrupted = ctx.record().steps.filter((step) => isActiveStatus(step.status));
   if (interrupted.length) {
-    await Promise.all(interrupted.map((step) => runStep(ctx, workspace, step.stepId)));
+    await runSteps(interrupted.map((step) => step.stepId));
     if (ctx.record().status === "unavailable") return ctx.record();
   }
   for (;;) {
@@ -92,6 +107,6 @@ export const executeOnce = async (
       );
       launched.push(definition.id);
     }
-    await Promise.all(launched.map((id) => runStep(ctx, workspace, id)));
+    await runSteps(launched);
   }
 };

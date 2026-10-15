@@ -8,8 +8,10 @@ import {
   removeRunWorktree,
   returnToPreviousBranch,
 } from "./run-branch.js";
-import { cancelRun, isRunActive, withIdleRunSlot } from "./scheduler.js";
+import { cancelRun, isRunActive, withIdleRunSlot, runExecutionError } from "./scheduler.js";
 import { listRuns, readRun } from "./storage.js";
+import { FINISHED_RUN } from "./scheduler-constants.js";
+import { hasRunOwner } from "./run-ownership.js";
 import { json, readBody, type RouteContext, type RouteHandler } from "./server-http.js";
 
 const branchNameFailure = (response: RouteContext["response"], error: BranchNameError) =>
@@ -185,9 +187,13 @@ export const handleRunReads: RouteHandler = async (ctx) => {
     if (run)
       json(response, 200, {
         run,
+        executionError: FINISHED_RUN.has(run.status)
+          ? undefined
+          : runExecutionError(projectDirectory, id),
         interrupted:
           ["running", "waiting-input", "paused"].includes(run.status) &&
-          !isRunActive(projectDirectory, id),
+          !isRunActive(projectDirectory, id) &&
+          !(await hasRunOwner(projectDirectory, id)),
       });
     else json(response, 404, { error: "Run not found." });
     return true;

@@ -27,6 +27,7 @@ export const SelectedRunDetail = ({
       streamConnected={factory.streamConnected}
       executing={factory.executingRunId === id}
       interrupted={factory.selectedRunInterrupted}
+      executionError={factory.selectedRunExecutionError}
       onExecute={() => void factory.execute(id)}
       onCancel={() => void factory.cancel(id)}
       agents={agents}

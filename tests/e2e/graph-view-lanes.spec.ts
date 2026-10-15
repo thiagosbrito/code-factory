@@ -70,7 +70,7 @@ test("moving a step into Review asks first: Cancel snaps it back, Apply moves it
   await expect(dialog).toContainText("Review lane makes it a review step");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toHaveCount(0);
-  expect(await insideLane(page, "Implement", "3. Implementation")).toEqual(before);
+  await expect.poll(() => insideLane(page, "Implement", "3. Implementation")).toEqual(before);
   await expect(undo(page)).toBeDisabled();
 
   await dropInto(page, "Implement", "4. Review");
@@ -93,7 +93,7 @@ test("a group member refuses a lane move, snaps back and shows the reason on scr
     .filter({ hasText: "belongs to a group, join, or decision" });
   await expect(alert).toBeVisible();
   await expect(alert).toBeInViewport();
-  expect(await insideLane(page, "Lint changed files", "5. Validate")).toEqual(before);
+  await expect.poll(() => insideLane(page, "Lint changed files", "5. Validate")).toEqual(before);
   await expect(undo(page)).toBeDisabled();
 });
 
@@ -108,7 +108,7 @@ test("a check step cannot leave Validate", async ({ page, harness }) => {
   const alert = page.getByRole("alert").filter({ hasText: "Check steps belong in Validate." });
   await expect(alert).toBeVisible();
   await expect(alert).toBeInViewport();
-  expect(await insideLane(page, "New check", "5. Validate")).toEqual(before);
+  await expect.poll(() => insideLane(page, "New check", "5. Validate")).toEqual(before);
   // Only the add is in history; the refused move recorded nothing.
   await undo(page).click();
   await expect(undo(page)).toBeDisabled();
@@ -175,6 +175,6 @@ test("moving an agent step out of Validate asks first when it has indirect ances
   await expect(dialog).toContainText("stops receiving the results of every upstream step");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toHaveCount(0);
-  expect(await insideLane(page, "Validate", "5. Validate")).toEqual(before);
+  await expect.poll(() => insideLane(page, "Validate", "5. Validate")).toEqual(before);
   await expect(undo(page)).toBeDisabled();
 });

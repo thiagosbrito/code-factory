@@ -1,4 +1,4 @@
-import { chmod, lstat, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { READ_ONLY_LEFTOVERS } from "../src/domain/run-branch.js";
@@ -13,7 +13,7 @@ import {
   implement,
   loopWith,
   outcome,
-  parents,
+  removeParents,
   repository,
   savedEnv,
   tidy,
@@ -22,7 +22,7 @@ import {
 
 afterEach(async () => {
   process.env = { ...savedEnv };
-  await Promise.all(parents.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await removeParents();
 });
 
 // These tests execute real Git processes and multiple persisted/API transitions.

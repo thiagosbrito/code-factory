@@ -1,4 +1,4 @@
-import { chmod, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, readFile, utimes, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectDiff, inspectFiles } from "../src/runtime/inspection.js";
@@ -14,7 +14,7 @@ import {
   implement,
   loopWith,
   outcome,
-  parents,
+  removeParents,
   repository,
   review,
   savedEnv,
@@ -25,7 +25,7 @@ import {
 
 afterEach(async () => {
   process.env = { ...savedEnv };
-  await Promise.all(parents.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await removeParents();
 });
 
 describe("in-project run branch", () => {
