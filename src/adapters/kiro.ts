@@ -1,3 +1,4 @@
+import { planLaunch } from "./launch.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
@@ -145,7 +146,9 @@ export class KiroAdapter implements AgentAdapter {
     if (signal.aborted) throw new Error("Kiro execution aborted before launch");
     if (input.binding.effort)
       throw new Error("Kiro does not advertise supported effort choices in its model catalog");
-    const child = spawn(this.executable, kiroChatArgs(input), {
+    const launch = planLaunch(this.executable, kiroChatArgs(input));
+    const child = spawn(launch.command, launch.args, {
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
       cwd: input.projectDirectory,
       stdio: ["ignore", "pipe", "pipe"],
       // Kiro launches a second process; own its process group so cancellation reaches both.

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
+import { planLaunch, type LaunchPlan } from "./launch.js";
 
 export const PROBE_OUTPUT_LIMIT = 600;
 const PROBE_TIMEOUT_MS = 30_000;
@@ -36,7 +37,15 @@ export const probeCommand = (
   new Promise((resolve, reject) => {
     const command = `${options.label} ${args.join(" ")}`;
     const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
-    const child = spawn(executable, args, {
+    let launch: LaunchPlan;
+    try {
+      launch = planLaunch(executable, args);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const child = spawn(launch.command, launch.args, {
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
       cwd: options.cwd ?? tmpdir(),
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, NO_COLOR: "1" },

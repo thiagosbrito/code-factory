@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { CHANGED_FILES_GATE_PATH, DEFAULT_COVERAGE_THRESHOLD } from "../domain/gates.js";
+import { GATE_LAUNCH_SOURCE } from "./gate-launch.js";
 
 /**
  * The changed-files gate, run by check steps as `node .code-factory/gates/changed-files-gate.mjs
@@ -20,9 +21,18 @@ import { join, resolve } from "node:path"
 
 const THRESHOLD = Number(process.env.CODE_FACTORY_COVERAGE_THRESHOLD || "${DEFAULT_COVERAGE_THRESHOLD}")
 const root = process.cwd()
-const bin = name => join(root, "node_modules", ".bin", name)
+${GATE_LAUNCH_SOURCE}
+// On Windows npm writes tool (bash shim), tool.cmd and tool.ps1; only the launchable entry can start.
+const bin = name => resolveGateBin(join(root, "node_modules", ".bin", name), process.platform, existsSync)
 const has = name => existsSync(bin(name))
-const run = (command, args) => spawnSync(command, args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+const run = (command, args) => {
+  try {
+    const plan = planGateLaunch(command, args, process.platform, existsSync, process.env.ComSpec || "cmd.exe")
+    return spawnSync(plan.command, plan.args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsVerbatimArguments: plan.verbatim })
+  } catch (error) {
+    return { status: null, stdout: "", stderr: "", error }
+  }
+}
 const print = result => {
   if (result.stdout) process.stdout.write(result.stdout)
   if (result.stderr) process.stderr.write(result.stderr)
