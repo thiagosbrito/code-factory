@@ -1,4 +1,4 @@
-import { rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { mockAdapter } from "../src/adapters/mock.js";
@@ -12,7 +12,7 @@ import {
   implement,
   loopWith,
   outcome,
-  parents,
+  removeParents,
   repository,
   review,
   savedEnv,
@@ -22,7 +22,7 @@ import {
 
 afterEach(async () => {
   process.env = { ...savedEnv };
-  await Promise.all(parents.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await removeParents();
 });
 
 // These tests execute real Git processes and multiple persisted/API transitions.

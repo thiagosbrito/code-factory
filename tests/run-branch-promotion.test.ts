@@ -14,7 +14,7 @@ import {
   git,
   implement,
   loopWith,
-  parents,
+  removeParents,
   repository,
   savedEnv,
   worktreeOf,
@@ -23,7 +23,7 @@ import {
 
 afterEach(async () => {
   process.env = { ...savedEnv };
-  await Promise.all(parents.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await removeParents();
 });
 
 describe("promotion and removal through the local API", () => {

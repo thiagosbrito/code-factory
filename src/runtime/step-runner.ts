@@ -159,8 +159,13 @@ export const runStep = async (
       .record()
       .steps.find((item) => item.stepId === stepId)
       ?.attempts.at(-1)?.id;
+    // Best effort: while writes are still blocked, keep the original error.
     if (finalAttemptId)
-      await commit((current) => expireQueuedGuidance(current, stepId, finalAttemptId));
+      await commit((current) => expireQueuedGuidance(current, stepId, finalAttemptId)).catch(
+        (error: unknown) => {
+          if (!ctx.writeFailed()) throw error;
+        },
+      );
     if (reviewRoot) await rm(reviewRoot, { recursive: true, force: true });
   }
 };

@@ -282,15 +282,35 @@ export const createRunFromPublished = async (
     createRunRecord(createRunSnapshot(loop, task, defaultBinding, baseline)),
   );
 };
+const persistenceFailures = new WeakSet<object>();
+/** Whether the run file could not be replaced on disk, as opposed to a rejected change or stale revision. */
+export const isRunPersistenceError = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && persistenceFailures.has(error);
+
+const tagPersistence = (error: unknown): Error => {
+  const failure = error instanceof Error ? error : new Error(String(error));
+  persistenceFailures.add(failure);
+  return failure;
+};
+const hasFsCode = (error: unknown): boolean =>
+  error instanceof Error && "code" in error && typeof error.code === "string";
+
 /** Serialized updates preserve immutable inputs and reject stale, destructive history writes. */
 export const updateRun = async (project: string, input: RunRecord): Promise<RunRecord> => {
   const record = runRecordSchema.parse(input);
   const directory = await runDirectory(project);
   const path = join(directory, `${record.snapshot.id}.json`);
   const lock = `${path}.lock`;
-  await mkdir(lock);
   try {
-    const current = await readRun(project, record.snapshot.id);
+    await mkdir(lock);
+  } catch (error) {
+    // A stale or unwritable lock blocks persistence just like a failed replacement.
+    throw tagPersistence(error);
+  }
+  try {
+    const current = await readRun(project, record.snapshot.id).catch((error: unknown) => {
+      throw hasFsCode(error) ? tagPersistence(error) : error;
+    });
     if (!current) throw new Error("Run does not exist.");
     if (record.revision !== current.revision + 1)
       throw new Error("Run revision conflict; reload before updating.");
@@ -350,7 +370,12 @@ export const updateRun = async (project: string, input: RunRecord): Promise<RunR
       )
     )
       throw new Error("Evidence history is append-only.");
-    await atomicWrite(path, record);
+    try {
+      await atomicWrite(path, record);
+    } catch (error) {
+      // Tag the original error so callers and tests keep its identity and code.
+      throw tagPersistence(error);
+    }
     return record;
   } finally {
     await rm(lock, { recursive: true, force: true });
@@ -370,7 +395,9 @@ export const mutateRun = async (
   const work = prior
     .catch(() => undefined)
     .then(async () => {
-      const current = await readRun(project, runId);
+      const current = await readRun(project, runId).catch((error: unknown) => {
+        throw hasFsCode(error) ? tagPersistence(error) : error;
+      });
       if (!current) throw new Error("Run not found.");
       const next = await change(current);
       return next === current ? current : updateRun(project, next);

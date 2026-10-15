@@ -62,7 +62,7 @@ it("cancels multiple orphaned reviewers in one valid revision with contiguous ev
   ).toEqual([0, 1, 2]);
 });
 
-it("allows interruption evidence to persist after a failed queued write", async () => {
+it("keeps the queue usable after a change function rejects with a domain error", async () => {
   const root = await project();
   const initial = await createRun(root, run());
   const ctx = createRunContext(

@@ -2,7 +2,7 @@ import type { RunRecord } from "../domain/run.js";
 import type { StepInputs } from "./scheduler-inputs.js";
 import type { Resolver } from "./scheduler-constants.js";
 import type { FileSnapshot } from "./scheduler-evidence.js";
-import { mutateRun } from "./storage.js";
+import { mutateRun, isRunPersistenceError } from "./storage.js";
 import type { gitTreeState, ResolvedWorkspace } from "./workspace.js";
 
 export type Commit = (
@@ -70,8 +70,11 @@ export const createRunContext = (
       try {
         record = await mutateRun(project, runId, change);
       } catch (error) {
-        writeFailed = true;
-        onWriteFailure(error);
+        // Only a failed storage write blocks persistence; a rejected change is a domain error.
+        if (isRunPersistenceError(error)) {
+          writeFailed = true;
+          onWriteFailure(error);
+        }
         throw error;
       }
     });

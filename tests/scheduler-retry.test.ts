@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mockAdapter } from "../src/adapters/mock.js";
-import { executeRun, retryStep } from "../src/runtime/scheduler.js";
+import { executeRun, retryStep, runExecutionError, isRunActive } from "../src/runtime/scheduler.js";
 import { createRun, readRun, updateRun } from "../src/runtime/storage.js";
 import { startLocalServer } from "../src/runtime/server.js";
 import { evidenceFreshness } from "../src/ui/features/runs/run-view-model.js";
@@ -193,6 +193,96 @@ describe("portable scheduler", () => {
       expect(first.steps.find((item) => item.stepId === "security")?.attempts).toHaveLength(1);
       expect(await readFile(join(workspace, "task.txt"), "utf8")).toBe("retained edit");
       expect((await readRun(root, record.snapshot.id))?.revision).toBe(first.revision);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("shares one selected retry when a symlinked project root is used for concurrent requests", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "factory-retry-link-"));
+    try {
+      const realRoot = join(parent, "real");
+      const linkRoot = join(parent, "link");
+      await mkdir(join(realRoot, ".code-factory", "workspaces", "candidate"), { recursive: true });
+      await symlink(realRoot, linkRoot, "junction");
+      const seed = run({
+        steps: [step("build", "implementation")],
+        dependencies: [],
+        groups: [],
+        joins: [],
+      });
+      const record = createRunRecord(
+        createRunSnapshot(
+          seed.snapshot.loop,
+          { description: "Task" },
+          { provider: "mock", model: "default" },
+          {
+            id: "baseline",
+            kind: "git",
+            revision: "abc",
+            workspace: ".code-factory/workspaces/candidate",
+            capturedAt: new Date().toISOString(),
+          },
+        ),
+      );
+      await createRun(linkRoot, record);
+      let current = claim((await readRun(linkRoot, record.snapshot.id)) ?? record, "build");
+      current = await updateRun(linkRoot, current);
+      current = await updateRun(linkRoot, completeStep(current, "build", { status: "failed" }));
+      const previous = current.steps[0]?.attempts[0]?.id;
+      if (!previous) throw new Error("Missing previous attempt");
+      const adapter = { ...mockAdapter };
+      // No await between the calls: the slot check-and-set must not reorder across them.
+      // The retries use the real path, whose realpath resolves sooner than the symlink's.
+      const prior = executeRun(linkRoot, record.snapshot.id, () => adapter);
+      // Synchronous: the slot is taken before any await can reorder the later calls.
+      expect(isRunActive(linkRoot, record.snapshot.id)).toBe(true);
+      const first = retryStep(realRoot, record.snapshot.id, "build", previous, () => adapter);
+      const duplicate = retryStep(realRoot, record.snapshot.id, "build", previous, () => adapter);
+      const [one, two] = await Promise.all([first, duplicate]);
+      await prior;
+      expect(one.status).toBe("succeeded");
+      expect(two.revision).toBe(one.revision);
+      expect(one.steps[0]?.attempts).toHaveLength(2);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("does not record an execution error when a retry change is rejected as a domain error", async () => {
+    const root = await mkdtemp(join(tmpdir(), "factory-retry-domain-"));
+    try {
+      await mkdir(join(root, ".code-factory", "workspaces", "candidate"), { recursive: true });
+      const seed = run({
+        steps: [step("build", "implementation")],
+        dependencies: [],
+        groups: [],
+        joins: [],
+      });
+      const record = createRunRecord(
+        createRunSnapshot(
+          seed.snapshot.loop,
+          { description: "Task" },
+          { provider: "mock", model: "default" },
+          {
+            id: "baseline",
+            kind: "git",
+            revision: "abc",
+            workspace: ".code-factory/workspaces/candidate",
+            capturedAt: new Date().toISOString(),
+          },
+        ),
+      );
+      await createRun(root, record);
+      let current = claim((await readRun(root, record.snapshot.id)) ?? record, "build");
+      current = await updateRun(root, current);
+      current = await updateRun(root, completeStep(current, "build", { status: "failed" }));
+      // A stale expected attempt is rejected by the retry change, not by the storage write.
+      await expect(
+        retryStep(root, record.snapshot.id, "build", "stale-attempt", () => mockAdapter),
+      ).rejects.toThrow("Retry target changed");
+      expect(runExecutionError(root, record.snapshot.id)).toBeUndefined();
+      expect((await readRun(root, record.snapshot.id))?.status).toBe("failed");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

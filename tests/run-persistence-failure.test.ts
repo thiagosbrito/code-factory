@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { mockAdapter } from "../src/adapters/mock.js";
 import type { AdapterEvent } from "../src/adapters/contract.js";
-import { createRun, readRun } from "../src/runtime/storage.js";
+import { createRun, mutateRun, readRun } from "../src/runtime/storage.js";
 import { cancelRun, executeRun, isRunActive, runExecutionError } from "../src/runtime/scheduler.js";
+import { runRecordSchema } from "../src/domain/run.js";
 import { run, step } from "./support/scheduler.js";
 import { startLocalServer } from "../src/runtime/server.js";
 import { runResponseSchema } from "../src/ui/shared/project-api.js";
@@ -55,6 +56,27 @@ it("persists interruption after a failed completion write and can cancel without
         turnId: crypto.randomUUID(),
       };
       yield { type: "started", ...identity };
+      const attemptId = (await readRun(root, input.runId))?.steps[0]?.attempts[0]?.id;
+      await mutateRun(root, input.runId, (current) =>
+        runRecordSchema.parse({
+          ...current,
+          revision: current.revision + 1,
+          evidence: [
+            ...current.evidence,
+            {
+              kind: "guidance",
+              id: crypto.randomUUID(),
+              runId: current.snapshot.id,
+              createdAt: new Date().toISOString(),
+              stepId: "build",
+              attemptId,
+              messageId: crypto.randomUUID(),
+              message: "steer",
+              state: "queued",
+            },
+          ],
+        }),
+      );
       replace.mockRejectedValueOnce(failure);
       yield { type: "completed", ...identity, outcome: "succeeded", output: "Done" };
     },
@@ -62,11 +84,16 @@ it("persists interruption after a failed completion write and can cancel without
   const interrupted = await executeRun(root, initial.snapshot.id, () => adapter);
   expect(interrupted.status).toBe("unavailable");
   expect(interrupted.steps[0]?.attempts[0]?.status).toBe("interrupted");
-  expect(interrupted.evidence.at(-1)).toMatchObject({
-    title: "execution-interrupted",
+  expect(
+    interrupted.evidence.find((item) => "title" in item && item.title === "execution-interrupted"),
+  ).toMatchObject({
     detail: failure.message,
   });
   expect(await readRun(root, initial.snapshot.id)).toEqual(interrupted);
+  // Append-only: the queued guidance is superseded by a rejected entry once persistence recovers.
+  expect(
+    interrupted.evidence.some((item) => item.kind === "guidance" && item.state === "rejected"),
+  ).toBe(true);
   expect(
     (await readdir(join(root, ".code-factory", "runs"))).filter(
       (name) => name.endsWith(".tmp") || name.endsWith(".lock"),
@@ -215,4 +242,34 @@ it("aborts siblings and holds ownership until they settle after persistence is e
       server.close((error) => (error ? reject(error) : resolve())),
     );
   }
+});
+
+it("treats a stale run lock as a persistence failure that is reported and aborts the run", async () => {
+  const actual = await vi.importActual<typeof import("../src/runtime/storage-replace.js")>(
+    "../src/runtime/storage-replace.js",
+  );
+  replace.mockReset().mockImplementation(actual.replaceStorageFile);
+  root = await mkdtemp(join(tmpdir(), "factory-stale-lock-"));
+  await mkdir(join(root, ".code-factory", "workspaces", "candidate"), { recursive: true });
+  const seed = run({
+    steps: [step("build", "implementation")],
+    dependencies: [],
+    groups: [],
+    joins: [],
+  });
+  const initial = {
+    ...seed,
+    snapshot: {
+      ...seed.snapshot,
+      baseline: { ...seed.snapshot.baseline, workspace: ".code-factory/workspaces/candidate" },
+    },
+  };
+  await createRun(root, initial);
+  // A crash left the lock directory behind, so every later write fails with EEXIST.
+  await mkdir(join(root, ".code-factory", "runs", `${initial.snapshot.id}.json.lock`));
+  const outcome = await executeRun(root, initial.snapshot.id, () => mockAdapter).catch(
+    (error: unknown) => error,
+  );
+  expect(outcome).toBeInstanceOf(Error);
+  expect(runExecutionError(root, initial.snapshot.id)).toContain("EEXIST");
 });

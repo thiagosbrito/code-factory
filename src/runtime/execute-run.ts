@@ -8,7 +8,7 @@ import {
   settleRun,
   skipInactive,
 } from "../domain/scheduler.js";
-import { readRun } from "./storage.js";
+import { readRun, isRunPersistenceError } from "./storage.js";
 import { fileDigest } from "./workspace.js";
 import { FINISHED_RUN, isActiveStatus, type Resolver } from "./scheduler-constants.js";
 import { stepInputs } from "./scheduler-inputs.js";
@@ -36,7 +36,7 @@ export const executeOnce = async (
         try {
           await runStep(ctx, workspace, id);
         } catch (error) {
-          onWriteFailure(error);
+          if (ctx.writeFailed() || isRunPersistenceError(error)) onWriteFailure(error);
           throw error;
         }
       }),

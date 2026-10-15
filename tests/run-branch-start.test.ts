@@ -14,14 +14,14 @@ import {
   createProjectRun,
   git,
   outcome,
-  parents,
+  removeParents,
   repository,
   savedEnv,
 } from "./support/run-branch.js";
 
 afterEach(async () => {
   process.env = { ...savedEnv };
-  await Promise.all(parents.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await removeParents();
 });
 
 const userState = (root: string) => ({

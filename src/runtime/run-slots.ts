@@ -6,11 +6,19 @@ import { executeOnce } from "./execute-run.js";
 import { isActiveStatus, type Resolver } from "./scheduler-constants.js";
 import { interruptStep } from "./scheduler-evidence.js";
 import { withRunOwnership } from "./run-ownership.js";
-import { realpath } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 
 const projectAliases = new Map<string, string>();
-const runKey = async (project: string, runId: string): Promise<string> => {
-  const canonical = await realpath(project);
+// Synchronous so the check-and-set on `active` has no await before it and cannot reorder.
+const runKey = (project: string, runId: string): string => {
+  let canonical: string;
+  try {
+    canonical = realpathSync.native(project);
+  } catch {
+    // A missing project still yields a key; the later read reports the useful error.
+    canonical = resolve(project);
+  }
   projectAliases.set(project, canonical);
   return `${canonical}:${runId}`;
 };
@@ -42,7 +50,7 @@ export const executeRun = async (
   runId: string,
   resolveAdapter: Resolver,
 ): Promise<RunRecord> => {
-  const key = await runKey(project, runId);
+  const key = runKey(project, runId);
   const existing = active.get(key);
   if (existing) {
     if (existing.retry) throw new Error("A selected retry is active.");
@@ -77,7 +85,7 @@ export const withIdleRunSlot = async (
   runId: string,
   work: () => Promise<RunRecord>,
 ): Promise<RunRecord | null> => {
-  const key = await runKey(project, runId);
+  const key = runKey(project, runId);
   if (active.has(key)) return null;
   const pending = withRunOwnership(project, runId, work);
   active.set(key, { work: pending, controller: new AbortController() });
@@ -96,7 +104,7 @@ export const retryStep = async (
   expectedAttemptId: string,
   resolveAdapter: Resolver,
 ): Promise<RunRecord> => {
-  const key = await runKey(project, runId);
+  const key = runKey(project, runId);
   const retry = `${stepId}:${expectedAttemptId}`;
   const existing = active.get(key);
   if (existing) {
@@ -132,7 +140,7 @@ export const retryStep = async (
 };
 
 export const cancelRun = async (project: string, runId: string): Promise<RunRecord> => {
-  const key = await runKey(project, runId);
+  const key = runKey(project, runId);
   const running = active.get(key);
   if (running) {
     running.controller.abort();

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,6 +18,7 @@ import {
   loopWith,
   outcome,
   parents,
+  removeParents,
   repository,
   savedEnv,
   worktreeOf,
@@ -26,7 +27,7 @@ import {
 
 afterEach(async () => {
   process.env = { ...savedEnv };
-  await Promise.all(parents.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await removeParents();
 });
 
 describe("legacy worktree and clone runs", () => {
@@ -84,7 +85,8 @@ describe("legacy worktree and clone runs", () => {
     await expect(
       createReviewCopy(worktree, join(destinationParent, "copy"), "wrong"),
     ).rejects.toThrow("Frozen review copy does not match the candidate.");
-  });
+    // Many git subprocesses: Windows runners need far more than the default 5s.
+  }, 60_000);
 
   it("fails a reviewer whose frozen copy cannot be prepared without interrupting the run", async () => {
     if (process.platform === "win32") return;
