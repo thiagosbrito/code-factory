@@ -39,8 +39,8 @@ describe("process tree termination", () => {
       let onError: () => void = () => undefined;
       queueMicrotask(() => (emitError ? onError() : undefined));
       return {
-        once: (_event: "error", handler: () => void) => {
-          onError = handler;
+        once: (event: "error" | "close", handler: () => void) => {
+          if (event === "error") onError = handler;
         },
       };
     };
@@ -83,6 +83,14 @@ describe("command script quoting", () => {
       win("C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd"),
     ).args;
     expect(line).toBe('"C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd ^^^"a\\^^^"^^^&b^^^""');
+  });
+
+  it("ignores a ComSpec that is not cmd.exe", () => {
+    const plan = planLaunch("C:\\t\\x.bat", [], {
+      ...win("C:\\t\\x.bat"),
+      comspec: "C:\\evil\\calc.exe",
+    });
+    expect(plan.command).toBe("cmd.exe");
   });
 
   it("refuses a command line longer than cmd.exe accepts", () => {

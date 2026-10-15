@@ -79,7 +79,9 @@ export const planLaunch = (
     resolved.replace(CMD_META, "^$1"),
     ...args.map((value) => escapeCommandArgument(value, doubleEscape)),
   ].join(" ");
-  const comspec = environment.comspec ?? process.env.ComSpec ?? "cmd.exe";
+  // ComSpec is environment input: only an actual cmd.exe is accepted, anything else falls back.
+  const configured = environment.comspec ?? process.env.ComSpec;
+  const comspec = configured && /(^|[\\/])cmd\.exe$/i.test(configured) ? configured : "cmd.exe";
   if (comspec.length + line.length + 12 > CMD_LINE_LIMIT)
     throw new Error(
       `The command line for ${resolved} would exceed the ${CMD_LINE_LIMIT} characters cmd.exe accepts; use fewer or shorter arguments, or install an .exe launcher.`,

@@ -129,7 +129,9 @@ export const killProcessTree = (
       command: string,
       args: readonly string[],
       options: { stdio: "ignore"; windowsHide: true },
-    ) => { once(event: "error", listener: () => void): unknown };
+    ) => {
+      once(event: "error" | "close", listener: (code?: number | null) => void): unknown;
+    };
   } = {},
 ): void => {
   if ((options.platform ?? process.platform) !== "win32" || !child.pid) {
@@ -144,5 +146,9 @@ export const killProcessTree = (
       windowsHide: true,
     },
   );
+  // taskkill failing (not found, access denied, process already gone) must still stop the handle.
   killer.once("error", () => child.kill("SIGKILL"));
+  killer.once("close", (code) => {
+    if (code !== 0) child.kill("SIGKILL");
+  });
 };

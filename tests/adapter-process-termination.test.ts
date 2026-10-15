@@ -20,12 +20,13 @@ describe("adapter process termination", () => {
     expect(direct).not.toHaveBeenCalled();
   });
 
-  it.runIf(process.platform === "win32")("terminates the owned Windows child", () => {
+  // taskkill cannot end this fake pid, so the handle is stopped directly as a fallback.
+  it.runIf(process.platform === "win32")("terminates the owned Windows child", async () => {
     const child = childWithPid();
     const group = vi.spyOn(process, "kill");
     const direct = vi.spyOn(child, "kill").mockReturnValue(true);
     terminateChild(child);
-    expect(direct).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(direct).toHaveBeenCalledOnce());
     expect(group).not.toHaveBeenCalled();
   });
 
