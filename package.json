@@ -65,7 +65,7 @@
     "@playwright/test": "^1.63.0",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-select": "^2.3.7",
-    "@radix-ui/react-slot": "1.4.0",
+    "@radix-ui/react-slot": "1.5.0",
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
@@ -87,8 +87,8 @@
     "tailwindcss": "4.3.3",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
-    "vite": "8.3.3",
-    "vitest": "5.0.3"
+    "vite": "8.3.4",
+    "vitest": "5.0.4"
   },
   "engines": {
     "node": ">=22.12.0"
