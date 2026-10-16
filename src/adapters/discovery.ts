@@ -2,6 +2,7 @@ import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, join } from "node:path";
 import type { AgentConnection } from "./contract.js";
+import { WINDOWS_LAUNCHABLE_EXTENSIONS } from "./launch.js";
 
 const executableNames = [
   { provider: "codex", names: ["codex"] },
@@ -13,11 +14,16 @@ const executableNames = [
 const findExecutable = async (
   names: readonly string[],
   searchPath: string,
+  platform: NodeJS.Platform,
 ): Promise<string | null> => {
   for (const directory of searchPath.split(delimiter).filter(Boolean)) {
     for (const name of names) {
+      // Launchable Windows entries come before the extensionless npm shim, which passes
+      // access() but cannot be started.
       const candidates =
-        process.platform === "win32" ? [name, `${name}.exe`, `${name}.cmd`] : [name];
+        platform === "win32"
+          ? [...WINDOWS_LAUNCHABLE_EXTENSIONS.map((extension) => `${name}${extension}`), name]
+          : [name];
       for (const candidate of candidates) {
         const path = join(directory, candidate);
         try {
@@ -36,10 +42,11 @@ const findExecutable = async (
 /** Detect executable candidates without launching agents or reading credentials. */
 export const discoverAgents = async (
   searchPath = process.env.PATH ?? "",
+  platform: NodeJS.Platform = process.platform,
 ): Promise<AgentConnection[]> => {
   const discovered: AgentConnection[] = await Promise.all(
     executableNames.map(async ({ provider, names }) => {
-      const executable = await findExecutable(names, searchPath);
+      const executable = await findExecutable(names, searchPath, platform);
       return {
         provider,
         executable,

@@ -1,3 +1,4 @@
+import { planLaunch } from "./launch.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
@@ -173,7 +174,9 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
   async *execute(input: StepExecutionInput, signal: AbortSignal): AsyncIterable<AdapterEvent> {
     if (signal.aborted) throw new Error("Claude Code execution aborted before launch");
-    const child = spawn(this.executable, claudeCodeArgs(input), {
+    const launch = planLaunch(this.executable, claudeCodeArgs(input));
+    const child = spawn(launch.command, launch.args, {
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
       cwd: input.projectDirectory,
       stdio: ["pipe", "pipe", "pipe"],
       // Claude Code starts tool processes; own its process group so cancellation reaches them.

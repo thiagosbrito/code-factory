@@ -1,3 +1,4 @@
+import { planLaunch, resolveWindowsExecutable, type LaunchEnvironment } from "./launch.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
@@ -68,6 +69,21 @@ const streamEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runError"), data: z.unknown() }),
 ]);
 
+/**
+ * Code Factory gives Kiro its multi-line instruction as one argument, which cmd.exe cannot carry,
+ * so a Kiro launcher that is a `.cmd`/`.bat` would fail every step. Verification says so up front.
+ */
+export const kiroLaunchBlocker = (
+  executable: string,
+  environment: LaunchEnvironment = {},
+): string | null => {
+  if ((environment.platform ?? process.platform) !== "win32") return null;
+  const resolved = resolveWindowsExecutable(executable, environment.exists);
+  return /\.(cmd|bat)$/i.test(resolved)
+    ? `Kiro CLI at ${resolved} is a Windows .cmd/.bat launcher. Code Factory passes Kiro a multi-line instruction as an argument, which command scripts cannot receive, so every step would fail. Point Code Factory at a kiro-cli .exe instead.`
+    : null;
+};
+
 /** SSO sign-ins can refresh their token over the network during whoami, which takes seconds. */
 export const probeKiro = (
   executable: string,
@@ -98,6 +114,8 @@ export class KiroAdapter implements AgentAdapter {
   ) {}
 
   async inspect(_projectDirectory: string): Promise<AgentConnection> {
+    const blocker = kiroLaunchBlocker(this.executable);
+    if (blocker) throw new Error(blocker);
     const whoami = await probeKiro(this.executable, ["whoami", "--format", "json"]);
     // SSO accounts print the JSON identity followed by profile lines, so read the JSON line only.
     const identityLine = whoami.split(/\r?\n/).find((line) => line.trim().startsWith("{"));
@@ -145,7 +163,9 @@ export class KiroAdapter implements AgentAdapter {
     if (signal.aborted) throw new Error("Kiro execution aborted before launch");
     if (input.binding.effort)
       throw new Error("Kiro does not advertise supported effort choices in its model catalog");
-    const child = spawn(this.executable, kiroChatArgs(input), {
+    const launch = planLaunch(this.executable, kiroChatArgs(input));
+    const child = spawn(launch.command, launch.args, {
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
       cwd: input.projectDirectory,
       stdio: ["ignore", "pipe", "pipe"],
       // Kiro launches a second process; own its process group so cancellation reaches both.

@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { CHANGED_FILES_GATE_PATH, DEFAULT_COVERAGE_THRESHOLD } from "../domain/gates.js";
+import { GATE_LAUNCH_SOURCE } from "./gate-launch.js";
 
 /**
  * The changed-files gate, run by check steps as `node .code-factory/gates/changed-files-gate.mjs
@@ -20,9 +21,23 @@ import { join, resolve } from "node:path"
 
 const THRESHOLD = Number(process.env.CODE_FACTORY_COVERAGE_THRESHOLD || "${DEFAULT_COVERAGE_THRESHOLD}")
 const root = process.cwd()
-const bin = name => join(root, "node_modules", ".bin", name)
+${GATE_LAUNCH_SOURCE}
+// On Windows npm writes tool (bash shim), tool.cmd and tool.ps1; only the launchable entry can start.
+const bin = name => resolveGateBin(join(root, "node_modules", ".bin", name), process.platform, existsSync)
 const has = name => existsSync(bin(name))
-const run = (command, args) => spawnSync(command, args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+const run = (command, args) => {
+  try {
+    const plan = planGateLaunch(command, args, process.platform, existsSync, resolveGateCmd(process.env))
+    return spawnSync(plan.command, plan.args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsVerbatimArguments: plan.verbatim })
+  } catch (error) {
+    return { status: null, stdout: "", stderr: "", error }
+  }
+}
+// A tool that cannot start is a setup problem, not a failed gate.
+const started = (result, command) => {
+  if (result.error) done(2, "Could not start " + command + ": " + result.error.message)
+  return result
+}
 const print = result => {
   if (result.stdout) process.stdout.write(result.stdout)
   if (result.stderr) process.stderr.write(result.stderr)
@@ -54,7 +69,7 @@ const lint = changed => {
   if (!files.length) done(0, "No changed JS/TS files to lint.")
   if (!has("eslint")) done(0, "ESLint is not installed in this project; lint gate not applicable.")
   console.log("Linting " + files.length + " changed file(s):\n" + files.join("\n"))
-  const result = run(bin("eslint"), ["--quiet", "--", ...files])
+  const result = started(run(bin("eslint"), ["--quiet", "--", ...files]), "ESLint")
   print(result)
   done(result.status === 0 ? 0 : 1, result.status === 0 ? "Lint passed for changed files." : "Lint failed for changed files.")
 }
@@ -66,7 +81,7 @@ const types = changed => {
   if (!files.size) done(0, "No changed TypeScript files to type-check.")
   if (!has("tsc") || !existsSync(join(root, "tsconfig.json")))
     done(0, "TypeScript (tsc and tsconfig.json) is not set up in this project; type gate not applicable.")
-  const result = run(bin("tsc"), ["--noEmit", "--pretty", "false"])
+  const result = started(run(bin("tsc"), ["--noEmit", "--pretty", "false"]), "tsc")
   if (result.status === 0) done(0, "Type check passed (" + files.size + " changed file(s) included).")
   const errors = (result.stdout + result.stderr).split("\n").filter(line => /^[^\s(]+\(\d+,\d+\): error /.test(line))
   if (!errors.length) {
@@ -102,7 +117,7 @@ const coverage = changed => {
   const directory = mkdtempSync(join(tmpdir(), "code-factory-coverage-"))
   try {
     console.log("Running " + runner + " tests related to " + sources.length + " changed source file(s):\n" + sources.join("\n"))
-    const result = run(bin(runner), coverageArgs(runner, sources, directory))
+    const result = started(run(bin(runner), coverageArgs(runner, sources, directory)), runner)
     print(result)
     if (result.status !== 0) done(1, "Related tests failed, so coverage was not evaluated.")
     const summaryPath = join(directory, "coverage-summary.json")

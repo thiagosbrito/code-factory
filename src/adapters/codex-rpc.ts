@@ -1,3 +1,5 @@
+import { planLaunch } from "./launch.js";
+import { killProcessTree } from "./process.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
@@ -28,7 +30,9 @@ export class CodexStdioRpc implements CodexRpc {
     } = {},
   ) {
     // Each thread names its own working directory; the server process starts from a neutral one.
-    this.child = spawn(executable, ["app-server", "--listen", "stdio://"], {
+    const launch = planLaunch(executable, ["app-server", "--listen", "stdio://"]);
+    this.child = spawn(launch.command, launch.args, {
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
       cwd: tmpdir(),
       stdio: "pipe",
     });
@@ -93,6 +97,6 @@ export class CodexStdioRpc implements CodexRpc {
   }
 
   close(): void {
-    this.child.kill();
+    killProcessTree(this.child, { signal: "SIGTERM" });
   }
 }

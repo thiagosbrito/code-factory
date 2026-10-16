@@ -1,3 +1,4 @@
+import { planLaunch } from "./launch.js";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
@@ -39,25 +40,23 @@ type CatalogModel = NonNullable<AgentConnection["models"]>[number];
  */
 export const listClaudeCodeModels = (executable: string): Promise<CatalogModel[]> =>
   new Promise((resolve, reject) => {
-    const child = spawn(
-      executable,
-      [
-        "-p",
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--no-session-persistence",
-      ],
-      {
-        // A neutral directory, so no project's configuration shapes the catalog.
-        cwd: tmpdir(),
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, NO_COLOR: "1" },
-        detached: process.platform !== "win32",
-      },
-    );
+    const launch = planLaunch(executable, [
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--no-session-persistence",
+    ]);
+    const child = spawn(launch.command, launch.args, {
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
+      // A neutral directory, so no project's configuration shapes the catalog.
+      cwd: tmpdir(),
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, NO_COLOR: "1" },
+      detached: process.platform !== "win32",
+    });
     let settled = false;
     let stderr = "";
     const finish = (outcome: { models: CatalogModel[] } | { error: Error }) => {

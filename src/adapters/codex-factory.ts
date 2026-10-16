@@ -1,14 +1,14 @@
-import { execFile } from "node:child_process";
-import { tmpdir } from "node:os";
-import { promisify } from "node:util";
 import { CodexStdioRpc } from "./codex-rpc.js";
 import { CodexAdapter } from "./codex-adapter.js";
+import { probeCommand } from "./process.js";
 
 /** Verify the executable before starting its native protocol process. */
 export const createCodexAdapter = async (executable: string): Promise<CodexAdapter> => {
-  const { stdout } = await promisify(execFile)(executable, ["--version"], {
-    cwd: tmpdir(),
-    timeout: 5000,
+  // probeCommand starts .cmd/.bat shims correctly on Windows; a bare execFile cannot.
+  const stdout = await probeCommand(executable, ["--version"], {
+    label: "codex",
+    timeoutHint: "Codex did not answer --version",
+    timeoutMs: 5000,
   });
   const version = /^codex-cli (\d+\.\d+\.\d+)(?:\s|$)/.exec(stdout.trim())?.[1];
   if (!version) throw new Error("Executable is not a supported Codex CLI");
