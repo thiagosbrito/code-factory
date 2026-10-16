@@ -131,7 +131,7 @@ export const killProcessTree = (
   // A reaped child's pid may already belong to an unrelated process; never signal it.
   if (child.exitCode !== null || child.signalCode !== null) return;
   if ((options.platform ?? process.platform) !== "win32" || !child.pid) {
-    child.kill("SIGKILL");
+    child.kill(options.signal ?? "SIGKILL");
     return;
   }
   const killer = (options.spawnProcess ?? spawn)(
@@ -151,6 +151,8 @@ export const killProcessTree = (
 };
 
 export interface KillOptions {
+  /** Signal for non-Windows platforms; Windows always ends the tree with taskkill. */
+  signal?: NodeJS.Signals;
   platform?: NodeJS.Platform;
   systemRoot?: string;
   spawnProcess?: (

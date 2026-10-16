@@ -97,6 +97,6 @@ export class CodexStdioRpc implements CodexRpc {
   }
 
   close(): void {
-    killProcessTree(this.child);
+    killProcessTree(this.child, { signal: "SIGTERM" });
   }
 }

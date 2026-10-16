@@ -1,3 +1,4 @@
+import { windowsSystemExecutable } from "../adapters/launch.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { type StepResult } from "../domain/scheduler.js";
 
@@ -21,10 +22,14 @@ export const terminateCheckTree = async (child: ChildProcess): Promise<boolean> 
   if (!child.pid) return false;
   if (process.platform === "win32")
     return new Promise((resolve) => {
-      const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
+      const killer = spawn(
+        windowsSystemExecutable("taskkill.exe"),
+        ["/pid", String(child.pid), "/t", "/f"],
+        {
+          stdio: "ignore",
+          windowsHide: true,
+        },
+      );
       killer.once("error", () => resolve(child.exitCode !== null));
       killer.once("close", (code) => resolve(code === 0 || child.exitCode !== null));
     });
