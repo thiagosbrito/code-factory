@@ -126,7 +126,7 @@ jobs:
       - run: pnpm exec playwright install --with-deps chrome
       - run: pnpm build
       - run: pnpm test:e2e
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report-${{ matrix.os }}
