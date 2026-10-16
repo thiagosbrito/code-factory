@@ -44,8 +44,12 @@ export const commitStepChanges = async (
       return { kind: "failed", exitCode: null, output: reason, summary: reason };
     }
   } else return commitFailure(head);
-  const added = await runGit(workspace, ["add", "--all", "--", ".", ":(exclude).code-factory"]);
+  // An `:(exclude)` pathspec naming an ignored folder makes `git add` exit 1, so stage everything
+  // and then take factory storage back out of the index (the working tree is not touched).
+  const added = await runGit(workspace, ["add", "--all", "--", "."]);
   if (added.code !== 0) return commitFailure(added);
+  const unstaged = await runGit(workspace, ["reset", "--quiet", "--", ".code-factory"]);
+  if (unstaged.code !== 0) return commitFailure(unstaged);
   const staged = await runGit(workspace, ["diff", "--cached", "--quiet"]);
   if (staged.code === 0) return { kind: "unchanged" };
   if (staged.code !== 1) return commitFailure(staged);
