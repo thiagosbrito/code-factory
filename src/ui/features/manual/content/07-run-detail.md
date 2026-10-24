@@ -23,6 +23,7 @@ Under the title a status line shows:
 | "N active steps"                                                                                                  | How many steps are running right now.                                                                                                                                                                                                   |
 | "N of M complete"                                                                                                 | How many steps have succeeded, out of all steps in the loop.                                                                                                                                                                            |
 | "Local validation: **Passed** or **Incomplete** · Human acceptance: **pending**, **accepted** or **invalidated**" | The evidence state. See "Evidence summary".                                                                                                                                                                                             |
+| "Usage: …"                                                                                                        | The run's token and cost total. See "Usage and cost". Hidden until an attempt exists.                                                                                                                                                   |
 | The branch name                                                                                                   | The run branch, in a monospaced font. Shown when the run has one.                                                                                                                                                                       |
 | The connection text                                                                                               | See the table below.                                                                                                                                                                                                                    |
 
@@ -164,6 +165,7 @@ Each node shows, from the top:
 - a status badge and, at the right, the time the step has spent running, such as `42s`, `3m 12s` or `1h 04m`, summed across its attempts and counting up while an attempt runs. Nothing is shown when the time is unknown, for example while an attempt is waiting for input or paused;
 - the step's name;
 - its role and its number of attempts, such as "Implementer · 2 attempts";
+- once an attempt has ended, a usage line such as "12,345 in · 678 out · est. $0.0123 USD", or "Usage not reported" when the agent reported nothing (see "Usage and cost");
 - for agent steps, three lines: **Agent:** the provider, **Model:** the model's display name ("Agent default" when none was chosen) and **Effort:** the level (Default, or the name of the level with a capital).
 
 The **Effort** line ends with a meter of small bars, one per effort level the agent offers, with as many filled as the chosen level's position. All bars empty means the agent default. No meter is drawn when the agent does not list levels, or when the saved level is no longer offered. Hovering the three lines shows "Inherited from the project default" when the step has no binding of its own. With no binding anywhere, each line says "Not configured". Check steps run a shell command, not an agent, so they have no Agent, Model or Effort lines.
@@ -267,6 +269,15 @@ Selecting an artifact shows its details (when produced, run, step and attempt, s
 ### Details
 
 For a step: its instructions, role, kind, the agent, model and effort, the selected attempt and its status, the step status, its dependencies, expected outputs, candidate and input hash. For the run or a step it also shows the loop name and version, baseline commit, source commit, workspace, task source, when the baseline was captured and the implementation round. An **Evidence provenance** list names each check, review or acceptance receipt in scope, its source and whether it is current, "superseded · needs revalidation" or "invalidated · current validation inputs changed".
+
+### Usage and cost
+
+Some agents report how many tokens a step used and what it cost. Code Factory records exactly what the agent reports, once per attempt, and shows it on each step card, in the run header as a run total, and in the **Details** tab for the run, a step or an attempt (input, output, cache read and cache write tokens, cost, coverage and any note from the agent).
+
+- **Not reported** means the agent gave no figure. It is never shown as zero. A zero you see was reported as zero.
+- Costs are in US dollars (`USD`). "est." and "estimated by the provider" mean the agent computed the amount itself from its own price table; it can differ from your bill and is not billing data.
+- Retries add up: each attempt contributes its own figures once. If some attempts reported and others did not, the total is labeled "Partial: 2 of 3 attempts reported" and undercounts.
+- Claude Code reports tokens and an estimated cost. Its token counts cover the main agent loop only (subagent tokens are not in them), while its cost includes subagents. Codex, Kiro and custom agents report nothing yet, so their steps read "Usage not reported". Runs recorded before this feature show the same.
 
 ## Evidence summary
 

@@ -1,5 +1,6 @@
 import type { ExecutionBinding, ProviderId } from "../domain/loop.js";
 import type { ToolGrantInEffect } from "../domain/tool-grant.js";
+import type { UsageReport } from "../domain/usage.js";
 
 export type CapabilitySupport = "supported" | "unsupported" | "unknown";
 export interface AgentCapabilities {
@@ -60,6 +61,8 @@ export type AdapterEvent =
   | ({ type: "tool"; title: string; detail?: string; state?: string } & StepSession)
   | ({ type: "check"; title: string; detail?: string; state?: string } & StepSession)
   | ({ type: "error"; text: string } & StepSession)
+  /** Optional: at most one per attempt, before `completed`. A provider that reports nothing emits none. */
+  | ({ type: "usage"; usage: UsageReport } & StepSession)
   | ({
       type: "input-request";
       requestId: string | number;

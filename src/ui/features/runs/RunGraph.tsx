@@ -7,6 +7,8 @@ import { stepFacts } from "../../shared/step-facts";
 import { useCanvasViewport } from "./useCanvasViewport";
 import { NOT_REACHED, stepDisplayStatus } from "./run-view-model";
 import { StepElapsed } from "./StepElapsed";
+import { StepUsageLine } from "./RunUsage";
+import { summarizeUsage } from "../../../domain/usage.js";
 
 type Point = { x: number; y: number };
 const nodeWidth = 210;
@@ -197,6 +199,7 @@ export const RunGraph = ({
                       projectDefault: run.snapshot.bindings[definition.id],
                       agents,
                     });
+              const usage = summarizeUsage(run, definition.id);
               return (
                 <button
                   key={definition.id}
@@ -244,6 +247,12 @@ export const RunGraph = ({
                     {definition.role} · {step?.attempts.length ?? 0} attempts
                   </span>
                   {facts && <StepFactsLines inline facts={facts} className="mt-1.5" />}
+                  <StepUsageLine
+                    usage={usage}
+                    settled={(step?.attempts ?? []).every(
+                      (attempt) => attempt.endedAt !== undefined,
+                    )}
+                  />
                 </button>
               );
             })}

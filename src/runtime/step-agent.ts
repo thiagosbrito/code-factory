@@ -13,6 +13,7 @@ import {
   reviewResult,
 } from "./scheduler-inputs.js";
 import { appendEvent, appendLocalEvent, recordInputRequest } from "./scheduler-evidence.js";
+import { appendUsageReceipt } from "./usage-evidence.js";
 import type { RunContext, StepFrame } from "./run-context.js";
 
 /** Drive (or recover) an agent step through its adapter stream and return its reported result. */
@@ -151,6 +152,8 @@ export const runAgentStep = async (ctx: RunContext, frame: StepFrame): Promise<S
         };
       if (event.type === "input-request")
         await commit((current) => recordInputRequest(current, stepId, attempt.id, event));
+      else if (event.type === "usage")
+        await commit((current) => appendUsageReceipt(current, stepId, attempt.id, event.usage));
       else await commit((current) => appendEvent(current, stepId, attempt.id, event));
       // Deliberately outside the commit chain, as before the split: it writes the record directly.
       if (event.type === "started")

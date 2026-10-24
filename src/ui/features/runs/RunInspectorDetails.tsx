@@ -1,5 +1,7 @@
 import type { RunRecord } from "../../../domain/run.js";
 import type { EvidenceSummary } from "../../../domain/acceptance.js";
+import { summarizeUsage } from "../../../domain/usage.js";
+import { UsageDetails } from "./RunUsage";
 import {
   acceptanceFreshness,
   definitionForScope,
@@ -96,6 +98,16 @@ export const RunInspectorDetails = ({
         <dt>Implementation round</dt>
         <dd>{run.implementationRound}</dd>
       </dl>
+      <UsageDetails
+        usage={summarizeUsage(
+          run,
+          scope.kind === "step" ? scope.stepId : undefined,
+          scope.kind === "step" ? (scope.attemptId ?? undefined) : undefined,
+        )}
+        title={
+          scope.kind === "run" ? "Run usage" : scope.attemptId ? "Attempt usage" : "Step usage"
+        }
+      />
       {receipts.length > 0 && (
         <section>
           <h4 className="font-semibold">Evidence provenance</h4>

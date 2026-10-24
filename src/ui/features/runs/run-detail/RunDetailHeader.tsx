@@ -4,6 +4,8 @@ import type { RunRecord } from "../../../../domain/run.js";
 import { Button } from "@/shared/components/button";
 import { EvidenceStatusText } from "./EvidenceStatusText";
 import { RunConnectionStatus } from "./RunConnectionStatus";
+import { RunUsageTotal } from "../RunUsage";
+import { summarizeUsage } from "../../../../domain/usage.js";
 import { runStatusLabel, runTitle, stepProgress, type RunStep } from "../run-view-model";
 
 export const RunDetailHeader = ({
@@ -75,6 +77,7 @@ export const RunDetailHeader = ({
         <span>
           <EvidenceStatusText summary={summary} />
         </span>
+        <RunUsageTotal usage={summarizeUsage(run)} />
         {branch && <span className="font-mono text-muted-foreground">{branch}</span>}
         <RunConnectionStatus connected={connected} streamConnected={streamConnected} />
       </div>

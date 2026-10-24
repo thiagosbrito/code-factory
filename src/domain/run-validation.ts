@@ -132,7 +132,13 @@ export const validateEvidence = (record: RunRecordShape, report: Report): void =
   const attemptsById = new Map(
     record.steps.flatMap((step) => step.attempts.map((attempt) => [attempt.id, attempt] as const)),
   );
+  const usageAttempts = new Set<string>();
   for (const receipt of record.evidence) {
+    if (receipt.kind === "usage") {
+      if (usageAttempts.has(receipt.attemptId))
+        report(`Attempt ${receipt.attemptId} has more than one usage receipt.`);
+      usageAttempts.add(receipt.attemptId);
+    }
     if (evidenceIds.has(receipt.id)) report(`Duplicate evidence ID ${receipt.id}.`);
     if (receipt.kind === "event" && eventSequences.has(receipt.sequence))
       report(`Duplicate event sequence ${receipt.sequence}.`);
