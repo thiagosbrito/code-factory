@@ -5,7 +5,15 @@ import { dirname, join, resolve } from "node:path";
 import type { RunRecord } from "../domain/run.js";
 import { defaultTicketBranch, RUN_BRANCH_PREFIX, stepCommitMessage } from "../domain/run-branch.js";
 import { fileDigest, gitCommonDir } from "./workspace.js";
-import { type GitResult, identityArgs, runGit, git, tail, isCode } from "./run-branch-git.js";
+import {
+  COMMIT_TIMEOUT_MS,
+  type GitResult,
+  identityArgs,
+  runGit,
+  git,
+  tail,
+  isCode,
+} from "./run-branch-git.js";
 
 export type StepCommit =
   | { kind: "committed"; sha: string; subject: string }
@@ -18,6 +26,36 @@ export const commitFailure = (result: GitResult): StepCommit => ({
   output: result.spawnError ? `Could not start git: ${result.spawnError}` : tail(result),
   summary: `Commit failed (exit ${result.code ?? "none"}); a Git hook or Git rejected the step's changes. See the commit-failed evidence.`,
 });
+
+/**
+ * Stage the step's changes outside the root `.code-factory`. Paths are listed first and then
+ * staged by name in one index write: the factory folder is never walked or hashed (it holds large,
+ * atomically renamed files), and an `:(exclude)` pathspec naming an ignored folder is never given
+ * to `git add`, where it exits 1. Nothing is unstaged, so a failure leaves the index as it was.
+ */
+const stageStepChanges = async (workspace: string): Promise<GitResult> => {
+  const listed = await runGit(workspace, [
+    "ls-files",
+    "-z",
+    "--modified",
+    "--deleted",
+    "--others",
+    "--exclude-standard",
+    "--",
+    ".",
+    ":(exclude).code-factory",
+  ]);
+  if (listed.code !== 0) return listed;
+  // A modified-then-deleted path is listed twice.
+  const paths = [...new Set(listed.stdout.split("\0").filter(Boolean))];
+  if (paths.length === 0) return listed;
+  return runGit(
+    workspace,
+    ["--literal-pathspecs", "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"],
+    COMMIT_TIMEOUT_MS,
+    `${paths.join("\0")}\0`,
+  );
+};
 
 /**
  * Commit a successful writing attempt on the run branch with the user's identity and hooks.
@@ -44,12 +82,8 @@ export const commitStepChanges = async (
       return { kind: "failed", exitCode: null, output: reason, summary: reason };
     }
   } else return commitFailure(head);
-  // An `:(exclude)` pathspec naming an ignored folder makes `git add` exit 1, so stage everything
-  // and then take factory storage back out of the index (the working tree is not touched).
-  const added = await runGit(workspace, ["add", "--all", "--", "."]);
-  if (added.code !== 0) return commitFailure(added);
-  const unstaged = await runGit(workspace, ["reset", "--quiet", "--", ".code-factory"]);
-  if (unstaged.code !== 0) return commitFailure(unstaged);
+  const staging = await stageStepChanges(workspace);
+  if (staging.code !== 0) return commitFailure(staging);
   const staged = await runGit(workspace, ["diff", "--cached", "--quiet"]);
   if (staged.code === 0) return { kind: "unchanged" };
   if (staged.code !== 1) return commitFailure(staged);
