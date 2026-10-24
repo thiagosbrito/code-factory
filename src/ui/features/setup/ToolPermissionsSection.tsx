@@ -24,12 +24,12 @@ const providerName: Record<GrantableProvider, string> = {
 const grantedText: Record<GrantableProvider, string> = {
   kiro: "shell (execute_bash) allowed",
   codex: "commands inside the project allowed",
-  "claude-code": "shell (Bash) allowed",
+  "claude-code": "shell (Bash, PowerShell) allowed",
 };
 const defaultText: Record<GrantableProvider, string> = {
   kiro: "default tools only (fs_read, fs_write)",
   codex: "default: command approval requests are declined",
-  "claude-code": "default: file tools only, Bash denied",
+  "claude-code": "default: file tools only, Bash and PowerShell denied",
 };
 const permissionName: Record<GrantableProvider, string> = {
   kiro: "Kiro shell permission",

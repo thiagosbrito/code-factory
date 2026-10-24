@@ -109,11 +109,11 @@ This section appears only when editing a project that already has a saved setup.
 
 There is one row for each of **Kiro**, **Codex** and **Claude Code**. Each row states the current state:
 
-| Provider        | Default (no grant)                              | Granted                                          |
-| --------------- | ----------------------------------------------- | ------------------------------------------------ |
-| **Kiro**        | default tools only (fs_read, fs_write)          | shell (execute_bash) allowed since a date        |
-| **Codex**       | default: command approval requests are declined | commands inside the project allowed since a date |
-| **Claude Code** | default: file tools only, Bash denied           | shell (Bash) allowed since a date                |
+| Provider        | Default (no grant)                                   | Granted                                          |
+| --------------- | ---------------------------------------------------- | ------------------------------------------------ |
+| **Kiro**        | default tools only (fs_read, fs_write)               | shell (execute_bash) allowed since a date        |
+| **Codex**       | default: command approval requests are declined      | commands inside the project allowed since a date |
+| **Claude Code** | default: file tools only, Bash and PowerShell denied | shell (Bash, PowerShell) allowed since a date    |
 
 Notes:
 

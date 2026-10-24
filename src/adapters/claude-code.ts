@@ -32,12 +32,24 @@ export const CLAUDE_CODE_MODELS = [
   { id: "sonnet", displayName: "Sonnet (latest)", efforts: [...CLAUDE_CODE_EFFORTS] },
   { id: "haiku", displayName: "Haiku (latest)", efforts: [...CLAUDE_CODE_EFFORTS] },
 ];
+/**
+ * Claude Code's command-execution tools (tools reference: `Bash`, and `PowerShell`, which Claude
+ * Code uses natively on Windows). The stored grant scope stays the portable `Bash`; this adapter
+ * maps it to every shell tool, on every platform, so allowing and denying never disagree about
+ * which shell the CLI picked. Monitor runs commands under the Bash permission rules.
+ */
+export const CLAUDE_CODE_SHELL_TOOLS = ["Bash", "PowerShell"] as const;
 /** Tools a read-only reviewer must not have, whatever the user's own settings allow. */
-export const CLAUDE_CODE_WRITE_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit"] as const;
+export const CLAUDE_CODE_WRITE_TOOLS = [
+  ...CLAUDE_CODE_SHELL_TOOLS,
+  "Edit",
+  "Write",
+  "NotebookEdit",
+] as const;
 
 /**
  * Non-interactive print-mode arguments. File edits inside the project are accepted, nothing ever
- * waits for a permission prompt, and Bash is denied unless the project holds a Claude Code grant.
+ * waits for a permission prompt, and the shell tools are denied unless the project holds a Claude Code grant.
  * Deny rules beat allow rules from the user's settings, so a reviewer stays read-only.
  */
 export const claudeCodeArgs = (input: StepExecutionInput): string[] => [
@@ -58,8 +70,8 @@ export const claudeCodeArgs = (input: StepExecutionInput): string[] => [
   ...(input.readOnly
     ? ["--disallowedTools", ...CLAUDE_CODE_WRITE_TOOLS]
     : input.toolGrant?.provider === "claude-code"
-      ? ["--allowedTools", ...input.toolGrant.scope]
-      : ["--disallowedTools", "Bash"]),
+      ? ["--allowedTools", ...CLAUDE_CODE_SHELL_TOOLS]
+      : ["--disallowedTools", ...CLAUDE_CODE_SHELL_TOOLS]),
 ];
 
 /** One user message in the CLI's stream-json input format. */

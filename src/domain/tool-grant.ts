@@ -8,6 +8,7 @@ export type GrantableProvider = z.infer<typeof grantableProviderSchema>;
 export const TOOL_GRANT_SCOPE = {
   kiro: ["execute_bash"],
   codex: ["commandExecution"],
+  // Stays `Bash` in stored grants; the adapter maps it to Claude Code's Bash and PowerShell tools.
   "claude-code": ["Bash"],
 } as const;
 export const KIRO_DEFAULT_TRUSTED_TOOLS = ["fs_read", "fs_write"] as const;
@@ -96,7 +97,7 @@ export const describeToolGrant = (
       : `Codex default: command approval requests are declined.${suffix}`;
   if (provider === "claude-code")
     return grant?.provider === "claude-code"
-      ? `Claude Code project grant from ${grant.grantedAt}: file tools and Bash allowed.`
-      : `Claude Code default: file tools allowed. Bash is denied.${suffix}`;
+      ? `Claude Code project grant from ${grant.grantedAt}: file tools and shell (Bash and PowerShell) allowed.`
+      : `Claude Code default: file tools allowed. Shell (Bash and PowerShell) is denied.${suffix}`;
   return `No tool permission grant applies to provider ${provider}.`;
 };
