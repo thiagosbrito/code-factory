@@ -1,6 +1,7 @@
 import { CancellationUnconfirmedError, type StepExecutionInput } from "../adapters/contract.js";
 import { attachAttemptSession } from "../domain/run.js";
 import type { StepResult } from "../domain/scheduler.js";
+import { isAnalyticalStep, readOnlyRole } from "../domain/step-access.js";
 import { describeToolGrant, TOOL_PERMISSION } from "../domain/tool-grant.js";
 import { deliverQueuedGuidance } from "./guidance.js";
 import { resolveToolGrant } from "./tool-grant.js";
@@ -62,6 +63,8 @@ export const runAgentStep = async (ctx: RunContext, frame: StepFrame): Promise<S
     attempt: attempt.number,
     instruction: [
       definition.instruction,
+      isAnalyticalStep(definition) &&
+        `This ${definition.stage ?? "analytical"} step is read-only: inspect the project and report your findings in your output. Do not create, edit or delete files; Code Factory fails the step and does not commit if the project changes.`,
       frame.inputs.context,
       frame.runChanges && frame.base && changedFilesContext(frame.base, frame.runChanges),
       allowedOutcomes &&
@@ -84,7 +87,7 @@ export const runAgentStep = async (ctx: RunContext, frame: StepFrame): Promise<S
         attempt.id,
         "lifecycle",
         TOOL_PERMISSION,
-        `Read-only reviewer: ${binding.provider} runs without write or shell permissions it can enforce, and the project's tool grant does not apply.`,
+        `Read-only ${readOnlyRole(definition).toLowerCase()}: ${binding.provider} runs without write or shell permissions it can enforce, and the project's tool grant does not apply.`,
       ),
     );
   // A grant is read per fresh attempt, so grant and revoke apply at the next attempt.

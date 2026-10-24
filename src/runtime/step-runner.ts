@@ -1,6 +1,7 @@
 import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isAnalyticalStep, isReadOnlyAgentStep } from "../domain/step-access.js";
 import { completeStep, type StepResult } from "../domain/scheduler.js";
 import { CHECKOUT_MOVED, checkoutMovedMessage } from "../domain/run-branch.js";
 import { snapshotFileDiffs } from "./inspection.js";
@@ -28,8 +29,13 @@ const prepareStep = async (
   hasReviewRoot: boolean,
 ): Promise<StepFrame> => {
   const { commit, project, runId } = ctx;
-  const readonly = definition.stage === "review";
-  const verifiesNoChange = workspace.isProjectRun && (readonly || definition.kind === "check");
+  // One portable policy decides permissions here and commits in `writesRunBranch`.
+  const readonly = isReadOnlyAgentStep(definition);
+  // Adapters enforce read-only where they can; the runtime verifies the tree either way, so a
+  // step that changed files anyway (shell, unenforceable adapter) fails and is never committed.
+  const verifiesNoChange =
+    (workspace.isProjectRun && (readonly || definition.kind === "check")) ||
+    (workspace.isWorktreeRun && isAnalyticalStep(definition));
   const step = ctx.record().steps.find((item) => item.stepId === stepId);
   const attempt = step?.attempts.at(-1);
   if (!step || !attempt) throw new Error("Claimed attempt missing.");
@@ -112,10 +118,9 @@ export const runStep = async (
   const { commit, signal, initial } = ctx;
   const definition = ctx.record().snapshot.loop.steps.find((step) => step.id === stepId);
   if (!definition) throw new Error(`Unknown step ${stepId}.`);
-  const readonly = definition.stage === "review";
-  // In-project reviewers and checks run in the project itself; legacy runs keep frozen copies.
+  // Only reviews judge a frozen candidate; evidence and planning run in the live workspace.
   const reviewRoot =
-    readonly && !workspace.isProjectRun
+    definition.stage === "review" && !workspace.isProjectRun
       ? await mkdtemp(join(tmpdir(), "factory-review-"))
       : undefined;
   const executionDirectory = reviewRoot ? join(reviewRoot, "candidate") : workspace.path;

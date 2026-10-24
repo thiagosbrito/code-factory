@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { EvidenceSummary } from "./acceptance.js";
 import { runRecordSchema, type RunRecord } from "./run.js";
+import type { ReadOnlyRole } from "./step-access.js";
 
 /** Append an event optionally scoped to a step attempt; the sequence continues the event log. */
 export const appendScopedEvent = (
@@ -193,10 +194,10 @@ export const changedFiles = (
 export const READ_ONLY_VIOLATION = "read-only-violation";
 export const CHECKOUT_MOVED = "checkout-moved";
 export const READ_ONLY_LEFTOVERS =
-  "A reviewer or check changed project files earlier in this run, and the project still has uncommitted changes. Review, commit or discard them yourself before continuing, so a later step does not commit them as its own.";
+  "A reviewer, check, evidence step or planning step changed project files earlier in this run, and the project still has uncommitted changes. Review, commit or discard them yourself before continuing, so a later step does not commit them as its own.";
 
-/** A read-only step (review or check) that changed project files fails with this summary. */
-export const readOnlyViolation = (role: "Reviewer" | "Check", changes: string[]): string =>
+/** A read-only step (review, check, evidence or planning) that changed project files fails with this summary. */
+export const readOnlyViolation = (role: ReadOnlyRole, changes: string[]): string =>
   `${role} changed project files, so its result does not describe the committed candidate. Nothing was reverted; review or discard these changes yourself:\n${changes
     .slice(0, 50)
     .join("\n")}${changes.length > 50 ? `\n… and ${changes.length - 50} more` : ""}`;
