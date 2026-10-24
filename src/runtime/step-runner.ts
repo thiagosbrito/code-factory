@@ -15,7 +15,7 @@ import { appendLocalEvent, interruptStep } from "./scheduler-evidence.js";
 import { runCheckStep } from "./step-check.js";
 import { runAgentStep } from "./step-agent.js";
 import { recordStepCompletion, revalidateResult } from "./step-finish.js";
-import type { RunContext, RunWorkspace, StepFrame } from "./run-context.js";
+import type { RunContext, RunWorkspace, StepFrame, TreeFiles } from "./run-context.js";
 
 type LoopStep = StepFrame["definition"];
 
@@ -27,6 +27,7 @@ const prepareStep = async (
   definition: LoopStep,
   executionDirectory: string,
   hasReviewRoot: boolean,
+  sharedBaseline?: TreeFiles,
 ): Promise<StepFrame> => {
   const { commit, project, runId } = ctx;
   // One portable policy decides permissions here and commits in `writesRunBranch`.
@@ -71,7 +72,9 @@ const prepareStep = async (
     }
   }
   const filesBefore =
-    verifiesNoChange && !copyFailure ? (await gitTreeState(workspace.path)).files : null;
+    verifiesNoChange && !copyFailure
+      ? (sharedBaseline ?? (await gitTreeState(workspace.path)).files)
+      : null;
   const base = ctx.record().snapshot.baseline.sourceRevision;
   const runChanges =
     workspace.isProjectRun && base && !copyFailure
@@ -114,6 +117,7 @@ export const runStep = async (
   ctx: RunContext,
   workspace: RunWorkspace,
   stepId: string,
+  sharedBaseline?: TreeFiles,
 ): Promise<void> => {
   const { commit, signal, initial } = ctx;
   const definition = ctx.record().snapshot.loop.steps.find((step) => step.id === stepId);
@@ -132,6 +136,7 @@ export const runStep = async (
       definition,
       executionDirectory,
       reviewRoot !== undefined,
+      sharedBaseline,
     );
     let reported: StepResult;
     let staleCheck = false;

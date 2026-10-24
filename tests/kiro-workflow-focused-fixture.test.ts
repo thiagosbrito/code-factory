@@ -167,9 +167,8 @@ describe("kiro workflow translator: focused fixture", () => {
     const added = 'Added importer-generated agent step "delivery-rounds-';
     expect(messageAt("steps[3]", `${added}decision"`)).toHaveLength(1);
     expect(messageAt("steps[3]", `${added}exit"`)).toHaveLength(1);
-    expect(messageAt("steps[1]", "Parallel gather-context: Code Factory starts one")).toHaveLength(
-      1,
-    );
+    // The context-gathering branches are evidence steps in a parallel group, so they now overlap.
+    expect(messageAt("steps[1]", "Parallel gather-context: Code Factory")).toEqual([]);
     // Every review inside the repeat is reported; the all-review parallel is not serialized.
     const rejectingReviews = issues.filter(({ message }) =>
       message.includes('"changes-requested" verdict rejects the run'),

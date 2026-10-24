@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { CHANGED_FILES_GATE_PATH, DEFAULT_COVERAGE_THRESHOLD } from "../domain/gates.js";
 import { GATE_LAUNCH_SOURCE } from "./gate-launch.js";
@@ -155,7 +156,12 @@ export const ensureChangedFilesGate = async (project: string): Promise<void> => 
   const current = await readFile(path, "utf8").catch(() => null);
   if (current === GATE_SCRIPT) return;
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
+  // Unique per call: overlapping read-only steps of one run prepare at the same time in one process.
+  const temporary = `${path}.${randomUUID()}.tmp`;
   await writeFile(temporary, GATE_SCRIPT, { mode: 0o644 });
-  await rename(temporary, path);
+  try {
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 };

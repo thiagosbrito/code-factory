@@ -1,4 +1,5 @@
 import { importerGeneratedRole, TranslationError, type TranslationIssue } from "./contract.js";
+import { isReadOnlyAgentStep } from "../domain/step-access.js";
 import { humanize, inferStage, maxJsonLength, normalizeId, uniqueId } from "./kiro-workflow-ids.js";
 import {
   formatIssuePath,
@@ -191,21 +192,25 @@ export const mapKiroWorkflow = (
         );
     }
     const entries = branches.flatMap(({ fragment }) => fragment.entries);
-    // The scheduler launches one ready non-review step at a time, and launches ready
-    // review steps together only when no non-review step is ready.
-    if (steps.slice(firstStep).some(({ stage }) => stage !== "review"))
+    // The scheduler starts read-only steps (evidence, planning, review) together when they sit in
+    // a parallel group (reviews need no group); every other step runs alone.
+    if (
+      steps
+        .slice(firstStep)
+        .some((step) => !isReadOnlyAgentStep(step) || (!groupId && step.stage !== "review"))
+    )
       issue(
         nodeIssues,
         "lossy",
         path,
-        `Parallel ${node.id}: Code Factory starts one non-review step at a time, so these branches run one after another instead of concurrently.`,
+        `Parallel ${node.id}: Code Factory runs only read-only steps (evidence, planning, review) of a parallel group together, and a review together without a group, so these branches run one after another instead of concurrently.`,
       );
     if (mode === "any")
       issue(
         nodeIssues,
         "lossy",
         [...path, "joinPolicy"],
-        "any imported as an any join: the next step becomes ready once one branch succeeds, but the other branches are not canceled, and review steps started together are all awaited before another step starts.",
+        "any imported as an any join: the next step becomes ready once one branch succeeds, but the other branches are not canceled, and read-only steps started together are all awaited before another step starts.",
       );
     if (groupId) {
       for (const id of entries) {

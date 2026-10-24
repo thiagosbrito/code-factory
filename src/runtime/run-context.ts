@@ -34,7 +34,7 @@ export type RunWorkspace = {
   readonly commitsRunBranch: boolean;
 };
 
-type TreeFiles = Awaited<ReturnType<typeof gitTreeState>>["files"];
+export type TreeFiles = Awaited<ReturnType<typeof gitTreeState>>["files"];
 type RunStepRecord = RunRecord["steps"][number];
 
 /** The facts of one claimed attempt that its check, agent and finishing phases all read. */

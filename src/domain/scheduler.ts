@@ -9,6 +9,7 @@ import {
   type RunRecord,
 } from "./run.js";
 import { getDependentStepIds } from "./loop.js";
+import { isReadOnlyAgentStep } from "./step-access.js";
 
 type Step = RunRecord["steps"][number];
 type Definition = RunRecord["snapshot"]["loop"]["steps"][number];
@@ -25,7 +26,12 @@ export type StepResult = {
 };
 
 const update = (record: RunRecord, steps: Step[], status = record.status): RunRecord =>
-  runRecordSchema.parse({ ...record, revision: record.revision + 1, steps, status });
+  runRecordSchema.parse({
+    ...record,
+    revision: record.revision + 1,
+    steps,
+    status,
+  });
 
 const activeSource = (record: RunRecord, from: string, to: string): boolean => {
   const decision = record.snapshot.loop.decisions.find((item) => item.stepId === from);
@@ -92,6 +98,25 @@ export const skipInactive = (record: RunRecord): RunRecord => {
   }
 };
 
+/** Most read-only agent steps one scheduling round starts together; the rest wait for the next. */
+export const MAX_CONCURRENT_READ_ONLY_STEPS = 4;
+
+/**
+ * Pick the ready steps to start now. A read-only agent step may share a round with others when it
+ * is a review or sits in a parallel group; every other ready step (a writer, a check, or an
+ * ungrouped analytical step) runs alone and takes priority, so a writer never overlaps anything.
+ * Readiness already guarantees the chosen steps do not depend on one another.
+ */
+export const selectRunnable = (record: RunRecord, ready: Definition[]): Definition[] => {
+  const groups = record.snapshot.loop.groups;
+  const concurrent = (definition: Definition): boolean =>
+    isReadOnlyAgentStep(definition) &&
+    (definition.stage === "review" ||
+      groups.some((group) => group.kind === "parallel" && group.stepIds.includes(definition.id)));
+  const exclusive = ready.find((definition) => !concurrent(definition));
+  return exclusive ? [exclusive] : ready.slice(0, MAX_CONCURRENT_READ_ONLY_STEPS);
+};
+
 export const claimStep = (
   record: RunRecord,
   stepId: string,
@@ -100,13 +125,15 @@ export const claimStep = (
 ): RunRecord => {
   const definition = readySteps(record).find((step) => step.id === stepId);
   if (!definition) throw new Error(`Step ${stepId} is not ready.`);
-  const writer = definition.stage !== "review";
+  // One policy (`step-access.ts`): read-only agent steps may overlap each other; any other step
+  // (a writer or a check) needs the workspace to itself, and nothing starts beside a running one.
   const active = record.steps.filter((step) => isActiveStatus(step.status));
-  if (writer && active.length) throw new Error("Conflicting workspace writer or reader is active.");
+  if (!isReadOnlyAgentStep(definition) && active.length)
+    throw new Error("Conflicting workspace writer or reader is active.");
   if (
     active.some((step) => {
-      const item = record.snapshot.loop.steps.find((definition) => definition.id === step.stepId);
-      return item?.stage !== "review";
+      const item = record.snapshot.loop.steps.find((candidate) => candidate.id === step.stepId);
+      return !item || !isReadOnlyAgentStep(item);
     })
   )
     throw new Error("Workspace writer is active.");
