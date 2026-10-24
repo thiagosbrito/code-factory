@@ -184,8 +184,9 @@ describe("step commits and the .code-factory folder", { timeout: 30_000 }, () =>
       "--option",
       "ünï cødé.txt",
       "a b.txt",
-      "[glob]*.txt",
-      ":(top)x.txt",
+      "[glob].txt",
+      // `*` and `:` are not valid in Windows file names, so these lookalikes are POSIX only.
+      ...(process.platform === "win32" ? [] : ["*.txt", ":(top)x.txt"]),
     ];
     for (const name of names) await writeFile(join(root, name), "x\n");
 
