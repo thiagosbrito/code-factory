@@ -8,7 +8,9 @@ import { attachAttemptSession } from "../src/domain/run.js";
 import { READ_ONLY_LEFTOVERS } from "../src/domain/run-branch.js";
 import { claimStep } from "../src/domain/scheduler.js";
 import { assertProjectRunCanWrite } from "../src/runtime/run-branch.js";
+import { startLocalServer } from "../src/runtime/server.js";
 import { mutateRun } from "../src/runtime/storage.js";
+import { trustProject } from "../src/runtime/trust.js";
 import { writesRunBranch } from "../src/runtime/scheduler-inputs.js";
 import { executeRun } from "../src/runtime/scheduler.js";
 import {
@@ -209,5 +211,35 @@ describe("read-only step violations and recovery", { timeout: 30_000 }, () => {
       done.evidence.some((item) => item.kind === "event" && item.title === "recovery-unavailable"),
     ).toBe(true);
     expect(done.steps[0]?.attempts[0]?.status).toBe("interrupted");
+  });
+
+  it("answers 409 with the leftovers message when retrying a dirty legacy worktree run", async () => {
+    const { root } = await repository();
+    const adapter = acting(async (input) => {
+      if (input.stepId === "planning")
+        await writeFile(join(input.projectDirectory, "file.txt"), "planned edit\n");
+    });
+    const run = await createLegacyWorktreeRun(root, loop());
+    const failed = await executeRun(root, run.snapshot.id, () => adapter);
+    const attemptId = failed.steps.find((step) => step.stepId === "planning")?.attempts.at(-1)?.id;
+    await trustProject(root);
+    const { server, url } = await startLocalServer({
+      sessionToken: null,
+      projectDirectory: root,
+      port: 0,
+    });
+    try {
+      const response = await fetch(`${url}/api/runs/${run.snapshot.id}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stepId: "planning", attemptId }),
+      });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: READ_ONLY_LEFTOVERS });
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 });

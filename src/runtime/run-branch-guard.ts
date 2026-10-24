@@ -27,7 +27,8 @@ export const assertSoleProjectWriter = async (project: string, runId?: string): 
 };
 
 /**
- * Before an in-project run executes: it is the only writer, the checkout is on its branch, and a
+ * Before an in-project run executes (legacy worktree runs only get the read-only leftovers
+ * check below): it is the only writer, the checkout is on its branch, and a
  * first execution starts from a clean tree, so the first step commit holds only agent changes.
  */
 export const assertProjectRunCanWrite = async (
@@ -52,7 +53,7 @@ export const assertProjectRunCanWrite = async (
 };
 
 /**
- * A reviewer or check changed files, and no attempt has started since: those changes are still
+ * A reviewer, evidence step, planning step or check changed files, and no attempt has started since: those changes are still
  * the violation's, so a later writing step must not commit them under its own name.
  */
 export const hasUnresolvedReadOnlyViolation = (record: RunRecord): boolean => {
