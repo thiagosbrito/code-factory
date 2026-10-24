@@ -248,6 +248,7 @@ describe("step commits and the .code-factory folder", { timeout: 30_000 }, () =>
       await writeFactoryData(root);
       await writeFile(join(root, "file.txt"), "modified\n");
       git(root, "add", "-f", ".code-factory/evidence/new.json", "file.txt");
+      await rm(join(root, "remove.txt")); // an unstaged user edit
       const before = git(root, "rev-parse", "HEAD");
 
       const result = await commitStepChanges(root, run, "implement", attempt);
@@ -263,7 +264,31 @@ describe("step commits and the .code-factory folder", { timeout: 30_000 }, () =>
         "",
         ".code-factory/evidence/new.json",
         "file.txt",
+        "remove.txt", // the step's own change was staged before the refusal
       ]);
+      expect(await readFile(join(root, ".code-factory", "evidence", "new.json"), "utf8")).toBe(
+        "{}\n",
+      );
+    },
+  );
+
+  it.each([{ change: "unchanged" }, { change: "modified in the working tree only" }])(
+    "commits normally when a tracked .code-factory file is $change",
+    async ({ change }) => {
+      const { root } = await repository();
+      await mkdir(join(root, ".code-factory"));
+      await writeFile(join(root, ".code-factory", "tracked.json"), "old\n");
+      git(root, "add", "-f", ".code-factory/tracked.json");
+      commit(root, "Track");
+      const run = await createProjectRun(root);
+      if (change !== "unchanged")
+        await writeFile(join(root, ".code-factory", "tracked.json"), "changed\n");
+      await writeFile(join(root, "file.txt"), "modified\n");
+
+      const result = await commitStepChanges(root, run, "implement", attempt);
+
+      expect(result.kind).toBe("committed");
+      expect(filesIn(root, "HEAD")).toEqual(["M\tfile.txt"]);
     },
   );
 

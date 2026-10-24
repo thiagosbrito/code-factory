@@ -38,7 +38,7 @@ const stagingFailure = (summary: string, output = summary): StepCommit => ({
 const stagingCommandFailure = (result: GitResult): StepCommit => {
   if (result.spawnError === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
     return stagingFailure(
-      "Code Factory could not list the step's changed files because the list is too large. Commit or ignore the generated files, then retry.",
+      "Code Factory could not read the step's changed files from Git because the list is too large. Commit or ignore the generated files, then retry.",
     );
   if (result.code === 129)
     return stagingFailure(
@@ -51,10 +51,11 @@ const stagingCommandFailure = (result: GitResult): StepCommit => {
  * Stage the step's changes outside the root `.code-factory`. Paths are listed first and then
  * staged by name in one index write: the factory folder is never walked or hashed (it holds large,
  * atomically renamed files), and an `:(exclude)` pathspec naming an ignored folder is never given
- * to `git add`, where it exits 1. Nothing is unstaged, so a failure leaves the index as it was.
+ * to `git add`, where it exits 1. Nothing is ever unstaged.
  * Anything already staged under the root `.code-factory` (for example by an agent running
  * `git add -A`) is not listed, because it matches the index; since the index may not be reset,
- * the step is refused with those paths named rather than committing factory data.
+ * the step is refused with those paths named rather than committing factory data (the step's own
+ * changes are then staged, no commit is made, and the working tree is untouched).
  *
  * Limits: `runGit` decodes output as UTF-8, so a file name that is not valid UTF-8 (possible on
  * Linux) cannot round-trip and fails the step with Git's own error. A path that vanishes between
@@ -99,7 +100,7 @@ const stageStepChanges = async (workspace: string): Promise<StepCommit | null> =
   const shown =
     staged.slice(0, 5).join(", ") + (staged.length > 5 ? `, and ${staged.length - 5} more` : "");
   return stagingFailure(
-    `Code Factory did not commit this step because factory data is staged in the index (${shown}). Unstage it with \`git restore --staged .code-factory\`; the index was left as it was.`,
+    `Code Factory did not commit this step because factory data is staged in the index (${shown}). The step's own changes were staged, nothing was unstaged and the working tree was not touched. Unstage the factory paths with \`git restore --staged .code-factory\` and retry.`,
   );
 };
 
