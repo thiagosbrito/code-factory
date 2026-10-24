@@ -35,7 +35,15 @@ export const assertProjectRunCanWrite = async (
   record: RunRecord,
   options: { fresh: boolean },
 ): Promise<void> => {
-  if (!isProjectRun(record.snapshot.baseline)) return;
+  if (!isProjectRun(record.snapshot.baseline)) {
+    // Legacy worktree runs commit too, so leftovers of a read-only violation must not be
+    // committed by the next writing step. Clone runs never commit and keep no such guard.
+    if (!hasUnresolvedReadOnlyViolation(record)) return;
+    const legacy = await resolveRunWorkspace(project, record, { legacy: "prefix" });
+    if (legacy.kind === "worktree" && (await isProjectDirty(legacy.path)))
+      throw new ProjectError(READ_ONLY_LEFTOVERS, 409);
+    return;
+  }
   await assertSoleProjectWriter(project, record.snapshot.id);
   const resolved = await resolveRunWorkspace(project, record, { legacy: "prefix" });
   if (!(await isProjectDirty(resolved.path))) return;

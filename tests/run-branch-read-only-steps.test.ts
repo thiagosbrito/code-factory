@@ -2,6 +2,13 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { StepExecutionInput } from "../src/adapters/contract.js";
+import { mockAdapter } from "../src/adapters/mock.js";
+import { parseLoop } from "../src/domain/loop.js";
+import { attachAttemptSession } from "../src/domain/run.js";
+import { READ_ONLY_LEFTOVERS } from "../src/domain/run-branch.js";
+import { claimStep } from "../src/domain/scheduler.js";
+import { assertProjectRunCanWrite } from "../src/runtime/run-branch.js";
+import { mutateRun } from "../src/runtime/storage.js";
 import { writesRunBranch } from "../src/runtime/scheduler-inputs.js";
 import { executeRun } from "../src/runtime/scheduler.js";
 import {
@@ -122,5 +129,85 @@ describe("read-only evidence and planning steps", { timeout: 30_000 }, () => {
     const done = await executeRun(root, run.snapshot.id, () => adapter);
     expect(outcome(done)).toEqual({ status: "succeeded", failures: [] });
     expect(subjects(root)).toContain("(implement)");
+  });
+});
+
+describe("read-only step violations and recovery", { timeout: 30_000 }, () => {
+  it("refuses to continue a worktree run over an analytical step's leftovers until they are resolved", async () => {
+    const { root } = await repository();
+    const adapter = acting(async (input) => {
+      if (input.stepId === "planning")
+        await writeFile(join(input.projectDirectory, "file.txt"), "planned edit\n");
+    });
+    const run = await createLegacyWorktreeRun(root, loop());
+    const failed = await executeRun(root, run.snapshot.id, () => adapter);
+    expect(failed.status).toBe("failed");
+    await expect(assertProjectRunCanWrite(root, failed, { fresh: false })).rejects.toThrow(
+      READ_ONLY_LEFTOVERS,
+    );
+    git(worktreeOf(root, run), "checkout", "--", "file.txt");
+    await expect(assertProjectRunCanWrite(root, failed, { fresh: false })).resolves.toBeUndefined();
+  });
+
+  it("fails a writing evidence step in a parallel group, commits nothing and does not start its sibling", async () => {
+    const { root } = await repository();
+    const pair = [
+      { ...evidence, id: "one", groupId: "pair" },
+      { ...evidence, id: "two", groupId: "pair" },
+    ];
+    const parallel = parseLoop({
+      schemaVersion: 2,
+      id: "flow",
+      name: "Flow",
+      version: 1,
+      status: "published",
+      steps: pair,
+      dependencies: [],
+      groups: [{ id: "pair", name: "Pair", kind: "parallel", stepIds: ["one", "two"] }],
+      joins: [],
+      decisions: [],
+      policy: { maxAttemptsPerStep: 2, maxImplementationRounds: 1 },
+    });
+    const started: string[] = [];
+    const adapter = acting(async (input) => {
+      started.push(input.stepId);
+      if (input.stepId === "one")
+        await writeFile(join(input.projectDirectory, "feature.txt"), "premature\n");
+    });
+    const run = await createProjectRun(root, parallel);
+    const done = await executeRun(root, run.snapshot.id, () => adapter);
+    expect(done.status).toBe("failed");
+    // Group members currently run one at a time, so the violation stops the sibling before it starts.
+    expect(started).toEqual(["one"]);
+    expect(outcome(done).failures).toEqual([
+      expect.stringContaining("one: Evidence step changed project files"),
+    ]);
+    expect(subjects(root)).toBe("");
+  });
+
+  it("does not reattach to an in-flight evidence step after a crash; it becomes recovery-unavailable", async () => {
+    const { root } = await repository();
+    const run = await createProjectRun(root, loopWith([evidence], []));
+    await mutateRun(root, run.snapshot.id, (current) =>
+      claimStep(current, "evidence", "candidate", "input"),
+    );
+    await mutateRun(root, run.snapshot.id, (current) =>
+      attachAttemptSession(current, "evidence", "session", "turn"),
+    );
+    let attached = false;
+    const resumable = {
+      ...mockAdapter,
+      capabilities: { ...mockAdapter.capabilities, resume: "supported" as const },
+      attach: (...args: Parameters<typeof mockAdapter.attach>) => {
+        attached = true;
+        return mockAdapter.attach(...args);
+      },
+    };
+    const done = await executeRun(root, run.snapshot.id, () => resumable);
+    expect(attached).toBe(false);
+    expect(
+      done.evidence.some((item) => item.kind === "event" && item.title === "recovery-unavailable"),
+    ).toBe(true);
+    expect(done.steps[0]?.attempts[0]?.status).toBe("interrupted");
   });
 });

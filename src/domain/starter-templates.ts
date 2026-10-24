@@ -118,7 +118,7 @@ export const createStarterDraft = (starter: StarterId, id: string): LoopDefiniti
         "Requirements and baseline",
         "evidence",
         "Requirements analyst",
-        "Identify the requested behavior, acceptance criteria, existing baseline, and relevant constraints.",
+        "Identify the requested behavior, acceptance criteria, relevant constraints, and the existing baseline from the source and Git history. You cannot run tests or commands, so state anything you could not verify.",
         ["Requirements and baseline evidence"],
       ),
       step(

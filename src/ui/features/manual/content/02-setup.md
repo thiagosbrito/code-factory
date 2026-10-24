@@ -117,7 +117,7 @@ There is one row for each of **Kiro**, **Codex** and **Claude Code**. Each row s
 
 Notes:
 
-- Reviewer steps stay read-only even when a grant exists.
+- Reviewer, evidence and planning steps stay read-only even when a grant exists, so a shell grant never applies to them.
 - A grant lets an allowed command run in your checkout with your account's permissions, so it can change your files, branches and Git configuration.
 - A `toolGrants` entry written into the project's own files is ignored. When one is present the section says: "Tool permissions saved in this project's files are ignored; grant them again here."
 - If a request to change trust or a permission fails, the dialog or section shows the error, for example "Connection lost. The project was not trusted; try again."

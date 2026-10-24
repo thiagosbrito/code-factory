@@ -64,7 +64,7 @@ export const runAgentStep = async (ctx: RunContext, frame: StepFrame): Promise<S
     instruction: [
       definition.instruction,
       isAnalyticalStep(definition) &&
-        `This ${definition.stage ?? "analytical"} step is read-only: inspect the project and report your findings in your output. Do not create, edit or delete files; Code Factory fails the step and does not commit if the project changes.`,
+        `This ${definition.stage} step is read-only and cannot run commands or tests: work from the project's files and history and report your findings in your output. Do not create, edit or delete files; Code Factory fails the step and does not commit if the project changes.`,
       frame.inputs.context,
       frame.runChanges && frame.base && changedFilesContext(frame.base, frame.runChanges),
       allowedOutcomes &&
