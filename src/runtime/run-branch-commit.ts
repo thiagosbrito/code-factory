@@ -5,7 +5,15 @@ import { dirname, join, resolve } from "node:path";
 import type { RunRecord } from "../domain/run.js";
 import { defaultTicketBranch, RUN_BRANCH_PREFIX, stepCommitMessage } from "../domain/run-branch.js";
 import { fileDigest, gitCommonDir } from "./workspace.js";
-import { type GitResult, identityArgs, runGit, git, tail, isCode } from "./run-branch-git.js";
+import {
+  COMMIT_TIMEOUT_MS,
+  type GitResult,
+  identityArgs,
+  runGit,
+  git,
+  tail,
+  isCode,
+} from "./run-branch-git.js";
 
 export type StepCommit =
   | { kind: "committed"; sha: string; subject: string }
@@ -18,6 +26,83 @@ export const commitFailure = (result: GitResult): StepCommit => ({
   output: result.spawnError ? `Could not start git: ${result.spawnError}` : tail(result),
   summary: `Commit failed (exit ${result.code ?? "none"}); a Git hook or Git rejected the step's changes. See the commit-failed evidence.`,
 });
+
+const stagingFailure = (summary: string, output = summary): StepCommit => ({
+  kind: "failed",
+  exitCode: null,
+  output,
+  summary,
+});
+
+/** Turn a failed listing or staging command into a clear result (a Git older than 2.25, an overflow). */
+const stagingCommandFailure = (result: GitResult): StepCommit => {
+  if (result.spawnError === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
+    return stagingFailure(
+      "Code Factory could not read the step's changed files from Git because the list is too large. Commit or ignore the generated files, then retry.",
+    );
+  if (result.code === 129)
+    return stagingFailure(
+      `Code Factory needs Git 2.25 or newer to stage a step's changes (this Git rejected an option). ${tail(result)}`.trim(),
+    );
+  return commitFailure(result);
+};
+
+/**
+ * Stage the step's changes outside the root `.code-factory`. Paths are listed first and then
+ * staged by name in one index write: the factory folder is never walked or hashed (it holds large,
+ * atomically renamed files), and an `:(exclude)` pathspec naming an ignored folder is never given
+ * to `git add`, where it exits 1. Nothing is ever unstaged.
+ * Anything already staged under the root `.code-factory` (for example by an agent running
+ * `git add -A`) is not listed, because it matches the index; since the index may not be reset,
+ * the step is refused with those paths named rather than committing factory data (the step's own
+ * changes are then staged, no commit is made, and the working tree is untouched).
+ *
+ * Limits: `runGit` decodes output as UTF-8, so a file name that is not valid UTF-8 (possible on
+ * Linux) cannot round-trip and fails the step with Git's own error. A path that vanishes between
+ * the listing and the add fails the step with Git's error, and a retry stages the current state.
+ */
+const stageStepChanges = async (workspace: string): Promise<StepCommit | null> => {
+  const listed = await runGit(workspace, [
+    "ls-files",
+    "-z",
+    "--modified",
+    "--deleted",
+    "--others",
+    "--exclude-standard",
+    "--",
+    ".",
+    ":(exclude).code-factory",
+  ]);
+  if (listed.code !== 0) return stagingCommandFailure(listed);
+  // A modified-then-deleted path is listed twice.
+  const paths = [...new Set(listed.stdout.split("\0").filter(Boolean))];
+  if (paths.length > 0) {
+    const added = await runGit(
+      workspace,
+      ["--literal-pathspecs", "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"],
+      COMMIT_TIMEOUT_MS,
+      `${paths.join("\0")}\0`,
+    );
+    if (added.code !== 0) return stagingCommandFailure(added);
+  }
+  const factory = await runGit(workspace, [
+    "--literal-pathspecs",
+    "diff",
+    "--cached",
+    "--name-only",
+    "-z",
+    "--",
+    ".code-factory",
+  ]);
+  if (factory.code !== 0) return stagingCommandFailure(factory);
+  const staged = factory.stdout.split("\0").filter(Boolean);
+  if (staged.length === 0) return null;
+  const shown =
+    staged.slice(0, 5).join(", ") + (staged.length > 5 ? `, and ${staged.length - 5} more` : "");
+  return stagingFailure(
+    `Code Factory did not commit this step because factory data is staged in the index (${shown}). The step's own changes were staged, nothing was unstaged and the working tree was not touched. Unstage the factory paths with \`git restore --staged .code-factory\` and retry.`,
+  );
+};
 
 /**
  * Commit a successful writing attempt on the run branch with the user's identity and hooks.
@@ -44,12 +129,8 @@ export const commitStepChanges = async (
       return { kind: "failed", exitCode: null, output: reason, summary: reason };
     }
   } else return commitFailure(head);
-  // An `:(exclude)` pathspec naming an ignored folder makes `git add` exit 1, so stage everything
-  // and then take factory storage back out of the index (the working tree is not touched).
-  const added = await runGit(workspace, ["add", "--all", "--", "."]);
-  if (added.code !== 0) return commitFailure(added);
-  const unstaged = await runGit(workspace, ["reset", "--quiet", "--", ".code-factory"]);
-  if (unstaged.code !== 0) return commitFailure(unstaged);
+  const staging = await stageStepChanges(workspace);
+  if (staging) return staging;
   const staged = await runGit(workspace, ["diff", "--cached", "--quiet"]);
   if (staged.code === 0) return { kind: "unchanged" };
   if (staged.code !== 1) return commitFailure(staged);

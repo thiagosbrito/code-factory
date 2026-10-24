@@ -33,6 +33,7 @@ export const runGit = async (
   cwd: string,
   args: readonly string[],
   timeout = COMMIT_TIMEOUT_MS,
+  input?: string,
 ): Promise<GitResult> => {
   let command: string;
   try {
@@ -41,7 +42,7 @@ export const runGit = async (
     return { code: null, stdout: "", stderr: "", timedOut: false, spawnError: "ENOENT" };
   }
   return new Promise((resolveGit) => {
-    execFile(
+    const child = execFile(
       command,
       ["-C", cwd, ...args],
       {
@@ -62,6 +63,11 @@ export const runGit = async (
         });
       },
     );
+    if (input !== undefined) {
+      // A Git that exits early closes the pipe; its exit code already reports the failure.
+      child.stdin?.on("error", () => undefined);
+      child.stdin?.end(input);
+    }
   });
 };
 
