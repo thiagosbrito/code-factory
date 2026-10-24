@@ -140,7 +140,7 @@ export const claimStep = (
 ): RunRecord => {
   const definition = readySteps(record).find((step) => step.id === stepId);
   if (!definition) throw new Error(`Step ${stepId} is not ready.`);
-  // One policy (`step-access.ts`): read-only agent steps may overlap each other; any other step
+  // One policy (`step-access.ts`): steps that share the workspace (`sharesWorkspace`) may overlap; any other step
   // (a writer or a check) needs the workspace to itself, and nothing starts beside a running one.
   const active = record.steps.filter((step) => isActiveStatus(step.status));
   if (!sharesWorkspace(record.snapshot.loop, definition) && active.length)

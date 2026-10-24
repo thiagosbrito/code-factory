@@ -207,7 +207,7 @@ export const mapKiroWorkflow = (
         nodeIssues,
         "lossy",
         path,
-        `Parallel ${node.id}: Code Factory runs a writing step, and an evidence or planning step outside a parallel group, alone, and starts at most four grouped evidence or planning steps at a time, so those branches run one after another instead of concurrently; reviews and the other read-only steps of a group run together.`,
+        `Parallel ${node.id}: Code Factory runs a writing step, and an evidence or planning step outside a parallel group, alone, and starts at most four grouped evidence or planning steps at a time, so those branches may run one after another or in rounds instead of all at once; reviews and the other read-only steps of a group run together.`,
       );
     if (mode === "any")
       issue(

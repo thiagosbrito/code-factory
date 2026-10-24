@@ -74,13 +74,13 @@ Both views organize steps into five stages. The stage is a property of the step.
 
 | Stage                 | Description shown in the editor                  | Effect at run time                                                                                                                                                                          |
 | --------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1. Evidence**       | Requirements, discovery, and baseline context    | An ordinary writing step.                                                                                                                                                                   |
-| **2. Plan**           | Design decisions and implementation planning     | An ordinary writing step.                                                                                                                                                                   |
+| **1. Evidence**       | Requirements, discovery, and baseline context    | A read-only step: it cannot run commands or tests, and if it changes a project file the step fails and nothing is committed.                                                                |
+| **2. Plan**           | Design decisions and implementation planning     | A read-only step: it cannot run commands or tests, and if it changes a project file the step fails and nothing is committed.                                                                |
 | **3. Implementation** | Source changes and candidate preparation         | An ordinary writing step.                                                                                                                                                                   |
 | **4. Review**         | Quality, accessibility, security, and acceptance | The step is a reviewer: it only reads the workspace, and several ready reviews may run at the same time. It answers with one verdict on the first line: pass, changes-requested or blocked. |
 | **5. Validate**       | Executable checks and final outcome              | Check steps live here. Validate steps, like Review steps, also receive the results of every upstream step that succeeded on the same candidate, not only their direct dependencies.         |
 
-Outside the Review stage, the factory runs one step at a time, even if several are ready.
+The factory runs one step at a time, even if several are ready, except for ready Review steps and the Evidence or Planning steps of a parallel group, which run together (at most four Evidence or Planning steps at once).
 
 ## The Board view
 

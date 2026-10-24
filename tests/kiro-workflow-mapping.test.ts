@@ -97,7 +97,7 @@ describe("kiro workflow translator: mapping rules", () => {
     const at = (field: string) =>
       report.issues.filter((item) => item.field === field).map(({ message }) => message);
     expect(at("steps[1]")).toEqual([
-      "Parallel work: Code Factory runs a writing step, and an evidence or planning step outside a parallel group, alone, and starts at most four grouped evidence or planning steps at a time, so those branches run one after another instead of concurrently; reviews and the other read-only steps of a group run together.",
+      "Parallel work: Code Factory runs a writing step, and an evidence or planning step outside a parallel group, alone, and starts at most four grouped evidence or planning steps at a time, so those branches may run one after another or in rounds instead of all at once; reviews and the other read-only steps of a group run together.",
     ]);
     expect(at("steps[1].joinPolicy")).toEqual([
       "any imported as an any join: the next step becomes ready once one branch succeeds, but the other branches are not canceled, and read-only steps started together are all awaited before another step starts.",

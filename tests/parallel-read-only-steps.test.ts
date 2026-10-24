@@ -215,13 +215,16 @@ describe("parallel read-only steps", { timeout: 30_000 }, () => {
     });
     const run = await createProjectRun(root, groupLoop([analytical("one"), analytical("two")]));
     const work = executeRun(root, run.snapshot.id, () => probe.adapter);
-    // Release step one only once step two's success is durable in the run record.
-    for (;;) {
+    // Release step one only once step two has settled durably in the run record.
+    let settled = "";
+    while (!["succeeded", "failed", "canceled"].includes(settled)) {
       const current = await readRun(root, run.snapshot.id);
-      if (current?.steps.find((step) => step.stepId === "two")?.status === "succeeded") break;
-      await new Promise((resolve) => setImmediate(resolve));
+      settled = current?.steps.find((step) => step.stepId === "two")?.status ?? "";
+      if (!settled || settled === "pending" || settled === "running")
+        await new Promise((resolve) => setTimeout(resolve, 5));
     }
     twoFinished.resolve();
+    expect(settled).toBe("succeeded");
     const done = await work;
     const status = Object.fromEntries(done.steps.map((step) => [step.stepId, step.status]));
     expect(status).toEqual({ one: "failed", two: "succeeded" });
