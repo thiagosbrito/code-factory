@@ -7,7 +7,7 @@ A local, agent-independent coding loop factory. React + TypeScript, shadcn/ui, T
 Requirements:
 
 - Node 22.12 or newer.
-- A Git repository with at least one commit and a clean working tree.
+- Git 2.25 or newer, and a Git repository with at least one commit and a clean working tree.
 - One of Codex, Kiro or Claude Code, installed and signed in.
 
 ```sh

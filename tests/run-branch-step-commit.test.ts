@@ -234,4 +234,49 @@ describe("step commits and the .code-factory folder", { timeout: 30_000 }, () =>
     expect(git(root, "diff", "--cached", "--name-only", "-z")).toBe("");
     expect(await readFile(join(root, "file.txt"), "utf8")).toBe("modified\n");
   });
+
+  it.each([{ ignored: true }, { ignored: false }])(
+    "refuses to commit factory files that were already staged and keeps user paths staged (ignored: $ignored)",
+    async ({ ignored }) => {
+      const { root } = await repository();
+      if (ignored) {
+        await writeFile(join(root, ".gitignore"), "node_modules/\n.code-factory/\n");
+        git(root, "add", ".gitignore");
+        commit(root, "Ignore");
+      }
+      const run = await createProjectRun(root);
+      await writeFactoryData(root);
+      await writeFile(join(root, "file.txt"), "modified\n");
+      git(root, "add", "-f", ".code-factory/evidence/new.json", "file.txt");
+      const before = git(root, "rev-parse", "HEAD");
+
+      const result = await commitStepChanges(root, run, "implement", attempt);
+
+      expect(result).toMatchObject({
+        kind: "failed",
+        summary: expect.stringMatching(
+          /\.code-factory\/evidence\/new\.json.*staged|staged.*\.code-factory\/evidence\/new\.json/,
+        ),
+      });
+      expect(git(root, "rev-parse", "HEAD")).toBe(before);
+      expect(git(root, "diff", "--cached", "--name-only", "-z").split("\0").sort()).toEqual([
+        "",
+        ".code-factory/evidence/new.json",
+        "file.txt",
+      ]);
+    },
+  );
+
+  it("commits user paths that the agent already staged", async () => {
+    const { root } = await repository();
+    const run = await createProjectRun(root);
+    await writeFile(join(root, "staged.txt"), "x\n");
+    git(root, "add", "staged.txt");
+    await writeFile(join(root, "file.txt"), "modified\n");
+
+    const result = await commitStepChanges(root, run, "implement", attempt);
+
+    expect(result.kind).toBe("committed");
+    expect(filesIn(root, "HEAD")).toEqual(["A\tstaged.txt", "M\tfile.txt"]);
+  });
 });
