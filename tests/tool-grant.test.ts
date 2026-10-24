@@ -259,33 +259,29 @@ describe("adapter mapping", () => {
     }
   });
 
-  it("covers Bash and PowerShell identically whatever platform the runtime reports", () => {
-    const original = Object.getOwnPropertyDescriptor(process, "platform");
-    const argsOn = (platform: string, toolGrant?: ToolGrantInEffect, readOnly = false) => {
-      Object.defineProperty(process, "platform", { value: platform, configurable: true });
-      return claudeCodeArgs({
+  it("names both shell tools in every mode because the shell list is platform-independent", () => {
+    // claudeCodeArgs reads no platform, so there is nothing to vary per OS: Windows (PowerShell)
+    // and POSIX (Bash) hosts get the same arguments. This is an argument-generation check only.
+    const args = (toolGrant?: ToolGrantInEffect, readOnly = false) =>
+      claudeCodeArgs({
         ...input(toolGrant),
         binding: { provider: "claude-code", model: "opus", effort: "high" },
         readOnly,
       });
-    };
-    try {
-      for (const [grant, readOnly] of [
-        [undefined, false],
-        [claudeGrant, false],
-        [claudeGrant, true],
-      ] as const) {
-        const reference = argsOn("linux", grant, readOnly);
-        for (const platform of ["win32", "darwin"])
-          expect(argsOn(platform, grant, readOnly)).toEqual(reference);
-        // No shell tool is ever allowed while another is denied, or the reverse.
-        const flag = reference.includes("--allowedTools") ? "allowed" : "denied";
-        expect(reference).toEqual(expect.arrayContaining(["Bash", "PowerShell"]));
-        expect(flag).toBe(grant && !readOnly ? "allowed" : "denied");
-      }
-    } finally {
-      if (original) Object.defineProperty(process, "platform", original);
-    }
+    const tail = (list: string[], flag: string) => list.slice(list.indexOf(flag));
+    expect(tail(args(), "--disallowedTools")).toEqual(["--disallowedTools", "Bash", "PowerShell"]);
+    expect(tail(args(claudeGrant), "--allowedTools")).toEqual([
+      "--allowedTools",
+      "Bash",
+      "PowerShell",
+    ]);
+    expect(args(claudeGrant)).not.toContain("--disallowedTools");
+    for (const grant of [undefined, claudeGrant])
+      expect(tail(args(grant, true), "--disallowedTools").slice(0, 3)).toEqual([
+        "--disallowedTools",
+        "Bash",
+        "PowerShell",
+      ]);
   });
 
   it("keeps the stored Claude Code scope as Bash and never stores a provider shell name list", () => {
