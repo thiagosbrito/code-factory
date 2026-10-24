@@ -32,7 +32,7 @@ export const toolGrantText: Record<
     title: "Allow Claude Code to run shell commands?",
     decline: "Run without shell",
     scope:
-      "Code Factory will start every Claude Code step in this project with `--allowedTools Bash` instead of `--disallowedTools Bash`.",
+      "Code Factory will start every Claude Code step in this project with `--allowedTools Bash PowerShell` instead of `--disallowedTools Bash PowerShell`.",
     implication:
       "The agent can run any command with your account's permissions, without asking, in any directory it chooses. Commands it runs work in your project checkout and can change its files, branches, stash and config.",
   },

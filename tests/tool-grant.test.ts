@@ -17,6 +17,7 @@ import { createRunRecord, createRunSnapshot } from "../src/domain/run.js";
 import {
   describeToolGrant,
   providersNeedingToolGrant,
+  TOOL_GRANT_SCOPE,
   toolGrantsSchema,
   type ToolGrantInEffect,
 } from "../src/domain/tool-grant.js";
@@ -145,10 +146,10 @@ describe("tool grant schemas and helpers", () => {
       "Codex default: command approval requests are declined. Tool permission unavailable: bad file.",
     );
     expect(describeToolGrant("claude-code", null, "/w")).toBe(
-      "Claude Code default: file tools allowed. Bash is denied.",
+      "Claude Code default: file tools allowed. Shell (Bash and PowerShell) is denied.",
     );
     expect(describeToolGrant("claude-code", claudeGrant, "/w")).toBe(
-      "Claude Code project grant from 2026-10-07T10:00:00.000Z: file tools and Bash allowed.",
+      "Claude Code project grant from 2026-10-07T10:00:00.000Z: file tools and shell (Bash and PowerShell) allowed.",
     );
     expect(describeToolGrant("cursor", null, "/w")).toBe(
       "No tool permission grant applies to provider cursor.",
@@ -234,8 +235,8 @@ describe("adapter mapping", () => {
       "high",
     ];
     // The instruction travels as a stdin message, so nothing follows the variadic tool list.
-    expect(claude()).toEqual([...base, "--disallowedTools", "Bash"]);
-    expect(claude(claudeGrant)).toEqual([...base, "--allowedTools", "Bash"]);
+    expect(claude()).toEqual([...base, "--disallowedTools", "Bash", "PowerShell"]);
+    expect(claude(claudeGrant)).toEqual([...base, "--allowedTools", "Bash", "PowerShell"]);
     expect(claude(kiroGrant)).toEqual(claude());
     for (const args of [claude(), claude(claudeGrant)]) {
       expect(args).not.toContain("bypassPermissions");
@@ -250,11 +251,46 @@ describe("adapter mapping", () => {
       expect(args.slice(args.indexOf("--disallowedTools"))).toEqual([
         "--disallowedTools",
         "Bash",
+        "PowerShell",
         "Edit",
         "Write",
         "NotebookEdit",
       ]);
     }
+  });
+
+  it("names both shell tools in every mode because the shell list is platform-independent", () => {
+    // claudeCodeArgs reads no platform, so there is nothing to vary per OS: Windows (PowerShell)
+    // and POSIX (Bash) hosts get the same arguments. This is an argument-generation check only.
+    const args = (toolGrant?: ToolGrantInEffect, readOnly = false) =>
+      claudeCodeArgs({
+        ...input(toolGrant),
+        binding: { provider: "claude-code", model: "opus", effort: "high" },
+        readOnly,
+      });
+    const tail = (list: string[], flag: string) => list.slice(list.indexOf(flag));
+    expect(tail(args(), "--disallowedTools")).toEqual(["--disallowedTools", "Bash", "PowerShell"]);
+    expect(tail(args(claudeGrant), "--allowedTools")).toEqual([
+      "--allowedTools",
+      "Bash",
+      "PowerShell",
+    ]);
+    expect(args(claudeGrant)).not.toContain("--disallowedTools");
+    for (const grant of [undefined, claudeGrant])
+      expect(tail(args(grant, true), "--disallowedTools").slice(0, 3)).toEqual([
+        "--disallowedTools",
+        "Bash",
+        "PowerShell",
+      ]);
+  });
+
+  it("keeps the stored Claude Code scope as Bash and never stores a provider shell name list", () => {
+    expect(TOOL_GRANT_SCOPE["claude-code"]).toEqual(["Bash"]);
+    expect(
+      toolGrantsSchema.safeParse({
+        "claude-code": { scope: ["Bash", "PowerShell"], grantedAt: claudeGrant.grantedAt },
+      }).success,
+    ).toBe(false);
   });
 
   it("trusts only fs_read for a read-only reviewer, even with a Kiro grant", () => {
