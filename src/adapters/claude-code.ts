@@ -12,6 +12,11 @@ import type {
 } from "./contract.js";
 import { listClaudeCodeModels } from "./claude-code-models.js";
 import {
+  foldClaudeUsage,
+  parseClaudeResultUsage,
+  type ClaudeResultUsage,
+} from "./claude-code-usage.js";
+import {
   parseJson,
   PROBE_OUTPUT_LIMIT,
   probeCommand,
@@ -108,6 +113,8 @@ const streamEvent = z.discriminatedUnion("type", [
     is_error: z.boolean(),
     session_id: z.string().min(1),
     result: z.string().optional(),
+    usage: z.unknown().optional(),
+    total_cost_usd: z.unknown().optional(),
   }),
 ]);
 const knownTypes = new Set(["system", "assistant", "user", "result"]);
@@ -211,6 +218,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       },
     );
     let session: StepSession | undefined;
+    const usageResults: ClaudeResultUsage[] = [];
     let completion: { outcome: "succeeded" | "failed"; output: string } | undefined;
     const toolNames = new Map<string, string>();
     try {
@@ -248,6 +256,9 @@ export class ClaudeCodeAdapter implements AgentAdapter {
             outcome: event.subtype === "success" && !event.is_error ? "succeeded" : "failed",
             output: event.result ?? "",
           };
+          // A crash result may carry zeroed metrics, so it reports nothing rather than zeros.
+          if (event.subtype !== "error_during_execution")
+            usageResults.push(parseClaudeResultUsage(event));
           // The turn is over; closing stdin lets the CLI exit and ends the step.
           this.inputs.delete(session.sessionId);
           child.stdin.end();
@@ -290,6 +301,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         throw new Error(
           `Claude Code stream ended without successful completion (${exit.code ?? exit.signal ?? "unknown"}): ${stderr}`,
         );
+      const usage = foldClaudeUsage(usageResults);
+      if (usage) yield { type: "usage", ...session, usage };
       yield { type: "completed", ...session, ...completion };
     } finally {
       signal.removeEventListener("abort", abort);

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { usageFields } from "./usage.js";
 
 export const projectRelativePathSchema = z
   .string()
@@ -154,6 +155,18 @@ export const artifactSchema = z.strictObject({
   provenance: provenanceSchema,
   freshness: freshnessSchema,
 });
+/** What a provider reported an attempt used; at most one per attempt, never edited afterward. */
+export const usageReceiptSchema = z
+  .strictObject({
+    ...identity,
+    kind: z.literal("usage"),
+    stepId: z.string().min(1),
+    attemptId: z.uuid(),
+    ...usageFields,
+  })
+  .refine((receipt) => receipt.tokens !== undefined || receipt.cost !== undefined, {
+    message: "A usage receipt needs tokens or a cost.",
+  });
 export const evidenceSchema = z.discriminatedUnion("kind", [
   eventSchema,
   guidanceSchema,
@@ -165,6 +178,7 @@ export const evidenceSchema = z.discriminatedUnion("kind", [
   fileChangeSchema,
   artifactSchema,
   acceptanceReceiptSchema,
+  usageReceiptSchema,
 ]);
 export type Evidence = z.infer<typeof evidenceSchema>;
 /** An event entry of a run's evidence: what the event stream publishes and the UI renders. */
