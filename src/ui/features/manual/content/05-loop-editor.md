@@ -74,13 +74,13 @@ Both views organize steps into five stages. The stage is a property of the step.
 
 | Stage                 | Description shown in the editor                  | Effect at run time                                                                                                                                                                          |
 | --------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1. Evidence**       | Requirements, discovery, and baseline context    | An ordinary writing step.                                                                                                                                                                   |
-| **2. Plan**           | Design decisions and implementation planning     | An ordinary writing step.                                                                                                                                                                   |
+| **1. Evidence**       | Requirements, discovery, and baseline context    | A read-only step: it cannot run commands or tests, and if it changes a project file the step fails and nothing is committed.                                                                |
+| **2. Plan**           | Design decisions and implementation planning     | A read-only step: it cannot run commands or tests, and if it changes a project file the step fails and nothing is committed.                                                                |
 | **3. Implementation** | Source changes and candidate preparation         | An ordinary writing step.                                                                                                                                                                   |
 | **4. Review**         | Quality, accessibility, security, and acceptance | The step is a reviewer: it only reads the workspace, and several ready reviews may run at the same time. It answers with one verdict on the first line: pass, changes-requested or blocked. |
 | **5. Validate**       | Executable checks and final outcome              | Check steps live here. Validate steps, like Review steps, also receive the results of every upstream step that succeeded on the same candidate, not only their direct dependencies.         |
 
-Outside the Review stage, the factory runs one step at a time, even if several are ready.
+The factory runs one step at a time, even if several are ready, except for ready Review steps and the Evidence or Planning steps of a parallel group, which run together (at most four Evidence or Planning steps at once).
 
 ## The Board view
 
@@ -237,7 +237,7 @@ A parallel group says that its members are not ordered relative to each other. U
 | One checkbox per step     | Chooses the members.                                                           | Selections that no longer match an existing step are dropped.                                                                     |
 | **Create parallel group** | Creates the group from the checked steps (two or more, none in another group). | Dependencies between members are removed, because a parallel group cannot order its own members. Each member remembers its group. |
 
-At run time a parallel group does not by itself make steps run at the same moment. All it guarantees is that no order is imposed between its members. The factory runs one writing step at a time. Several ready steps in the Review stage can run together.
+At run time a parallel group imposes no order between its members, and its read-only members (stages Evidence, Planning and Review) that are ready run at the same moment; at most four Evidence or Planning members start at once, and the rest follow in the next round. Ready Review steps are not limited. The factory runs every other step (a writing step or a check) alone, and ahead of any waiting read-only step. Several ready steps in the Review stage can also run together without a group. Read-only steps that run together share the project folder, so if one of them changes a file, every one of them that finishes afterwards fails and lists the change; nothing is committed.
 
 ### Repeat group
 

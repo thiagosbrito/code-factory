@@ -151,7 +151,7 @@ describe("read-only step violations and recovery", { timeout: 30_000 }, () => {
     await expect(assertProjectRunCanWrite(root, failed, { fresh: false })).resolves.toBeUndefined();
   });
 
-  it("fails a writing evidence step in a parallel group, commits nothing and does not start its sibling", async () => {
+  it("fails a writing evidence step in a parallel group and commits nothing", async () => {
     const { root } = await repository();
     const pair = [
       { ...evidence, id: "one", groupId: "pair" },
@@ -179,11 +179,13 @@ describe("read-only step violations and recovery", { timeout: 30_000 }, () => {
     const run = await createProjectRun(root, parallel);
     const done = await executeRun(root, run.snapshot.id, () => adapter);
     expect(done.status).toBe("failed");
-    // Group members currently run one at a time, so the violation stops the sibling before it starts.
-    expect(started).toEqual(["one"]);
-    expect(outcome(done).failures).toEqual([
+    // Group members now overlap, so the sibling starts and shares the failed tree check.
+    expect(started.sort()).toEqual(["one", "two"]);
+    // Whether the sibling also saw the edit depends on timing (see parallel-read-only-steps.test.ts
+    // for the deterministic overlap); the writer always fails.
+    expect(outcome(done).failures).toContainEqual(
       expect.stringContaining("one: Evidence step changed project files"),
-    ]);
+    );
     expect(subjects(root)).toBe("");
   });
 

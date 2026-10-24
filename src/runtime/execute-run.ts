@@ -4,17 +4,19 @@ import {
   continueRepeat,
   hashInputs,
   readySteps,
+  selectRunnable,
   prepareStepRetry,
   settleRun,
   skipInactive,
 } from "../domain/scheduler.js";
 import { readRun, isRunPersistenceError } from "./storage.js";
-import { fileDigest } from "./workspace.js";
+import { fileDigest, gitTreeState } from "./workspace.js";
 import { FINISHED_RUN, isActiveStatus, type Resolver } from "./scheduler-constants.js";
 import { stepInputs } from "./scheduler-inputs.js";
 import { createRunContext } from "./run-context.js";
 import { openRunWorkspace, runSetup } from "./run-prepare.js";
 import { runStep } from "./step-runner.js";
+import type { TreeFiles } from "./run-context.js";
 
 export const executeOnce = async (
   project: string,
@@ -30,11 +32,11 @@ export const executeOnce = async (
   // in particular its setup command must not run in the user's checkout after a cancel.
   if (!retry && FINISHED_RUN.has(initial.status)) return initial;
   const ctx = createRunContext(project, runId, initial, signal, resolveAdapter, onWriteFailure);
-  const runSteps = async (ids: string[]) => {
+  const runSteps = async (ids: string[], sharedBaseline?: TreeFiles) => {
     const results = await Promise.allSettled(
       ids.map(async (id) => {
         try {
-          await runStep(ctx, workspace, id);
+          await runStep(ctx, workspace, id, sharedBaseline);
         } catch (error) {
           if (ctx.writeFailed() || isRunPersistenceError(error)) onWriteFailure(error);
           throw error;
@@ -74,7 +76,11 @@ export const executeOnce = async (
     if (ctx.record().status === "unavailable") return ctx.record();
     if (signal.aborted)
       return commit((current) =>
-        runRecordSchema.parse({ ...current, revision: current.revision + 1, status: "canceled" }),
+        runRecordSchema.parse({
+          ...current,
+          revision: current.revision + 1,
+          status: "canceled",
+        }),
       );
     ctx.setRecord(await commit(skipInactive));
     const repeat = ctx
@@ -92,9 +98,12 @@ export const executeOnce = async (
     const ready = readySteps(ctx.record());
     if (!ready.length) return commit(settleRun);
     const candidateId = await fileDigest(workspace.path, workspace.mode);
-    const selected = ready.some((step) => step.stage !== "review")
-      ? ready.filter((step) => step.stage !== "review").slice(0, 1)
-      : ready;
+    const selected = selectRunnable(ctx.record(), ready);
+    // Overlapping read-only steps are all checked against one tree taken before any starts.
+    const sharedBaseline =
+      selected.length > 1 && (workspace.isProjectRun || workspace.isWorktreeRun)
+        ? (await gitTreeState(workspace.path)).files
+        : undefined;
     const launched: string[] = [];
     for (const definition of selected) {
       const inputs = stepInputs(ctx.record(), definition.id, candidateId);
@@ -107,6 +116,6 @@ export const executeOnce = async (
       );
       launched.push(definition.id);
     }
-    await runSteps(launched);
+    await runSteps(launched, sharedBaseline);
   }
 };

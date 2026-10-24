@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { CHANGED_FILES_GATE_PATH, DEFAULT_COVERAGE_THRESHOLD } from "../domain/gates.js";
 import { GATE_LAUNCH_SOURCE } from "./gate-launch.js";
@@ -149,13 +150,31 @@ if (listed === undefined) done(2, "Set CODE_FACTORY_CHANGED_FILES or pass --base
 gate(listed.split("\n").map(line => line.trim()).filter(Boolean).filter(path => existsSync(join(root, path))))
 `;
 
-/** Keep the project's copy of the gate current; a missing or edited copy is rewritten. */
-export const ensureChangedFilesGate = async (project: string): Promise<void> => {
-  const path = join(project, CHANGED_FILES_GATE_PATH);
+const gateWrites = new Map<string, Promise<void>>();
+
+const writeGate = async (path: string): Promise<void> => {
   const current = await readFile(path, "utf8").catch(() => null);
   if (current === GATE_SCRIPT) return;
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
+  const temporary = `${path}.${randomUUID()}.tmp`;
   await writeFile(temporary, GATE_SCRIPT, { mode: 0o644 });
-  await rename(temporary, path);
+  try {
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+};
+
+/**
+ * Keep the project's copy of the gate current; a missing or edited copy is rewritten. Overlapping
+ * read-only steps of one run prepare together, so calls for one path share a single write (a
+ * Windows rename over a file another call is replacing would fail).
+ */
+export const ensureChangedFilesGate = async (project: string): Promise<void> => {
+  const path = join(project, CHANGED_FILES_GATE_PATH);
+  const pending = gateWrites.get(path);
+  if (pending) return pending;
+  const write = writeGate(path).finally(() => gateWrites.delete(path));
+  gateWrites.set(path, write);
+  return write;
 };

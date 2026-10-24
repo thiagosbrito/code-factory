@@ -1,4 +1,6 @@
 import { importerGeneratedRole, TranslationError, type TranslationIssue } from "./contract.js";
+import { MAX_CONCURRENT_READ_ONLY_STEPS } from "../domain/scheduler.js";
+import { isReadOnlyAgentStep } from "../domain/step-access.js";
 import { humanize, inferStage, maxJsonLength, normalizeId, uniqueId } from "./kiro-workflow-ids.js";
 import {
   formatIssuePath,
@@ -191,21 +193,28 @@ export const mapKiroWorkflow = (
         );
     }
     const entries = branches.flatMap(({ fragment }) => fragment.entries);
-    // The scheduler launches one ready non-review step at a time, and launches ready
-    // review steps together only when no non-review step is ready.
-    if (steps.slice(firstStep).some(({ stage }) => stage !== "review"))
+    // The scheduler starts read-only steps (evidence, planning, review) together when they sit in
+    // a parallel group (reviews need no group; at most four evidence/planning at a time); every other
+    // step, including a writer in a mixed group, runs alone first.
+    if (
+      steps
+        .slice(firstStep)
+        .some((step) => !isReadOnlyAgentStep(step) || (!groupId && step.stage !== "review")) ||
+      steps.slice(firstStep).filter((step) => step.stage !== "review").length >
+        MAX_CONCURRENT_READ_ONLY_STEPS
+    )
       issue(
         nodeIssues,
         "lossy",
         path,
-        `Parallel ${node.id}: Code Factory starts one non-review step at a time, so these branches run one after another instead of concurrently.`,
+        `Parallel ${node.id}: Code Factory runs a writing step, and an evidence or planning step outside a parallel group, alone, and starts at most four grouped evidence or planning steps at a time, so those branches may run one after another or in rounds instead of all at once; reviews and the other read-only steps of a group run together.`,
       );
     if (mode === "any")
       issue(
         nodeIssues,
         "lossy",
         [...path, "joinPolicy"],
-        "any imported as an any join: the next step becomes ready once one branch succeeds, but the other branches are not canceled, and review steps started together are all awaited before another step starts.",
+        "any imported as an any join: the next step becomes ready once one branch succeeds, but the other branches are not canceled, and read-only steps started together are all awaited before another step starts.",
       );
     if (groupId) {
       for (const id of entries) {

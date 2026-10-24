@@ -9,6 +9,7 @@ import {
   type RunRecord,
 } from "./run.js";
 import { getDependentStepIds } from "./loop.js";
+import { isReadOnlyAgentStep } from "./step-access.js";
 
 type Step = RunRecord["steps"][number];
 type Definition = RunRecord["snapshot"]["loop"]["steps"][number];
@@ -25,7 +26,12 @@ export type StepResult = {
 };
 
 const update = (record: RunRecord, steps: Step[], status = record.status): RunRecord =>
-  runRecordSchema.parse({ ...record, revision: record.revision + 1, steps, status });
+  runRecordSchema.parse({
+    ...record,
+    revision: record.revision + 1,
+    steps,
+    status,
+  });
 
 const activeSource = (record: RunRecord, from: string, to: string): boolean => {
   const decision = record.snapshot.loop.decisions.find((item) => item.stepId === from);
@@ -92,6 +98,40 @@ export const skipInactive = (record: RunRecord): RunRecord => {
   }
 };
 
+/** Most grouped evidence or planning steps one scheduling round starts together; reviews are uncapped. */
+export const MAX_CONCURRENT_READ_ONLY_STEPS = 4;
+
+/**
+ * Whether a step may share the workspace with other running steps: a review (always, as before) or
+ * a read-only evidence/planning step in a parallel group. Every other step needs the workspace alone.
+ */
+export const sharesWorkspace = (loop: RunRecord["snapshot"]["loop"], definition: Definition) =>
+  isReadOnlyAgentStep(definition) &&
+  (definition.stage === "review" ||
+    loop.groups.some(
+      (group) => group.kind === "parallel" && group.stepIds.includes(definition.id),
+    ));
+
+/**
+ * Pick the ready steps to start now. Any ready step that does not share the workspace (a writer, a
+ * check, an ungrouped analytical step) runs alone and goes first, so a writer never overlaps
+ * anything. Otherwise every ready review starts, plus at most `MAX_CONCURRENT_READ_ONLY_STEPS`
+ * grouped evidence or planning steps; the rest wait for the next round. Readiness already
+ * guarantees the chosen steps do not depend on one another.
+ */
+export const selectRunnable = (record: RunRecord, ready: Definition[]): Definition[] => {
+  const loop = record.snapshot.loop;
+  const exclusive = ready.find((definition) => !sharesWorkspace(loop, definition));
+  if (exclusive) return [exclusive];
+  const reviews = ready.filter((definition) => definition.stage === "review");
+  const analytical = ready
+    .filter((definition) => definition.stage !== "review")
+    .slice(0, MAX_CONCURRENT_READ_ONLY_STEPS);
+  return ready.filter(
+    (definition) => reviews.includes(definition) || analytical.includes(definition),
+  );
+};
+
 export const claimStep = (
   record: RunRecord,
   stepId: string,
@@ -100,13 +140,15 @@ export const claimStep = (
 ): RunRecord => {
   const definition = readySteps(record).find((step) => step.id === stepId);
   if (!definition) throw new Error(`Step ${stepId} is not ready.`);
-  const writer = definition.stage !== "review";
+  // One policy (`step-access.ts`): steps that share the workspace (`sharesWorkspace`) may overlap; any other step
+  // (a writer or a check) needs the workspace to itself, and nothing starts beside a running one.
   const active = record.steps.filter((step) => isActiveStatus(step.status));
-  if (writer && active.length) throw new Error("Conflicting workspace writer or reader is active.");
+  if (!sharesWorkspace(record.snapshot.loop, definition) && active.length)
+    throw new Error("Conflicting workspace writer or reader is active.");
   if (
     active.some((step) => {
-      const item = record.snapshot.loop.steps.find((definition) => definition.id === step.stepId);
-      return item?.stage !== "review";
+      const item = record.snapshot.loop.steps.find((candidate) => candidate.id === step.stepId);
+      return !item || !sharesWorkspace(record.snapshot.loop, item);
     })
   )
     throw new Error("Workspace writer is active.");
