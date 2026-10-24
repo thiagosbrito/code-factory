@@ -98,23 +98,38 @@ export const skipInactive = (record: RunRecord): RunRecord => {
   }
 };
 
-/** Most read-only agent steps one scheduling round starts together; the rest wait for the next. */
+/** Most grouped evidence or planning steps one scheduling round starts together; reviews are uncapped. */
 export const MAX_CONCURRENT_READ_ONLY_STEPS = 4;
 
 /**
- * Pick the ready steps to start now. A read-only agent step may share a round with others when it
- * is a review or sits in a parallel group; every other ready step (a writer, a check, or an
- * ungrouped analytical step) runs alone and takes priority, so a writer never overlaps anything.
- * Readiness already guarantees the chosen steps do not depend on one another.
+ * Whether a step may share the workspace with other running steps: a review (always, as before) or
+ * a read-only evidence/planning step in a parallel group. Every other step needs the workspace alone.
+ */
+export const sharesWorkspace = (loop: RunRecord["snapshot"]["loop"], definition: Definition) =>
+  isReadOnlyAgentStep(definition) &&
+  (definition.stage === "review" ||
+    loop.groups.some(
+      (group) => group.kind === "parallel" && group.stepIds.includes(definition.id),
+    ));
+
+/**
+ * Pick the ready steps to start now. Any ready step that does not share the workspace (a writer, a
+ * check, an ungrouped analytical step) runs alone and goes first, so a writer never overlaps
+ * anything. Otherwise every ready review starts, plus at most `MAX_CONCURRENT_READ_ONLY_STEPS`
+ * grouped evidence or planning steps; the rest wait for the next round. Readiness already
+ * guarantees the chosen steps do not depend on one another.
  */
 export const selectRunnable = (record: RunRecord, ready: Definition[]): Definition[] => {
-  const groups = record.snapshot.loop.groups;
-  const concurrent = (definition: Definition): boolean =>
-    isReadOnlyAgentStep(definition) &&
-    (definition.stage === "review" ||
-      groups.some((group) => group.kind === "parallel" && group.stepIds.includes(definition.id)));
-  const exclusive = ready.find((definition) => !concurrent(definition));
-  return exclusive ? [exclusive] : ready.slice(0, MAX_CONCURRENT_READ_ONLY_STEPS);
+  const loop = record.snapshot.loop;
+  const exclusive = ready.find((definition) => !sharesWorkspace(loop, definition));
+  if (exclusive) return [exclusive];
+  const reviews = ready.filter((definition) => definition.stage === "review");
+  const analytical = ready
+    .filter((definition) => definition.stage !== "review")
+    .slice(0, MAX_CONCURRENT_READ_ONLY_STEPS);
+  return ready.filter(
+    (definition) => reviews.includes(definition) || analytical.includes(definition),
+  );
 };
 
 export const claimStep = (
@@ -128,12 +143,12 @@ export const claimStep = (
   // One policy (`step-access.ts`): read-only agent steps may overlap each other; any other step
   // (a writer or a check) needs the workspace to itself, and nothing starts beside a running one.
   const active = record.steps.filter((step) => isActiveStatus(step.status));
-  if (!isReadOnlyAgentStep(definition) && active.length)
+  if (!sharesWorkspace(record.snapshot.loop, definition) && active.length)
     throw new Error("Conflicting workspace writer or reader is active.");
   if (
     active.some((step) => {
       const item = record.snapshot.loop.steps.find((candidate) => candidate.id === step.stepId);
-      return !item || !isReadOnlyAgentStep(item);
+      return !item || !sharesWorkspace(record.snapshot.loop, item);
     })
   )
     throw new Error("Workspace writer is active.");

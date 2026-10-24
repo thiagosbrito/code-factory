@@ -1,4 +1,5 @@
 import { importerGeneratedRole, TranslationError, type TranslationIssue } from "./contract.js";
+import { MAX_CONCURRENT_READ_ONLY_STEPS } from "../domain/scheduler.js";
 import { isReadOnlyAgentStep } from "../domain/step-access.js";
 import { humanize, inferStage, maxJsonLength, normalizeId, uniqueId } from "./kiro-workflow-ids.js";
 import {
@@ -193,17 +194,20 @@ export const mapKiroWorkflow = (
     }
     const entries = branches.flatMap(({ fragment }) => fragment.entries);
     // The scheduler starts read-only steps (evidence, planning, review) together when they sit in
-    // a parallel group (reviews need no group); every other step runs alone.
+    // a parallel group (reviews need no group; at most four evidence/planning at a time); every other
+    // step, including a writer in a mixed group, runs alone first.
     if (
       steps
         .slice(firstStep)
-        .some((step) => !isReadOnlyAgentStep(step) || (!groupId && step.stage !== "review"))
+        .some((step) => !isReadOnlyAgentStep(step) || (!groupId && step.stage !== "review")) ||
+      steps.slice(firstStep).filter((step) => step.stage !== "review").length >
+        MAX_CONCURRENT_READ_ONLY_STEPS
     )
       issue(
         nodeIssues,
         "lossy",
         path,
-        `Parallel ${node.id}: Code Factory runs only read-only steps (evidence, planning, review) of a parallel group together, and a review together without a group, so these branches run one after another instead of concurrently.`,
+        `Parallel ${node.id}: Code Factory runs a writing step, and an evidence or planning step outside a parallel group, alone, and starts at most four grouped evidence or planning steps at a time, so those branches run one after another instead of concurrently; reviews and the other read-only steps of a group run together.`,
       );
     if (mode === "any")
       issue(

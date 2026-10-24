@@ -11,6 +11,7 @@ import {
   selectRunnable,
 } from "../src/domain/scheduler.js";
 import { claim } from "./support/scheduler.js";
+import { readRun } from "../src/runtime/storage.js";
 import { cancelRun, executeRun } from "../src/runtime/scheduler.js";
 import {
   createProjectRun,
@@ -50,7 +51,9 @@ const groupLoop = (
     status: "published",
     steps,
     dependencies,
-    groups: [{ id: "group", name: "Group", kind: "parallel", stepIds: members }],
+    groups: members.length
+      ? [{ id: "group", name: "Group", kind: "parallel", stepIds: members }]
+      : [],
     joins: [],
     decisions: [],
     policy: { maxAttemptsPerStep: 2, maxImplementationRounds: 1 },
@@ -131,15 +134,6 @@ describe("parallel read-only steps", { timeout: 30_000 }, () => {
     );
     const run = await createProjectRun(root, loop);
     const done = await executeRun(root, run.snapshot.id, () => probe.adapter);
-    console.log(
-      JSON.stringify(
-        done.evidence.map((e) => [
-          e.kind,
-          (e as { title?: string }).title,
-          (e as { detail?: string }).detail,
-        ]),
-      ),
-    );
     expect(done.status).toBe("succeeded");
     const start = probe.log.indexOf("start:summary");
     expect(start).toBeGreaterThan(probe.log.indexOf("end:one"));
@@ -193,6 +187,47 @@ describe("parallel read-only steps", { timeout: 30_000 }, () => {
     const failures = outcome(done).failures;
     expect(failures).toHaveLength(2);
     for (const failure of failures) expect(failure).toContain("changed project files");
+    expect(git(root, "log", "--format=%s", "main..HEAD")).toBe("");
+  });
+
+  it("starts all six ready reviews in one round", async () => {
+    const { root } = await repository();
+    const meet = rendezvous(6);
+    const probe = controlled((input) => meet(input.stepId));
+    const ids = ["r1", "r2", "r3", "r4", "r5", "r6"];
+    const reviews = ids.map((id) => ({ ...analytical(id, "review"), groupId: undefined }));
+    const run = await createProjectRun(root, groupLoop(reviews, [], []));
+    const done = await executeRun(root, run.snapshot.id, () => probe.adapter);
+    expect(done.status).toBe("succeeded");
+    expect(probe.max()).toBe(6);
+  });
+
+  it("keeps the result of a step that finished before a sibling edited the project", async () => {
+    const { root } = await repository();
+    const meet = rendezvous(2);
+    const twoFinished = deferred();
+    const probe = controlled(async (input) => {
+      await meet(input.stepId);
+      if (input.stepId === "one") {
+        await twoFinished.promise;
+        await writeFile(join(input.projectDirectory, "feature.txt"), "late\n");
+      }
+    });
+    const run = await createProjectRun(root, groupLoop([analytical("one"), analytical("two")]));
+    const work = executeRun(root, run.snapshot.id, () => probe.adapter);
+    // Release step one only once step two's success is durable in the run record.
+    for (;;) {
+      const current = await readRun(root, run.snapshot.id);
+      if (current?.steps.find((step) => step.stepId === "two")?.status === "succeeded") break;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    twoFinished.resolve();
+    const done = await work;
+    const status = Object.fromEntries(done.steps.map((step) => [step.stepId, step.status]));
+    expect(status).toEqual({ one: "failed", two: "succeeded" });
+    expect(
+      done.evidence.some((item) => item.kind === "event" && item.title === "read-only-violation"),
+    ).toBe(true);
     expect(git(root, "log", "--format=%s", "main..HEAD")).toBe("");
   });
 
@@ -281,6 +316,21 @@ describe("selectRunnable", () => {
     ).toEqual(ids.slice(0, MAX_CONCURRENT_READ_ONLY_STEPS));
   });
 
+  it("starts every ready review but caps grouped evidence", async () => {
+    const reviews = ["a", "b", "c", "d", "e", "f"].map((id) => ({
+      ...analytical(id, "review"),
+      groupId: undefined,
+    }));
+    const evidence = ["x", "y", "z", "u", "v", "w"].map((id) => analytical(id));
+    expect(await pick(reviews, [])).toEqual(["a", "b", "c", "d", "e", "f"]);
+    expect(
+      await pick(
+        evidence,
+        evidence.map((item) => item.id),
+      ),
+    ).toEqual(["x", "y", "z", "u"]);
+  });
+
   it("keeps a writer alone and ahead of read-only siblings", async () => {
     expect(
       await pick(
@@ -323,6 +373,15 @@ describe("claimStep exclusivity", () => {
     const record = evidenceLoop([analytical("one"), analytical("two")]);
     const claimed = claim(claim(record, "one"), "two");
     expect(claimed.steps.filter((item) => item.status === "running")).toHaveLength(2);
+  });
+
+  it("refuses an ungrouped analytical step beside a running evidence step", () => {
+    const record = evidenceLoop([
+      analytical("one"),
+      analytical("two"),
+      { ...analytical("solo"), groupId: undefined },
+    ]);
+    expect(() => claim(claim(record, "one"), "solo")).toThrow(/Conflicting workspace/);
   });
 
   it("refuses a writer beside a running evidence step, and an evidence step beside a writer", () => {
