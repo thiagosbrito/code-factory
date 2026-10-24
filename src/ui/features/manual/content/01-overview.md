@@ -29,7 +29,7 @@ Creating a run never starts an agent. Execution is always a separate action.
 | **Evidence**         | The durable, append-only record of a run: attempts, events, outputs, command results and receipts. Failures keep their output as evidence.                                                                                                                |
 | **Run branch**       | The Git branch Code Factory creates at your current commit when a run starts, and switches your checkout to. After each successful writing step Code Factory commits that step's changes on it.                                                           |
 | **Trust**            | Your decision, recorded once per project, that Code Factory may run that project's setup and check commands, custom agent executables and agent steps. Nothing runs in an untrusted project.                                                              |
-| **Tool permissions** | A separate, per-provider permission that lets writing steps run shell commands (for example your tests). It is off by default and can be revoked at any time. Reviewers stay read-only regardless.                                                        |
+| **Tool permissions** | A separate, per-provider permission that lets writing steps run shell commands (for example your tests). It is off by default and can be revoked at any time. Reviewer, evidence and planning steps stay read-only regardless.                            |
 | **Check step**       | A step that runs a command in your project, for example a linter. It receives `CODE_FACTORY_BASE_REVISION` (the commit the run started from) and `CODE_FACTORY_CHANGED_FILES` (one path per line). A check that changes a file that is not ignored fails. |
 
 ## Where your data lives
@@ -85,4 +85,4 @@ You need Node 22.12 or newer, a Git repository with at least one commit and a cl
 - A run does not start if the working tree has uncommitted changes, or a merge, rebase, cherry-pick, revert or bisect is in progress. Code Factory never stashes, resets or cleans your files.
 - If you switch branches while a run is pending or active, its next step is refused with a message naming the branch to switch back to.
 - A restart never resumes anything on its own. An unfinished run shows **Resume run**.
-- Reviewer steps are read-only. If a reviewer or check changes a file that is not ignored, the step fails and the evidence lists what changed.
+- Reviewer, evidence and planning steps are read-only, and only writing steps are committed. If one of them or a check changes a file that is not ignored, the step fails and the evidence lists what changed.

@@ -167,7 +167,7 @@ By default agents cannot run shell commands for you. A tool permission, granted 
 | **Codex**       | Runs commands inside its own sandbox; requests to go outside it are declined. Row text: "default: command approval requests are declined".           | Accepts a command-approval request only when the command's working directory is inside the project folder. Network prompts and file-change approvals stay declined. Row text: "commands inside the project allowed since `<date>`". The command then runs outside Codex's sandbox. |
 | **Claude Code** | File tools only, Bash and PowerShell denied (`--disallowedTools Bash PowerShell`). Row text: "default: file tools only, Bash and PowerShell denied". | Starts steps with `--allowedTools Bash PowerShell`. Row text: "shell (Bash, PowerShell) allowed since `<date>`".                                                                                                                                                                   |
 
-Cursor and Custom have no tool permission. Reviewers are always read-only whatever you grant: Kiro reviewers trust only `fs_read`, and Claude Code reviewers disallow Bash, PowerShell, Edit, Write and NotebookEdit.
+Cursor and Custom have no tool permission. Reviewers, evidence steps and planning steps are always read-only whatever you grant: Kiro trusts only `fs_read` for them, and Claude Code disallows Bash, PowerShell, Edit, Write and NotebookEdit.
 
 An allowed command runs with your account's permissions and can change files, branches, stash and Git config in your checkout. The dialog says so; read it.
 

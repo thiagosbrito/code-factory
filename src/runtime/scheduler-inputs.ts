@@ -8,6 +8,7 @@ import {
 } from "../domain/ticket.js";
 import { declaredOutcome, firstLineOutcome } from "../domain/outcome.js";
 import { CHANGED_FILES_GATE_PATH } from "../domain/gates.js";
+import { stepWritesProject } from "../domain/step-access.js";
 
 export const issueLookupInstruction = (ticketId: string): string =>
   [
@@ -59,13 +60,17 @@ export const issueContext = (record: RunRecord, stepId: string, ticketId: string
   return `Issue ${ticketId} details were not captured by the first step. Do not fetch the issue again; work from the task and inputs below.`;
 };
 
-/** Agent steps outside review in a project or worktree run get one Code Factory commit per success. */
+/**
+ * Writing agent steps (see `stepWritesProject`: not evidence, planning or review) in a project or
+ * worktree run get one Code Factory commit per success. This is the same portable policy that
+ * selects read-only adapter permissions, so permissions and commits cannot disagree.
+ */
 export const writesRunBranch = (record: RunRecord, stepId: string): boolean => {
   const definition = record.snapshot.loop.steps.find((step) => step.id === stepId);
   return (
     Boolean(record.snapshot.baseline.branch) &&
-    definition?.kind === "agent" &&
-    definition.stage !== "review"
+    definition !== undefined &&
+    stepWritesProject(definition)
   );
 };
 

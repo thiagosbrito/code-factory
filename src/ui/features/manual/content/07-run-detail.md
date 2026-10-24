@@ -298,7 +298,7 @@ If an earlier acceptance is no longer valid the dialog says so: "Earlier accepta
 
 A check step runs a shell command from the loop, in your project folder, and records pass or fail with its output. The starter loops use checks for changed-files lint, type-check and coverage, and a diff check. Their gate script lives under `.code-factory/` and is never committed.
 
-A reviewer is an agent that may only read. In your project, reviewers and checks must leave your files unchanged. If one changes any file, its result is replaced by a failure with the message that begins "Reviewer changed project files, so its result does not describe the committed candidate" (or "Check changed project files…"), listing the paths. Nothing is reverted. You must review or discard those changes yourself before executing again, because Code Factory refuses to continue with leftover changes ("A reviewer or check changed project files earlier in this run…").
+A reviewer is an agent that may only read, and so are evidence and planning steps (by their stage). In your project, these steps and checks must leave your files unchanged, and only writing steps are committed. If one changes any file, its result is replaced by a failure with the message that begins "Reviewer changed project files, so its result does not describe the committed candidate" (or "Evidence step changed project files…", "Planning step changed project files…", "Check changed project files…"), listing the paths. Nothing is reverted. You must review or discard those changes yourself before executing again, because Code Factory refuses to continue with leftover changes ("A reviewer, check, evidence step or planning step changed project files earlier in this run…").
 
 Other ways a step fails:
 
@@ -380,7 +380,7 @@ Every entry in **Activity** has a type: **lifecycle**, **message**, **tool**, **
 | Check started, Check output, Check completed                         | check     | A check step's command, its output and its result.                                                                       |
 | commit-created                                                       | lifecycle | The step's commit, with its short hash and subject.                                                                      |
 | commit-failed                                                        | check     | Git or a hook refused the commit.                                                                                        |
-| read-only-violation                                                  | check     | A reviewer or check changed files.                                                                                       |
+| read-only-violation                                                  | check     | A reviewer, check, evidence or planning step changed files.                                                              |
 | checkout-moved                                                       | check     | Your checkout left the run branch.                                                                                       |
 | agent-not-connected                                                  | check     | The step's agent is not connected in this session.                                                                       |
 | result-rejected                                                      | check     | Code Factory rejected an agent's reported success.                                                                       |

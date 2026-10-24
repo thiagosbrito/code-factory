@@ -27,7 +27,8 @@ export const assertSoleProjectWriter = async (project: string, runId?: string): 
 };
 
 /**
- * Before an in-project run executes: it is the only writer, the checkout is on its branch, and a
+ * Before an in-project run executes (legacy worktree runs only get the read-only leftovers
+ * check below): it is the only writer, the checkout is on its branch, and a
  * first execution starts from a clean tree, so the first step commit holds only agent changes.
  */
 export const assertProjectRunCanWrite = async (
@@ -35,7 +36,15 @@ export const assertProjectRunCanWrite = async (
   record: RunRecord,
   options: { fresh: boolean },
 ): Promise<void> => {
-  if (!isProjectRun(record.snapshot.baseline)) return;
+  if (!isProjectRun(record.snapshot.baseline)) {
+    // Legacy worktree runs commit too, so leftovers of a read-only violation must not be
+    // committed by the next writing step. Clone runs never commit and keep no such guard.
+    if (!hasUnresolvedReadOnlyViolation(record)) return;
+    const legacy = await resolveRunWorkspace(project, record, { legacy: "prefix" });
+    if (legacy.kind === "worktree" && (await isProjectDirty(legacy.path)))
+      throw new ProjectError(READ_ONLY_LEFTOVERS, 409);
+    return;
+  }
   await assertSoleProjectWriter(project, record.snapshot.id);
   const resolved = await resolveRunWorkspace(project, record, { legacy: "prefix" });
   if (!(await isProjectDirty(resolved.path))) return;
@@ -44,7 +53,7 @@ export const assertProjectRunCanWrite = async (
 };
 
 /**
- * A reviewer or check changed files, and no attempt has started since: those changes are still
+ * A reviewer, evidence step, planning step or check changed files, and no attempt has started since: those changes are still
  * the violation's, so a later writing step must not commit them under its own name.
  */
 export const hasUnresolvedReadOnlyViolation = (record: RunRecord): boolean => {

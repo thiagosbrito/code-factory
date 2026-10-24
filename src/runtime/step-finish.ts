@@ -1,6 +1,7 @@
 import { completeStep, type StepResult } from "../domain/scheduler.js";
 import { isIssueBlockedOutput } from "../domain/ticket.js";
 import { changedFiles, READ_ONLY_VIOLATION, readOnlyViolation } from "../domain/run-branch.js";
+import { readOnlyRole } from "../domain/step-access.js";
 import { snapshotFileDiffs } from "./inspection.js";
 import { commitStepChanges } from "./run-branch.js";
 import { fileDigest, gitTreeState } from "./workspace.js";
@@ -25,7 +26,10 @@ export const revalidateResult = async (
   if (readonly && filesBefore) {
     const reviewChanges = changedFiles(filesBefore, (await gitTreeState(workspace.path)).files);
     if (reviewChanges.length && result.status !== "canceled") {
-      result = { status: "failed", summary: readOnlyViolation("Reviewer", reviewChanges) };
+      result = {
+        status: "failed",
+        summary: readOnlyViolation(readOnlyRole(definition), reviewChanges),
+      };
       const detail = result.summary;
       await commit((current) =>
         appendLocalEvent(
@@ -41,6 +45,7 @@ export const revalidateResult = async (
     }
   } else if (
     readonly &&
+    definition.stage === "review" &&
     !copyFailure &&
     result.status === "succeeded" &&
     (await fileDigest(frame.executionDirectory, workspace.mode)) !== step.candidateId
